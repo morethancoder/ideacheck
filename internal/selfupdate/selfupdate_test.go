@@ -99,7 +99,7 @@ func TestInstall(t *testing.T) {
 	// still in place: this is the only thing standing between a download and
 	// the file the user executes.
 	served = strings.Repeat("0", 64)
-	if err := Install(context.Background(), srv.Client(), rel, exe); err == nil {
+	if err := Install(context.Background(), srv.Client(), rel, exe, nil); err == nil {
 		t.Fatal("want an error when the checksum does not match")
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "OLD BINARY" {
@@ -107,7 +107,7 @@ func TestInstall(t *testing.T) {
 	}
 
 	served = hex.EncodeToString(sum[:])
-	if err := Install(context.Background(), srv.Client(), rel, exe); err != nil {
+	if err := Install(context.Background(), srv.Client(), rel, exe, nil); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(exe)
@@ -124,7 +124,7 @@ func TestInstallRefusesWithoutChecksums(t *testing.T) {
 	rel := Release{Version: "0.3.0", Assets: []Asset{
 		{Name: fmt.Sprintf("ideacheck_0.3.0_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH), URL: "https://example.test/a"},
 	}}
-	err := Install(context.Background(), http.DefaultClient, rel, filepath.Join(t.TempDir(), "ideacheck"))
+	err := Install(context.Background(), http.DefaultClient, rel, filepath.Join(t.TempDir(), "ideacheck"), nil)
 	if err == nil || !strings.Contains(err.Error(), sumsFile) {
 		t.Fatalf("err = %v; want a refusal naming %s", err, sumsFile)
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/morethancoder/ideacheck/internal/pipeline"
 	"github.com/morethancoder/ideacheck/internal/rubric"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/internal/ui"
 )
 
 func (a *app) rubricsCmd() *cobra.Command {
@@ -29,15 +29,22 @@ func (a *app) rubricsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			p := a.printer(a.stdout)
+			defer p.Stop()
+			p.Title("ideacheck", "rubrics")
 			for _, name := range names {
 				rb, err := rubric.Load(a.files(), cfg.RubricsDir, name)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(a.stdout, "%s — %s\n", rb.Name, rb.Description)
+				p.Head("%s", rb.Name)
+				p.Wrap(0, rb.Description)
+				p.Blank()
 				for _, q := range rb.Questions {
-					fmt.Fprintf(a.stdout, "  %-26s %-6s weight %.1f  %s\n", q.ID, q.Kind, q.Weight, q.Instructions)
+					p.Line("  %-26s %-6s weight %.1f", q.ID, q.Kind, q.Weight)
+					p.Wrap(4, q.Instructions)
 				}
+				p.Blank()
 			}
 			return nil
 		},
@@ -75,24 +82,32 @@ func (a *app) fieldsCmd() *cobra.Command {
 }
 
 func (a *app) printFields(f *pipeline.Fields) error {
-	var b strings.Builder
-	b.WriteString("About the idea — give what you know. Anything you leave out is read from the document when there is one, and otherwise comes back in missing[].\n\n")
-	writeFields(&b, f.Idea)
-	b.WriteString("\nAbout you — without these, founder-fit questions are left unscored rather than guessed.\n\n")
-	writeFields(&b, f.Profile)
-	b.WriteString("\nOne call, no file:\n")
-	b.WriteString("  ideacheck --agent --answer problem=\"...\" --answer audience=\"...\" --answer why_now=\"...\"\n")
-	_, err := io.WriteString(a.stdout, b.String())
-	return err
+	p := a.printer(a.stdout)
+	defer p.Stop()
+	p.Title("ideacheck", "fields")
+	p.Head("About the idea")
+	p.Wrap(0, "Give what you know. Anything you leave out is read from the document when there is one, and otherwise comes back in missing[].")
+	p.Blank()
+	writeFields(p, f.Idea)
+	p.Head("About you")
+	p.Wrap(0, "Without these, founder-fit questions are left unscored rather than guessed.")
+	p.Blank()
+	writeFields(p, f.Profile)
+	p.Head("One call, no file")
+	p.Note(`ideacheck --agent --answer problem="..." --answer audience="..." --answer why_now="..."`)
+	p.Blank()
+	return nil
 }
 
-func writeFields(b *strings.Builder, fields []pipeline.Field) {
+func writeFields(p *ui.Printer, fields []pipeline.Field) {
 	for _, f := range fields {
-		fmt.Fprintf(b, "  %s\"...\"\n      %s\n", f.Flag, f.Description)
+		p.Line("%s\"...\"", f.Flag)
+		p.Wrap(4, f.Description)
 		if f.Example != "" {
-			fmt.Fprintf(b, "      e.g. %s\n", f.Example)
+			p.Wrap(4, "e.g. "+f.Example)
 		}
 	}
+	p.Blank()
 }
 
 // pageCmd opens the app on one page and exits when that task is done.
@@ -133,15 +148,24 @@ func (a *app) showProfile() error {
 	if err != nil {
 		return err
 	}
+	p := a.printer(a.stdout)
+	defer p.Stop()
 	if len(saved) == 0 {
-		_, err := fmt.Fprintf(a.stdout, "no profile saved (%s)\nset one with `ideacheck profile set background=\"...\"`, or `ideacheck profile` on a terminal\n", a.profilePath(""))
-		return err
+		p.Title("ideacheck", "profile")
+		p.Note("no profile saved (%s)", shortPath(a.profilePath(""), a.home))
+		p.Blank()
+		p.Hint("ideacheck profile", "fill it in on a terminal")
+		p.Note(`or from anywhere: ideacheck profile set background="..."`)
+		p.Blank()
+		return nil
 	}
+	p.Title("ideacheck", "profile")
 	for _, field := range pipeline.ProfileFields() {
 		if v := saved[field]; v != "" {
-			fmt.Fprintf(a.stdout, "%-18s %s\n", field, v)
+			p.Value(field, v)
 		}
 	}
+	p.Blank()
 	return nil
 }
 
@@ -246,8 +270,11 @@ func (a *app) setCmd() *cobra.Command {
 			if _, err := config.Load(a.files(), config.LoadOptions{Environ: a.environ}); err != nil {
 				return errors.Join(fmt.Errorf("%s: %w", args[0], err), config.Restore(dir, before, had))
 			}
-			_, err := fmt.Fprintf(a.stdout, "%s = %s  (%s)\n", args[0], args[1], filepath.Join(dir, "config.yaml"))
-			return err
+			p := a.printer(a.stdout)
+			defer p.Stop()
+			p.Row("set", args[0]+" = "+args[1])
+			p.Note("%s", shortPath(filepath.Join(dir, "config.yaml"), a.home))
+			return nil
 		},
 	}
 }
@@ -280,10 +307,13 @@ func (a *app) dump(dir string) error {
 	if err != nil {
 		return err
 	}
+	p := a.printer(a.stdout)
+	defer p.Stop()
+	p.Title("ideacheck", "config dump")
 	for _, name := range names {
 		target := filepath.Join(dir, filepath.FromSlash(name))
 		if _, err := os.Stat(target); err == nil {
-			fmt.Fprintf(a.stdout, "kept     %s\n", target)
+			p.Skip("kept", name) // an edited file is never overwritten
 			continue
 		}
 		b, err := files.Read(name)
@@ -296,7 +326,10 @@ func (a *app) dump(dir string) error {
 		if err := os.WriteFile(target, b, 0o644); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.stdout, "wrote    %s\n", target)
+		p.Row("wrote", name)
 	}
+	p.Done("%d config file(s) in %s", len(names), shortPath(dir, a.home))
+	p.Hint("ideacheck -c DIR", "run against an edited copy")
+	p.Blank()
 	return nil
 }

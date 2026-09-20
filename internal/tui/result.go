@@ -27,8 +27,22 @@ func CalibrationNote(method string) string {
 }
 
 // RenderResult is the result screen. It is a plain string so `last` and `show`
-// can reuse it without a running program.
+// can reuse it without a running program, and it carries the same left margin
+// as every other thing ideacheck prints, so a result left in the scrollback
+// lines up with the steps above it.
 func RenderResult(res *pipeline.Result) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(result(res), "\n"), "\n") {
+		if line = strings.TrimRight(line, " "); line == "" {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString("  " + line + "\n")
+	}
+	return b.String()
+}
+
+func result(res *pipeline.Result) string {
 	var b strings.Builder
 	b.WriteString(headline(res) + "\n")
 	if res.Summary != "" {

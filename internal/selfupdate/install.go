@@ -26,13 +26,27 @@ const binName = "ideacheck"
 // here so a wrong URL cannot fill the disk.
 const maxArchive = 256 << 20
 
-// Install replaces exe with the build of rel for this machine.
+// Progress is one report from an install, for a caller that draws it. Steps
+// arrive in order; each one is announced with Done and Total at zero, reports
+// bytes while they move, and ends with Finished.
+type Progress struct {
+	Step        string // download, verify, install
+	Note        string // what the step is doing, or what it did
+	Done, Total int64  // bytes so far and expected, for a step that transfers
+	Finished    bool   // the step is over; Note (or Done) says how it went
+}
+
+// Install replaces exe with the build of rel for this machine, reporting each
+// step to report, which may be nil.
 //
 // The archive is verified against the release's checksums.txt before it is
 // unpacked, and the new binary is written beside the old one and renamed over
 // it. A rename is atomic, so an interrupted upgrade leaves the working
 // ideacheck in place rather than half a new one.
-func Install(ctx context.Context, client *http.Client, rel Release, exe string) error {
+func Install(ctx context.Context, client *http.Client, rel Release, exe string, report func(Progress)) error {
+	if report == nil {
+		report = func(Progress) {}
+	}
 	archive, err := rel.asset(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return err
@@ -43,7 +57,17 @@ func Install(ctx context.Context, client *http.Client, rel Release, exe string) 
 		// and an unverified binary is not worth the convenience.
 		return fmt.Errorf("%w — refusing to install a download that cannot be verified", err)
 	}
-	manifest, err := download(ctx, client, sums.URL)
+	report(Progress{Step: "download", Note: archive.Name})
+	blob, err := download(ctx, client, archive.URL, func(done, total int64) {
+		report(Progress{Step: "download", Done: done, Total: total})
+	})
+	if err != nil {
+		return err
+	}
+	report(Progress{Step: "download", Done: int64(len(blob)), Finished: true})
+
+	report(Progress{Step: "verify", Note: "checking the sha256 checksum"})
+	manifest, err := download(ctx, client, sums.URL, nil)
 	if err != nil {
 		return err
 	}
@@ -51,18 +75,21 @@ func Install(ctx context.Context, client *http.Client, rel Release, exe string) 
 	if err != nil {
 		return err
 	}
-	blob, err := download(ctx, client, archive.URL)
-	if err != nil {
-		return err
-	}
 	if got := sha256.Sum256(blob); hex.EncodeToString(got[:]) != want {
-		return fmt.Errorf("%s does not match its checksum in %s — the download was corrupted or tampered with", archive.Name, sumsFile)
+		return fmt.Errorf("%s does not match its checksum in %s — the download was corrupted or tampered with. Nothing was installed", archive.Name, sumsFile)
 	}
+	report(Progress{Step: "verify", Note: "sha256 matches the release", Finished: true})
+
+	report(Progress{Step: "install", Note: exe})
 	bin, err := unpack(blob)
 	if err != nil {
 		return err
 	}
-	return replace(exe, bin)
+	if err := replace(exe, bin); err != nil {
+		return err
+	}
+	report(Progress{Step: "install", Note: exe, Finished: true})
+	return nil
 }
 
 // Manager names the package manager that owns exe, when one does, along with
@@ -92,9 +119,10 @@ func gobin(getenv func(string) string) string {
 	return ""
 }
 
-// download reads a release file into memory. Releases are small enough that
-// streaming to disk would buy nothing and cost a temp file to clean up.
-func download(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+// download reads a release file into memory, reporting bytes to onBytes (which
+// may be nil) as they arrive. Releases are small enough that streaming to disk
+// would buy nothing and cost a temp file to clean up.
+func download(ctx context.Context, client *http.Client, url string, onBytes func(done, total int64)) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -107,11 +135,37 @@ func download(ctx context.Context, client *http.Client, url string) ([]byte, err
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("downloading %s: HTTP %d", path.Base(url), res.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(res.Body, maxArchive))
-	if err != nil {
+	var buf bytes.Buffer
+	if res.ContentLength > 0 {
+		buf.Grow(int(min(res.ContentLength, maxArchive)))
+	}
+	var body io.Reader = io.LimitReader(res.Body, maxArchive)
+	if onBytes != nil {
+		// A server that sends no Content-Length leaves total at zero, which the
+		// caller draws as "bytes so far" rather than as a bar that cannot move.
+		body = &counter{r: body, total: res.ContentLength, report: onBytes}
+	}
+	if _, err := buf.ReadFrom(body); err != nil {
 		return nil, fmt.Errorf("downloading %s: %w", path.Base(url), err)
 	}
-	return b, nil
+	return buf.Bytes(), nil
+}
+
+// counter reports how much of a body has arrived, once per read.
+type counter struct {
+	r      io.Reader
+	done   int64
+	total  int64
+	report func(done, total int64)
+}
+
+func (c *counter) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.done += int64(n)
+	if n > 0 {
+		c.report(c.done, c.total)
+	}
+	return n, err
 }
 
 // checksum reads one "<sha256>  <file>" line out of a checksums manifest.

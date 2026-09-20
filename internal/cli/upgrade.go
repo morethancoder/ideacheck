@@ -13,6 +13,7 @@ import (
 
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/internal/selfupdate"
+	"github.com/morethancoder/ideacheck/internal/ui"
 )
 
 // upgradeTimeout bounds the whole upgrade: two downloads on a slow line.
@@ -50,21 +51,33 @@ func (a *app) runUpgrade(ctx context.Context, checkOnly bool) error {
 	ctx, cancel := context.WithTimeout(ctx, upgradeTimeout)
 	defer cancel()
 
+	p := a.printer(a.stdout)
+	defer p.Stop() // an error path leaves no half-drawn line behind
+
+	current := selfupdate.Clean(Version)
+	p.Title("ideacheck", "upgrade")
+	p.Row("current", current)
+
+	p.Pending("latest", "asking GitHub for the newest release")
 	rel, err := selfupdate.Latest(ctx, http.DefaultClient, a.releasesURL)
 	if err != nil {
 		return err
 	}
-	current := selfupdate.Clean(Version)
-	if rel.Version == current {
-		_, err := fmt.Fprintf(a.stdout, "ideacheck %s is the latest release.\n", current)
-		return err
-	}
-	if checkOnly {
-		_, err := fmt.Fprintf(a.stdout, "ideacheck %s is available (you have %s).\nRun `ideacheck upgrade` to install it: %s\n", rel.Version, current, rel.Page)
-		return err
+	p.Row("latest", rel.Version)
+
+	switch {
+	case rel.Version == current:
+		p.Done("ideacheck %s is the latest release", current)
+		return nil
+	case checkOnly:
+		p.Done("ideacheck %s is available — you have %s", rel.Version, current)
+		p.Hint("ideacheck upgrade", "install it")
+		p.Hint("release notes", rel.Page)
+		p.Blank()
+		return nil
 	}
 
-	exe, err := os.Executable()
+	exe, err := a.exe()
 	if err != nil {
 		return err
 	}
@@ -77,12 +90,50 @@ func (a *app) runUpgrade(ctx context.Context, checkOnly bool) error {
 		return fmt.Errorf("this ideacheck was installed with %s, which should be the one to replace it:\n  %s", manager, command)
 	}
 
-	fmt.Fprintf(a.stdout, "upgrading ideacheck %s → %s …\n", current, rel.Version)
-	if err := selfupdate.Install(ctx, http.DefaultClient, rel, exe); err != nil {
+	if err := selfupdate.Install(ctx, http.DefaultClient, rel, exe, func(ev selfupdate.Progress) {
+		a.upgradeStep(p, ev)
+	}); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(a.stdout, "done — ideacheck %s is installed at %s\nWhat changed: %s\n", rel.Version, exe, rel.Page)
-	return err
+	p.Done("ideacheck %s is ready", rel.Version)
+	p.Hint("ideacheck", "check an idea, or open the app")
+	p.Hint("release notes", rel.Page)
+	p.Blank()
+	return nil
+}
+
+// upgradeStep draws one install step in the installer's own vocabulary: a
+// pending line while it runs, a bar while bytes move, a row when it is done.
+func (a *app) upgradeStep(p *ui.Printer, ev selfupdate.Progress) {
+	switch {
+	case ev.Finished:
+		p.Row(ev.Step, upgradeDone(ev, a.home))
+	case ev.Note != "":
+		p.Pending(ev.Step, ev.Note)
+	default:
+		p.Progress(ev.Step, ev.Done, ev.Total)
+	}
+}
+
+// upgradeDone is what a finished step leaves in its row: the size it fetched,
+// the path it wrote, or the sentence the step itself supplied.
+func upgradeDone(ev selfupdate.Progress, home string) string {
+	switch ev.Step {
+	case "download":
+		return ui.Bytes(ev.Done)
+	case "install":
+		return shortPath(ev.Note, home)
+	}
+	return ev.Note
+}
+
+// shortPath writes a path under the home directory the way the shell shows it,
+// because "~/.local/bin/ideacheck" is the form the user recognizes.
+func shortPath(path, home string) string {
+	if home != "" && strings.HasPrefix(path, home+string(os.PathSeparator)) {
+		return "~" + path[len(home):]
+	}
+	return path
 }
 
 // startUpdateCheck begins the once-a-day release lookup and returns the
@@ -113,7 +164,10 @@ func (a *app) reportUpdate(check func() *selfupdate.Found) {
 		return
 	}
 	if found := check(); found != nil {
-		fmt.Fprintf(a.stderr, "\nideacheck %s is available (you have %s) — run `ideacheck upgrade`.\n", found.Version, selfupdate.Clean(Version))
+		p := a.printer(a.stderr)
+		p.Blank()
+		p.Note("ideacheck %s is available (you have %s) — run `ideacheck upgrade`.", found.Version, selfupdate.Clean(Version))
+		p.Stop()
 	}
 }
 

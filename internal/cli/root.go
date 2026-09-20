@@ -13,10 +13,12 @@ import (
 	"io"
 	"os"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
 	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/internal/ui"
 )
 
 // Version and Commit are injected by `make build` via -ldflags.
@@ -53,7 +55,10 @@ type app struct {
 	getenv         func(string) string
 	home           string
 	stdoutTTY      bool
-	releasesURL    string // GitHub release endpoint; empty means the real one
+	stderrTTY      bool
+	executable     func() (string, error) // nil means os.Executable; the upgrade target
+	width          int                    // terminal columns; 0 means ask the environment
+	releasesURL    string                 // GitHub release endpoint; empty means the real one
 
 	global globalFlags
 }
@@ -83,7 +88,10 @@ func Execute() int {
 	a := &app{
 		stdout: os.Stdout, stderr: os.Stderr,
 		input: osInputEnv(), environ: os.Environ, getenv: os.Getenv, home: home,
-		stdoutTTY: isatty.IsTerminal(os.Stdout.Fd()),
+		stdoutTTY:  isatty.IsTerminal(os.Stdout.Fd()),
+		stderrTTY:  isatty.IsTerminal(os.Stderr.Fd()),
+		width:      columns(),
+		executable: os.Executable,
 	}
 	return a.run(context.Background(), os.Args[1:])
 }
@@ -100,7 +108,11 @@ func (a *app) run(ctx context.Context, args []string) int {
 		if code = 1; errors.As(err, &ex) {
 			code = ex.code
 		}
-		fmt.Fprintf(a.stderr, "ideacheck: %v\n", err)
+		// One shape for every failure, and the same column the steps use: the
+		// first line is the problem, the rest is what to do about it.
+		p := a.printer(a.stderr)
+		p.Fail("ideacheck: " + err.Error())
+		p.Stop()
 	}
 	a.reportUpdate(update)
 	return code
@@ -206,6 +218,37 @@ Picking the model
   -b BACKEND -m MODEL for one run; ` + "`ideacheck config set backends.<backend>.model <id>`" + ` to keep it.
   The backend and model are on the "checking idea" line on stderr and in .model.
 `
+
+// exe is the binary an upgrade replaces: this process, unless a test says
+// otherwise. A test must never be able to overwrite the test binary.
+func (a *app) exe() (string, error) {
+	if a.executable != nil {
+		return a.executable()
+	}
+	return os.Executable()
+}
+
+// printer returns the step column wired to this run: live redraws only where
+// the writer really is a terminal, color unless the user or NO_COLOR said no.
+func (a *app) printer(w io.Writer) *ui.Printer {
+	tty := (w == a.stdout && a.stdoutTTY) || (w == a.stderr && a.stderrTTY)
+	return ui.New(w, ui.Options{
+		TTY:    tty,
+		Color:  !a.global.noColor && a.getenv("NO_COLOR") == "",
+		Width:  a.width,
+		Getenv: a.getenv,
+	})
+}
+
+// columns asks the terminal how wide it is, for the width of a progress bar.
+// Zero means "unknown", which the printer reads as the usual eighty.
+func columns() int {
+	w, _, err := term.GetSize(os.Stdout.Fd())
+	if err != nil {
+		return 0
+	}
+	return w
+}
 
 // files resolves the override directory: --config, else the user config dir.
 func (a *app) files() config.Files {

@@ -79,6 +79,8 @@ internal/
   config/              koanf: flags > env IDEACHECK_* > user dir > embedded
   store/               SQLite history (modernc.org/sqlite, pure Go)
   tui/                 bubbletea app: menu, idea form, live check, result, setup
+  ui/                  the shared step column — install.sh in Go: rows, pending
+                       lines with a spinner, the download bar, warnings, errors
   server/              HTTP API + SSE
   bench/               backend comparison on bench/ideas.jsonl
   selfupdate/          daily release check, verified self-replace
@@ -121,6 +123,24 @@ includes `other`; `score` has 2–10 concrete levels, low → high; weights ≥ 
 every weighted question sets polarity; `uses` lists only the state the question
 needs; gate expressions may reference real question ids only, and see normalized
 values in [0,1].
+
+## Look and feel
+
+Everything ideacheck prints outside the bubbletea app goes through `internal/ui`:
+a two-space column of `✓ label  value` rows, a live pending line while a step
+runs, and the same progress bar `install.sh` draws. The rules that keep them the
+same tool:
+
+- **install.sh is the reference.** Its glyphs (`✓ ✗ ↓ · ━ ─ ›`), its ten-character
+  label column, its dim/green/yellow/red, its ASCII fallback for a non-UTF-8
+  locale. Change one side and change the other.
+- **Live only on a terminal.** Off one, a step prints exactly one plain line with
+  no escape codes, in the same order — agents and CI read that output.
+- **stdout stays the artifact.** Steps that are progress, not result, go to
+  stderr (`bench` writes its table to stdout and its steps to stderr).
+- The app (`internal/tui`) uses the same palette: faint rather than a grey that
+  guesses at the theme, and the terminal's own green/red/yellow, so the window
+  matches the installer that put it there.
 
 ## Flags
 
