@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/internal/ui"
 )
 
 // Progress is one update from a model download.
@@ -87,6 +88,8 @@ func (a *App) updateDownload(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// view draws the download the way the installer draws its own: the same bar,
+// the same percentage, the same "so far / in total" on the right.
 func (d *download) view(width int) string {
 	head := bold.Render("Downloading "+d.model) + dim.Render(" — once; it stays on this machine and runs free") + "\n\n"
 	p := d.last
@@ -98,14 +101,13 @@ func (d *download) view(width int) string {
 		return head + dim.Render(orStarting(status))
 	}
 	frac := float64(p.Done) / float64(p.Total)
-	w := min(max(width-12, 10), 60)
-	filled := min(int(frac*float64(w)), w)
-	bar := good.Render(strings.Repeat("█", filled)) + dim.Render(strings.Repeat("░", w-filled))
-	line := fmt.Sprintf("%s of %s  %.0f%%", size(p.Done), size(p.Total), frac*100)
+	filled, rest := ui.Bar(frac, min(max(width-34, 10), 40))
+	line := fmt.Sprintf("  %s %3.0f%%  %s", good.Render(filled)+dim.Render(rest), frac*100,
+		dim.Render(ui.Bytes(p.Done)+" / "+ui.Bytes(p.Total)))
 	if status != "" {
 		line += dim.Render("  · " + status)
 	}
-	return head + bar + "\n" + line
+	return head + line
 }
 
 func orStarting(status string) string {
@@ -113,15 +115,4 @@ func orStarting(status string) string {
 		return "starting…"
 	}
 	return status + "…"
-}
-
-// size shows bytes the way a download is usually read: 1.2 GB, 340 MB.
-func size(n int64) string {
-	switch {
-	case n >= 1e9:
-		return fmt.Sprintf("%.1f GB", float64(n)/1e9)
-	case n >= 1e6:
-		return fmt.Sprintf("%.0f MB", float64(n)/1e6)
-	}
-	return fmt.Sprintf("%.0f KB", float64(n)/1e3)
 }

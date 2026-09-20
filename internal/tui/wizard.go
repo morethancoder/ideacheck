@@ -57,7 +57,7 @@ func (w *wizard) move(dir int) (wizardState, tea.Cmd) {
 			return wizardDone, nil
 		case w.shown(i):
 			w.at = i
-			form := w.steps[i].build().WithShowHelp(false)
+			form := w.steps[i].build().WithShowHelp(false).WithTheme(formTheme())
 			cmd := form.Init() // before sizing: a form renders nothing until it is initialized
 			w.form = w.fit(form)
 			return wizardRunning, cmd

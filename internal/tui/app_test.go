@@ -329,7 +329,7 @@ func TestSetupDownloadsAMissingLocalModelBeforeSavingIt(t *testing.T) {
 	}
 	_, cmd = a.Update(cmd()) // pulling manifest
 	_, cmd = a.Update(cmd()) // a quarter done
-	if view := a.View(); !strings.Contains(view, "Downloading qwen3:8b") || !strings.Contains(view, "500 MB of 2.0 GB  25%") {
+	if view := a.View(); !strings.Contains(view, "Downloading qwen3:8b") || !strings.Contains(view, "25%  476.8 MB / 1.9 GB") {
 		t.Errorf("download page:\n%s", view)
 	}
 	pump(t, a, cmd, pageDownload)

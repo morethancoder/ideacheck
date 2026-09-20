@@ -26,8 +26,8 @@ else
   BOLD=; DIM=; GREEN=; YELLOW=; RED=; RESET=
 fi
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-  *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) G_OK='✓'; G_ERR='✗'; G_BUSY='↓'; G_WAIT='·'; G_FILL='━'; G_REST='─' ;;
-  *) G_OK='+'; G_ERR='x'; G_BUSY='>'; G_WAIT='.'; G_FILL='#'; G_REST='-' ;;
+  *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) G_OK='✓'; G_ERR='✗'; G_BUSY='↓'; G_WAIT='·'; G_FILL='━'; G_REST='─'; G_ARROW='›' ;;
+  *) G_OK='+'; G_ERR='x'; G_BUSY='>'; G_WAIT='.'; G_FILL='#'; G_REST='-'; G_ARROW='>' ;;
 esac
 
 tmp=
@@ -135,7 +135,7 @@ sha256() {
   fi
 }
 
-printf '\n  %s%s%s %sinstaller%s\n\n' "$BOLD" "$BIN" "$RESET" "$DIM" "$RESET"
+printf '\n  %s%s%s%s  %s  installer%s\n\n' "$BOLD" "$BIN" "$RESET" "$DIM" "$G_ARROW" "$RESET"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$os" in

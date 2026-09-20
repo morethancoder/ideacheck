@@ -45,7 +45,23 @@ func (a *app) serveCmd() *cobra.Command {
 			log := logging.New(a.stderr, cfg.Log.Level, cfg.Log.Format, !a.global.noColor && a.getenv("NO_COLOR") == "")
 			api := &server.Server{Engine: &pipeline.Engine{Config: cfg, Files: a.files(), Judge: judge}, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: log}
 			return listen(cmd.Context(), net.JoinHostPort(host, strconv.Itoa(port)), api.Handler(), func(addr string) {
-				log.Info().Str("addr", "http://"+addr).Str("backend", cfg.Backend).Str("model", cfg.Active().Model).Msg("serving")
+				// A person watching a terminal gets the step column; anything
+				// else — a supervisor, a log file — gets the structured line.
+				if !a.stderrTTY {
+					log.Info().Str("addr", "http://"+addr).Str("backend", cfg.Backend).Str("model", cfg.Active().Model).Msg("serving")
+					return
+				}
+				p := a.printer(a.stderr)
+				p.Title("ideacheck", "serve")
+				p.Row("judge", joined(cfg.Backend, cfg.Active().Model))
+				p.Row("listening", "http://"+addr)
+				p.Blank()
+				p.Hint("POST /v1/check", `{"idea":"..."}`)
+				p.Hint("GET /v1/checks", "past checks · /v1/rubrics · /v1/healthz")
+				p.Blank()
+				p.Note("ctrl+c stops it, draining the checks in flight")
+				p.Blank()
+				p.Stop()
 			})
 		},
 	}
@@ -55,6 +71,15 @@ func (a *app) serveCmd() *cobra.Command {
 	f.StringVarP(&backend, "backend", "b", "", "jev, logprob, structured, claude-cli, mock")                      // same as the default action
 	f.BoolVar(&allowCLI, "allow-cli-backend", false, "permit the claude-cli / codex-cli backends in server mode") // long only: a deliberate opt-in
 	return cmd
+}
+
+// joined names the judge as "backend/model", or just the backend when the
+// model is the provider's own default.
+func joined(backend, model string) string {
+	if model == "" {
+		return backend
+	}
+	return backend + "/" + model
 }
 
 // listen serves until interrupted, then drains in-flight checks.

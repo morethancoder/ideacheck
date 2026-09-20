@@ -61,13 +61,19 @@ func (a *app) benchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(a.stderr, "running %d ideas × %d repeats × %d backend(s)…\n", len(ideas), repeats, len(names))
+			p := a.printer(a.stderr)
+			p.Title("ideacheck", "bench")
+			p.Row("plan", fmt.Sprintf("%d ideas × %d repeats × %d backend(s)", len(ideas), repeats, len(names)))
+			p.Pending("running", strings.Join(names, ", "))
+			defer p.Stop()
 			report := runner.Execute(cmd.Context(), dataset, ideas, catalog, time.Now())
 			path, err := report.Write(benchResultsDir)
 			if err != nil {
 				return err
 			}
-			_, err = fmt.Fprintf(a.stdout, "%s\nsaved %s (+ .csv)\n", report.Table(), path)
+			p.Row("saved", path+"  (+ .csv)")
+			p.Stop() // the table is the output; nothing live may be left over it
+			_, err = fmt.Fprintln(a.stdout, report.Table())
 			return err
 		},
 	}

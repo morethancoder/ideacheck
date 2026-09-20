@@ -40,11 +40,28 @@ ideacheck upgrade          # install the latest release
 ideacheck upgrade --check  # just tell me whether there is one
 ```
 
-`upgrade` downloads the release build for your machine, checks it against the
-published checksums, and swaps it in with an atomic rename — an interrupted
-upgrade leaves the working binary in place. An ideacheck installed by Homebrew or
-`go install` is left alone, and the command prints the right way to upgrade it
-instead.
+`upgrade` is the install script again, from inside the binary — the same column of
+steps, the same live download bar:
+
+```
+  ideacheck  ›  upgrade
+
+  ✓ current    0.1.0
+  ✓ latest     0.2.0
+  ✓ download   6.0 MB
+  ✓ verify     sha256 matches the release
+  ✓ install    ~/.local/bin/ideacheck
+
+  ideacheck 0.2.0 is ready
+```
+
+It downloads the release build for your machine, checks it against the published
+checksums, and swaps it in with an atomic rename — an interrupted upgrade leaves
+the working binary in place. An ideacheck installed by Homebrew or `go install` is
+left alone, and the command prints the right way to upgrade it instead.
+
+Piped or in CI there is no spinner and no bar: one plain line per finished step, in
+the same order, so the output stays greppable.
 
 You do not have to remember to check. Once a day, in the background, ideacheck asks
 GitHub whether there is a newer release and remembers the answer; when there is one
