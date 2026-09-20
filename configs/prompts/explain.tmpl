@@ -1,0 +1,23 @@
+{{- /* The brief for the plain-language summary. Findings are sorted most
+influential first; Effect is strength, weakness, mixed, or context. */ -}}
+IDEA:
+```json
+{{ .StateJSON }}
+```
+
+VERDICT: {{ .Verdict }}
+WHY THE RULES CHOSE IT: {{ .Reason }}
+
+FINDINGS (most influential first):
+{{- range .Findings }}
+- [{{ .Effect }}] {{ .Question }} → {{ .Reading }}
+{{- end }}
+{{- if .Missing }}
+
+NOT STATED IN THE DESCRIPTION:
+{{- range .Missing }}
+- {{ . }}
+{{- end }}
+{{- end }}
+
+Reply with one JSON object: {"summary": "<the paragraph>"}

@@ -1,0 +1,65 @@
+# Release build. Runs in CI on every v* tag (.github/workflows/release.yml).
+# Locally: goreleaser release --snapshot --clean  (builds, publishes nothing)
+#
+# The archive name is what `ideacheck upgrade` looks for: it picks the .tar.gz
+# whose name contains this machine's OS and architecture, and verifies it
+# against checksums.txt before replacing the binary. Renaming these files is a
+# breaking change for every installed copy.
+version: 2
+
+project_name: ideacheck
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ideacheck
+    main: ./cmd/ideacheck
+    binary: ideacheck
+    # Pure Go all the way down (modernc.org/sqlite, not mattn/go-sqlite3), so
+    # every target cross-compiles from one runner with no C toolchain.
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/morethancoder/ideacheck/internal/cli.Version={{ .Version }}
+      - -X github.com/morethancoder/ideacheck/internal/cli.Commit={{ .ShortCommit }}
+
+archives:
+  - id: ideacheck
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/morethancoder/ideacheck/main/install.sh | sh
+    ```
+
+    Already have it? `ideacheck upgrade`.

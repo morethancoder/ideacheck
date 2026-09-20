@@ -1,0 +1,84 @@
+# Question-writing rules (enforced by rubric.Validate):
+#  - one judgment per question; "yes" must be the natural positive reading;
+#  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
+#  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
+#  - `uses` lists only the state fields the question needs (idea, profile).
+name: creative
+description: Evaluates games, stories, artwork, music, and other creative work.
+questions:
+  - id: originality
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: How original is the concept as described?
+    levels:
+      - A direct copy of a familiar work or formula
+      - A familiar formula with a minor twist
+      - A distinct combination or perspective
+      - Something with no obvious close comparison
+  - id: hook_strength
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: How strong is the hook that would make someone want to experience this?
+    levels:
+      - No hook stated
+      - A hook that needs a long explanation
+      - A hook that lands in one sentence
+  - id: audience_named
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: The description names who this work is for.
+  - id: scope_realism
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How realistic is the scope for this person to finish?
+    levels:
+      - Far beyond what one person or this team could finish
+      - Finishable only by cutting most of what is described
+      - Ambitious but finishable
+      - Comfortably finishable
+  - id: creator_motivation
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: The person shows a personal reason to make this particular work beyond it being marketable.
+  - id: craft_fit
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How well do the person's existing skills cover what the work requires?
+    levels:
+      - None of the required crafts
+      - Some of the required crafts, with major gaps
+      - Most of the required crafts
+      - All of the required crafts
+  - id: clarity
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: How clearly is the idea explained?
+    levels:
+      - Vague; hard to tell what it is
+      - Understandable but missing key details
+      - Clear and specific
+
+verdict:
+  gates:
+    - when: "scope_realism < 0.2"
+      max: park
+      reason: Scope is far beyond what can be finished
+  thresholds:
+    build: 0.65
+    explore: 0.45
+    park: 0.30
+  min_confidence: 0.45

@@ -1,0 +1,45 @@
+{{- /* Two blocks: "state" is sent once as a cacheable block shared by every
+question that uses the same state; "questions" is the per-request user turn. */ -}}
+{{ define "state" -}}
+STATE:
+```json
+{{ .StateJSON }}
+```
+{{- end }}
+{{ define "questions" -}}
+{{ range .Questions }}
+QUESTION id={{ .ID }} kind={{ .Kind }}
+{{ .Instructions }}
+{{- if eq (printf "%s" .Kind) "choice" }}
+Options:
+{{- range .OptionList }}
+- {{ .Key }}: {{ .Description }}
+{{- end }}
+{{- if eq $.Mode "vote" }}
+Answer shape: {"choice": "<option key>"}
+{{- else }}
+Answer shape: {"choice": "<option key>", "probabilities": {"<option key>": <0..1>, ...}, "confidence": <0..1>}
+Probabilities cover every option and sum to 1.
+{{- end }}
+{{- else if eq (printf "%s" .Kind) "score" }}
+Levels (index 0 is lowest):
+{{- range $i, $l := .Levels }}
+- {{ $i }}: {{ $l }}
+{{- end }}
+{{- if eq $.Mode "vote" }}
+Answer shape: {"level": <level index>}
+{{- else }}
+Answer shape: {"level": <level index>, "probabilities": {"<level index>": <0..1>, ...}, "confidence": <0..1>}
+Probabilities cover every level and sum to 1.
+{{- end }}
+{{- else }}
+This is a statement. Judge whether it is true of the STATE.
+{{- if eq $.Mode "vote" }}
+Answer shape: {"yes": <true|false>}
+{{- else }}
+Answer shape: {"probability": <0..1 probability that the statement is true>}
+{{- end }}
+{{- end }}
+{{ end }}
+Reply with JSON only, matching the required schema.
+{{- end }}

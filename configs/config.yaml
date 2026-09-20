@@ -1,0 +1,229 @@
+# ideacheck default configuration. Copy with `ideacheck config dump` and edit.
+# Precedence: flags > env (IDEACHECK_*, nest with "__", e.g.
+# IDEACHECK_BACKENDS__JEV__MODEL) > user config dir > these embedded defaults.
+# API keys are NEVER read from here: TYPESAFE_API_KEY, ANTHROPIC_API_KEY,
+# OPENROUTER_API_KEY come from the environment only.
+
+backend: logprob             # jev | logprob | structured | claude-cli | codex-cli | mock
+                             # default: a local Ollama model — free, no key, no login
+# After scoring, one more call writes a short plain-language paragraph on why the
+# idea got its verdict (result.summary). It explains; it never changes a score.
+explain: true
+timeouts: { question: 30s, batch: 90s }
+retries: { max_attempts: 4, base_backoff: 500ms, max_backoff: 5s }
+concurrency: { default_max: 16 }
+
+backends:
+  jev:
+    base_url: https://api.typesafe.ai
+    model: jev-1.13.0        # pinned on purpose; jev-latest moves
+    batch: true
+    max_concurrent: 32
+  logprob:
+    base_url: http://localhost:11434/v1   # Ollama
+    model: qwen3:8b
+    billing: local           # api | subscription | local — how the cost line reads
+    # Sent as reasoning_effort. "" = none: a thinking model (qwen3, gpt-oss…)
+    # must answer at once, because the readout needs the answer as the FIRST
+    # token. Models that cannot think ignore it. Use "default" to leave the
+    # field out, for a server that rejects it.
+    effort: ""
+    top_logprobs: 20
+    shuffle_runs: 2          # order-bias mitigation: runs per choice/score question
+    # One request at a time. A local GPU is compute-bound, so parallel requests
+    # bought ~15% (measured: 12.7s → 10.8s on llama3.2:3b), while Ollama 0.13.5
+    # returned missing or garbage logits for qwen3 under parallel load — wrong
+    # scores, silently. Raise it for a server that batches properly (vLLM).
+    max_concurrent: 1
+  structured:
+    provider: anthropic       # anthropic | openai | openrouter | ollama
+    base_url: ""              # OpenAI-compatible endpoint; set by `ideacheck setup` for openai/openrouter/ollama
+    model: claude-sonnet-5
+    effort: ""                # low | medium | high | xhigh | max; "" = the model's default
+    mode: vote                # verbalized | vote
+    # vote: k independent samples per question; probabilities = answer frequencies.
+    # No temperature is sent: current Claude models reject sampling parameters and
+    # already sample at their default, which is what voting needs.
+    vote_k: 5
+    max_tokens: 1024
+    thinking: disabled        # disabled | adaptive — narrow judgments; adaptive costs more per vote
+    # batch: true puts every question in one request. Faster and cheaper, but the
+    # answers are no longer independent judgments (one can anchor the next).
+    batch: false
+    max_concurrent: 8
+  claude-cli:                 # human CLI mode only; draws on your Claude subscription limits
+    model: sonnet
+    effort: ""                # "" = thinking off (fastest; a question is one narrow judgment).
+                              # low | medium | high | xhigh | max turns thinking on at that --effort
+    billing: subscription
+    mode: verbalized
+    # Every `claude -p` call starts a process and carries ~11k tokens of CLI
+    # overhead, so all questions that share state go in ONE call by default.
+    batch: true
+    max_concurrent: 4         # each question is a process; keep this modest
+  codex-cli:                  # human CLI mode only; uses your Codex/ChatGPT login
+    model: ""                 # "" = Codex's own default model
+    effort: ""                # "" = model_reasoning_effort=none: no reasoning, whatever your
+                              # ~/.codex/config.toml says. low | medium | high | xhigh turns it on
+    billing: subscription
+    mode: verbalized
+    batch: true               # each call starts a process with ~12k tokens of overhead
+  mock:
+    seed: 1
+    fixtures_dir: ""          # dir of <question_id>.json answers; empty = seeded values
+
+# USD per million tokens; cached_in is input read from a prompt cache. Used for
+# the cost line on every result. Checked 2026-09-19 against the Claude pricing
+# table, developers.openai.com/api/docs/pricing and ollama.com/pricing.
+# A model is found by exact id, then without a provider prefix
+# ("anthropic/claude-sonnet-5"), then by the longest id it extends
+# ("claude-haiku-4-5-20251001" → claude-haiku-4-5). The Claude CLI reports its
+# own cost, which wins over this table.
+pricing:
+  jev-1.13.0: { in: 0.042, out: 0 }
+  # Anthropic
+  claude-fable-5-1: { in: 10.0, out: 50.0, cached_in: 1.0 }
+  claude-fable-5: { in: 10.0, out: 50.0, cached_in: 1.0 }
+  claude-opus-5: { in: 5.0, out: 25.0, cached_in: 0.5 }
+  claude-opus-4-8: { in: 5.0, out: 25.0, cached_in: 0.5 }
+  claude-sonnet-5: { in: 2.0, out: 10.0, cached_in: 0.2 }
+  claude-sonnet-4-6: { in: 3.0, out: 15.0, cached_in: 0.3 }
+  claude-haiku-4-5: { in: 1.0, out: 5.0, cached_in: 0.1 }
+  # Claude CLI aliases, priced as the model each one resolves to
+  fable: { in: 10.0, out: 50.0, cached_in: 1.0 }
+  opus: { in: 5.0, out: 25.0, cached_in: 0.5 }
+  sonnet: { in: 2.0, out: 10.0, cached_in: 0.2 }
+  haiku: { in: 1.0, out: 5.0, cached_in: 0.1 }
+  # OpenAI (also what Codex models cost at API rates)
+  gpt-6-astra: { in: 10.0, out: 50.0, cached_in: 1.0 }
+  gpt-5.6-sol: { in: 4.0, out: 20.0, cached_in: 0.4 }
+  gpt-5.6-terra: { in: 2.0, out: 12.0, cached_in: 0.2 }
+  gpt-5.6-luna: { in: 0.2, out: 1.2, cached_in: 0.02 }
+  gpt-5.5: { in: 5.0, out: 30.0, cached_in: 0.5 }
+  gpt-5.4: { in: 2.5, out: 15.0, cached_in: 0.25 }
+  gpt-5.4-mini: { in: 0.75, out: 4.5, cached_in: 0.075 }
+  gpt-5.4-nano: { in: 0.2, out: 1.25, cached_in: 0.02 }
+  gpt-5.3-codex: { in: 1.75, out: 14.0, cached_in: 0.175 }
+  gpt-5.2: { in: 1.75, out: 14.0, cached_in: 0.175 }
+  gpt-5.1: { in: 1.25, out: 10.0, cached_in: 0.125 }
+  gpt-5: { in: 1.25, out: 10.0, cached_in: 0.125 }
+  gpt-5-mini: { in: 0.25, out: 2.0, cached_in: 0.025 }
+  gpt-5-nano: { in: 0.05, out: 0.4, cached_in: 0.005 }
+  # Ollama Cloud (per token, from prepaid credits; local models are free)
+  gpt-oss:120b: { in: 0.15, out: 0.6, cached_in: 0.014 }
+  gemma4:31b: { in: 0.14, out: 0.4, cached_in: 0.05 }
+  kimi-k3: { in: 3.0, out: 15.0, cached_in: 0.3 }
+  glm-5.3: { in: 1.4, out: 4.4, cached_in: 0.26 }
+  qwen3.5:397b: { in: 0.6, out: 3.6 }
+  deepseek-v4.1-flash: { in: 0.15, out: 0.6, cached_in: 0.003 }
+
+# Choices offered by `ideacheck setup` (first run, and Settings in the TUI).
+# Picking one writes backend/provider/base_url/model/effort/billing into your
+# config.yaml; an API key, when needed, goes to credentials.yaml (mode 0600) —
+# never into config.yaml. Environment variables always win over credentials.yaml.
+#   models:   offered as a list (plus "Other…" to type any id); the first is the default.
+#             Each label gets its in/out price from `pricing` above — don't write prices here
+#   efforts:  effort levels offered after the model; a model with no_effort skips the step
+#   discover: codex | ollama — list the models actually available instead of `models`;
+#             `model` stays the default only when it is in that list, else the first one is
+#   live_prices: label models with current prices from prices_url (no key needed),
+#             falling back to `pricing`. Off for Ollama: local is free, and Ollama
+#             Cloud bills its own rates, which the pricing table carries.
+# The first provider is preselected on first run.
+setup:
+  prices_url: https://openrouter.ai/api/v1/models
+  providers:
+    - id: ollama
+      label: Ollama — local models, free, no key (recommended)
+      backend: logprob
+      base_url: http://localhost:11434/v1
+      model: qwen3:8b
+      needs_cli: ollama
+      billing: local
+      discover: ollama
+    - id: claude-cli
+      label: Claude CLI — use my Claude login (no API key)
+      backend: claude-cli
+      model: sonnet
+      needs_cli: claude
+      billing: subscription
+      live_prices: true
+      efforts: [low, medium, high, xhigh, max]
+      models:
+        - { id: sonnet, label: "Sonnet — balanced" }
+        - { id: opus, label: "Opus — strongest judgment" }
+        - { id: haiku, label: "Haiku — fastest and cheapest", no_effort: true }
+        - { id: fable, label: "Fable — most capable" }
+    - id: codex-cli
+      label: Codex CLI — use my ChatGPT/Codex login (no API key)
+      backend: codex-cli
+      model: ""
+      needs_cli: codex
+      billing: subscription
+      live_prices: true
+      discover: codex
+      efforts: [low, medium, high, xhigh]
+      models:
+        - { id: gpt-5.6-terra, label: "gpt-5.6-terra" }
+        - { id: gpt-5.6-luna, label: "gpt-5.6-luna — cheapest" }
+        - { id: gpt-5.5, label: "gpt-5.5" }
+    - id: anthropic
+      label: Anthropic API key
+      backend: structured
+      provider: anthropic
+      model: claude-sonnet-5
+      key_env: ANTHROPIC_API_KEY
+      key_url: https://console.anthropic.com/settings/keys
+      billing: api
+      live_prices: true
+      efforts: [low, medium, high, xhigh, max]
+      models:
+        - { id: claude-sonnet-5, label: "claude-sonnet-5" }
+        - { id: claude-opus-5, label: "claude-opus-5" }
+        - { id: claude-haiku-4-5, label: "claude-haiku-4-5 — fastest", no_effort: true }
+        - { id: claude-fable-5-1, label: "claude-fable-5-1" }
+    - id: openai
+      label: OpenAI API key
+      backend: structured
+      provider: openai
+      base_url: https://api.openai.com/v1
+      model: gpt-5-mini
+      key_env: OPENAI_API_KEY
+      key_url: https://platform.openai.com/api-keys
+      billing: api
+      live_prices: true
+      efforts: [low, medium, high]
+      models:
+        - { id: gpt-5-mini, label: "gpt-5-mini" }
+        - { id: gpt-5.6-luna, label: "gpt-5.6-luna" }
+        - { id: gpt-5.6-terra, label: "gpt-5.6-terra" }
+        - { id: gpt-5.6-sol, label: "gpt-5.6-sol" }
+    - id: openrouter
+      label: OpenRouter API key (many models)
+      backend: structured
+      provider: openrouter
+      base_url: https://openrouter.ai/api/v1
+      model: anthropic/claude-sonnet-5
+      key_env: OPENROUTER_API_KEY
+      key_url: https://openrouter.ai/keys
+      billing: api
+      live_prices: true
+      models:
+        - { id: anthropic/claude-sonnet-5, label: "anthropic/claude-sonnet-5" }
+        - { id: anthropic/claude-opus-5, label: "anthropic/claude-opus-5" }
+        - { id: openai/gpt-5.6-terra, label: "openai/gpt-5.6-terra" }
+    - id: ollama-cloud
+      label: Ollama Cloud API key (hosted open models)
+      backend: structured
+      provider: ollama
+      base_url: https://ollama.com/v1
+      model: gpt-oss:120b
+      key_env: OLLAMA_API_KEY
+      key_url: https://ollama.com/settings/keys
+      billing: api
+      discover: ollama
+
+rubrics_dir: rubrics
+prompts_dir: prompts
+store: { path: ~/.local/share/ideacheck/history.db }
+log: { level: info, format: console }   # console | json

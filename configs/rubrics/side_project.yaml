@@ -1,0 +1,88 @@
+# Question-writing rules (enforced by rubric.Validate):
+#  - one judgment per question; "yes" must be the natural positive reading;
+#  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
+#  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
+#  - `uses` lists only the state fields the question needs (idea, profile).
+name: side_project
+description: Evaluates tools and apps built mainly for personal use, learning, or fun.
+questions:
+  - id: personal_usefulness
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How useful would the finished thing be to the person building it?
+    levels:
+      - No stated personal use for it
+      - Occasionally handy
+      - Solves a recurring annoyance in their own life or work
+      - Removes a problem they hit constantly
+  - id: would_use_weekly
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: The person would use the finished thing at least once a week.
+  - id: learning_value
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How much would building this teach the person something they want to learn?
+    levels:
+      - Nothing new; entirely familiar skills
+      - Some new techniques at the edges
+      - A substantial new skill or technology they have said they want
+  - id: scope_fits_time
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How well does the scope of a first usable version fit the time the person has available?
+    levels:
+      - Far larger than the available time; unlikely to be finished
+      - Finishable only by cutting most of what is described
+      - A usable first version fits within about a month of spare time
+      - A usable first version fits within a weekend
+  - id: first_version_defined
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: The description identifies a small first version that would be usable on its own.
+  - id: novelty_to_builder
+    kind: noul
+    weight: 0.5
+    polarity: 1
+    uses: [idea, profile]
+    instructions: This is a kind of project the person has not built before.
+  - id: existing_tool_suffices
+    kind: noul
+    weight: 1.0
+    polarity: -1
+    uses: [idea]
+    instructions: A free or cheap existing tool already does substantially what is described.
+  - id: clarity
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: How clearly is the idea explained?
+    levels:
+      - Vague; hard to tell what it is
+      - Understandable but missing key details
+      - Clear and specific
+
+verdict:
+  gates:
+    - when: "scope_fits_time < 0.2 && first_version_defined < 0.3"
+      max: park
+      reason: Scope far exceeds available time and no small first version is defined
+    - when: "existing_tool_suffices > 0.8 && learning_value < 0.3"
+      max: explore
+      reason: An existing tool already does this and building it teaches little
+  thresholds:
+    build: 0.65
+    explore: 0.45
+    park: 0.30
+  min_confidence: 0.45

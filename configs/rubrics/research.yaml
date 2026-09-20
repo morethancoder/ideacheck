@@ -1,0 +1,96 @@
+# Question-writing rules (enforced by rubric.Validate):
+#  - one judgment per question; "yes" must be the natural positive reading;
+#  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
+#  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
+#  - `uses` lists only the state fields the question needs (idea, profile).
+name: research
+description: Evaluates investigations, experiments, papers, and studies.
+questions:
+  - id: falsifiable
+    kind: noul
+    weight: 2.0
+    polarity: 1
+    uses: [idea]
+    instructions: The description poses a question that a specific observation or result could answer or refute.
+  - id: novelty_stated
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: How clearly does the description position this against what is already known?
+    levels:
+      - Prior work is not mentioned
+      - Prior work is mentioned without saying what is missing from it
+      - A specific gap in prior work is named
+      - A specific gap is named along with why earlier approaches could not close it
+  - id: feasibility
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How feasible is this with the resources the person has?
+    levels:
+      - Requires data, equipment, or access the person does not have
+      - Possible only after securing significant new resources
+      - Feasible with modest additions to what the person has
+      - Feasible today with what the person has
+  - id: method_named
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: The description names the method or data that will be used to answer the question.
+  - id: why_now
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: How strong is the reason this is newly possible or newly needed?
+    levels:
+      - Nothing has changed; this could have been done years ago
+      - A weak or generic trend is cited
+      - A specific recent change makes this newly possible or needed
+  - id: potential_impact
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: If the work succeeds, how much would it matter to others?
+    levels:
+      - Of interest mainly to the author
+      - Useful to a small specialist group
+      - Changes how a field or a group of practitioners works
+  - id: researcher_fit
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How well matched is this person's background to this investigation?
+    levels:
+      - No relevant training or experience
+      - Adjacent experience
+      - Direct experience with the methods or the domain
+  - id: clarity
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: How clearly is the idea explained?
+    levels:
+      - Vague; hard to tell what it is
+      - Understandable but missing key details
+      - Clear and specific
+
+verdict:
+  gates:
+    - when: "falsifiable < 0.3"
+      max: park
+      reason: No question that a result could answer or refute
+    - when: "feasibility < 0.2"
+      max: explore
+      reason: Requires resources the person does not have
+  thresholds:
+    build: 0.65
+    explore: 0.45
+    park: 0.30
+  min_confidence: 0.45

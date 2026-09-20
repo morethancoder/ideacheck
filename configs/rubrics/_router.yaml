@@ -1,0 +1,17 @@
+# Question-writing rules (enforced by rubric.Validate):
+#  - one judgment per question; "yes" must be the natural positive reading;
+#  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
+#  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
+#  - `uses` lists only the state fields the question needs (idea, profile).
+questions:
+  - id: idea_type
+    kind: choice
+    instructions: What kind of idea is this?
+    uses: [idea]
+    options:
+      business: A product, service, or startup intended to make money
+      side_project: A tool or app built mainly for personal use, learning, or fun
+      content: A blog, newsletter, video series, podcast, course, or similar media
+      research: An investigation, experiment, paper, or study
+      creative: A game, story, artwork, music, or other creative work
+      other: None of the above

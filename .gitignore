@@ -1,0 +1,6 @@
+bin/
+bench/results/*
+!bench/results/.gitkeep
+.env
+.playwright/
+*.db

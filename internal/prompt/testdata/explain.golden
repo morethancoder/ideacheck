@@ -1,0 +1,21 @@
+IDEA:
+```json
+{
+  "idea": {
+    "problem": "slow payroll",
+    "text": "An app"
+  }
+}
+```
+
+VERDICT: park
+WHY THE RULES CHOSE IT: Tarpit fired
+
+FINDINGS (most influential first):
+- [weakness] This is a tarpit idea. → probably true
+- [strength] How clear? → Clear
+
+NOT STATED IN THE DESCRIPTION:
+- Who exactly is the first user?
+
+Reply with one JSON object: {"summary": "<the paragraph>"}

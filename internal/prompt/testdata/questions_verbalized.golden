@@ -1,0 +1,24 @@
+
+QUESTION id=idea_type kind=choice
+What kind of idea is this?
+Options:
+- business: Makes money
+- content: Media
+- other: None of the above
+Answer shape: {"choice": "<option key>", "probabilities": {"<option key>": <0..1>, ...}, "confidence": <0..1>}
+Probabilities cover every option and sum to 1.
+
+QUESTION id=clarity kind=score
+How clear?
+Levels (index 0 is lowest):
+- 0: Vague
+- 1: Clear
+Answer shape: {"level": <level index>, "probabilities": {"<level index>": <0..1>, ...}, "confidence": <0..1>}
+Probabilities cover every level and sum to 1.
+
+QUESTION id=tarpit kind=noul
+This is a tarpit idea.
+This is a statement. Judge whether it is true of the STATE.
+Answer shape: {"probability": <0..1 probability that the statement is true>}
+
+Reply with JSON only, matching the required schema.

@@ -1,0 +1,14 @@
+STATE:
+```json
+{{ .StateJSON }}
+```
+
+{{ .Question.Instructions }}
+{{ if eq (printf "%s" .Question.Kind) "noul" -}}
+Y) yes  N) no
+{{- else -}}
+{{ range .Labels }}{{ .Label }}) {{ .Text }}
+{{ end -}}
+{{- end }}
+Answer with exactly one character: the label of your answer.
+Answer:

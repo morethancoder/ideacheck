@@ -1,0 +1,156 @@
+# Question-writing rules (enforced by rubric.Validate):
+#  - one judgment per question; "yes" must be the natural positive reading;
+#  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
+#  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
+#  - `uses` lists only the state fields the question needs (idea, profile).
+name: business
+description: Evaluates product/startup ideas using YC-style criteria.
+questions:
+  - id: problem_acuity
+    kind: score
+    weight: 2.0
+    polarity: 1
+    uses: [idea]
+    instructions: How acute is the problem this idea addresses?
+    levels:
+      - No real problem, or a mild inconvenience people ignore
+      - A real annoyance with acceptable existing workarounds
+      - A painful problem people solve with clumsy hacks or manual work
+      - A blocking problem with no workable existing solution
+  - id: sisp
+    kind: noul
+    weight: 1.5
+    polarity: -1
+    uses: [idea]
+    instructions: The idea starts from a technology or trend and works backward to find a problem, rather than starting from a problem people already have.
+  - id: audience_specificity
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: How specific and reachable is the target audience?
+    levels:
+      - Everyone, or undefined
+      - A broad demographic
+      - A specific role, community, or situation
+      - A specific role in a specific context with a clear place to find them
+  - id: market_size
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: Based only on the description, how large could the market plausibly become?
+    levels:
+      - Tiny niche unlikely to grow
+      - Small niche
+      - Meaningful market or small but fast-growing
+      - Large market today or clearly on track to become large
+  - id: tarpit
+    kind: noul
+    weight: 1.5
+    polarity: -1
+    uses: [idea]
+    instructions: This is an idea many people independently come up with and that has repeatedly been tried without success (for example apps to plan meetups with friends, generic social networks, restaurant or music discovery apps).
+  - id: structural_barrier_named
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: The description names a specific structural reason this has not been solved before and explains how this idea gets past it.
+  - id: competitors_exist
+    kind: noul
+    weight: 0
+    polarity: 0
+    uses: [idea]
+    instructions: Products or services already exist that address substantially the same problem for the same audience.
+  - id: differentiating_insight
+    kind: noul
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: The description contains a specific insight or approach that existing alternatives are missing.
+  - id: why_now
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: How strong is the reason this is newly possible or newly needed?
+    levels:
+      - Nothing has changed; this could have been built years ago
+      - A weak or generic trend is cited
+      - A specific recent change makes this newly possible or needed
+      - A specific recent change makes this urgent and existing players are poorly positioned
+  - id: proxy_exists
+    kind: noul
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: The description points to a successful comparable business in another market, geography, or vertical that proves the model works.
+  - id: scalability
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea]
+    instructions: How well does revenue decouple from human effort as the business grows?
+    levels:
+      - Each customer requires significant manual work; a services business
+      - Mostly software with a meaningful services component
+      - Software with light onboarding or support
+      - Pure software or self-serve; scales with near-zero marginal effort
+  - id: idea_space
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: How fertile is the surrounding space of adjacent ideas if this exact idea fails?
+    levels:
+      - Isolated idea; a pivot would mean starting over
+      - A few related ideas nearby
+      - A rich space with many adjacent problems and paying customers
+  - id: founder_market_fit
+    kind: score
+    weight: 2.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: How well matched is this person's background to this specific idea?
+    levels:
+      - No relevant skills, domain knowledge, or access
+      - Can build it but has no domain insight or access to users
+      - Has either the domain insight or the building skills plus a way to reach users
+      - "Uniquely positioned: domain insight, building ability, and access to users"
+  - id: personal_want
+    kind: noul
+    weight: 0.5
+    polarity: 1
+    uses: [idea, profile]
+    instructions: The person or people they know would use this themselves.
+  - id: clarity
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: How clearly is the idea explained?
+    levels:
+      - Vague; hard to tell what it is
+      - Understandable but missing key details
+      - Clear and specific
+
+verdict:
+  gates:
+    # Gates see NORMALIZED values in [0,1]. problem_acuity has 4 levels, so
+    # "below level 1" (raw < 1.0) is normalized < 1/3.
+    - when: "sisp > 0.8 && problem_acuity < 0.34"
+      max: park
+      reason: Solution in search of a problem
+    - when: "tarpit > 0.7 && structural_barrier_named < 0.3"
+      max: explore
+      reason: Likely tarpit with no named way past the barrier
+    - when: "competitors_exist > 0.7 && differentiating_insight < 0.3"
+      max: explore
+      reason: Crowded space with no stated differentiation
+  thresholds:            # on composite in [0,1]
+    build: 0.70
+    explore: 0.50
+    park: 0.30
+    # below park → kill
+  min_confidence: 0.45   # below this, verdict is reported as "uncertain" with the composite

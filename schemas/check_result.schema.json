@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ideacheck.dev/schemas/check_result.schema.json",
+  "$defs": {
+    "Answer": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "choice": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "noul": {
+          "type": "number"
+        },
+        "probabilities": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "method": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "latency_ms": {
+          "type": "integer"
+        },
+        "tokens_in": {
+          "type": "integer"
+        },
+        "tokens_out": {
+          "type": "integer"
+        },
+        "tokens_cached": {
+          "type": "integer"
+        },
+        "cost_usd": {
+          "type": "number"
+        },
+        "order_bias": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "probabilities",
+        "confidence",
+        "method",
+        "model",
+        "latency_ms"
+      ]
+    },
+    "Contribution": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "value",
+        "weight"
+      ]
+    },
+    "Cost": {
+      "properties": {
+        "usd": {
+          "type": "number"
+        },
+        "basis": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "tokens_in": {
+          "type": "integer"
+        },
+        "tokens_cached": {
+          "type": "integer"
+        },
+        "tokens_out": {
+          "type": "integer"
+        },
+        "price_per_mtok": {
+          "$ref": "#/$defs/Price"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "usd",
+        "basis",
+        "tokens_in",
+        "tokens_out"
+      ]
+    },
+    "Dimension": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        },
+        "weight": {
+          "type": "number"
+        },
+        "polarity": {
+          "type": "integer"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "value",
+        "weight",
+        "polarity",
+        "confidence"
+      ]
+    },
+    "IdeaType": {
+      "properties": {
+        "choice": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "choice",
+        "confidence"
+      ]
+    },
+    "Missing": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "probability": {
+          "type": "number"
+        },
+        "ask": {
+          "type": "string"
+        },
+        "fills": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "probability",
+        "ask",
+        "fills"
+      ]
+    },
+    "Price": {
+      "properties": {
+        "in": {
+          "type": "number"
+        },
+        "out": {
+          "type": "number"
+        },
+        "cached_in": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "in",
+        "out"
+      ]
+    },
+    "RubricRef": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "hash"
+      ]
+    },
+    "Timing": {
+      "properties": {
+        "total_ms": {
+          "type": "integer"
+        },
+        "slowest_question": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "total_ms"
+      ]
+    }
+  },
+  "properties": {
+    "status": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string"
+    },
+    "idea_type": {
+      "$ref": "#/$defs/IdeaType"
+    },
+    "missing": {
+      "items": {
+        "$ref": "#/$defs/Missing"
+      },
+      "type": "array"
+    },
+    "answers": {
+      "items": {
+        "$ref": "#/$defs/Answer"
+      },
+      "type": "array"
+    },
+    "composite": {
+      "type": "number"
+    },
+    "composite_confidence": {
+      "type": "number"
+    },
+    "verdict": {
+      "type": "string"
+    },
+    "verdict_reason": {
+      "type": "string"
+    },
+    "dimensions": {
+      "items": {
+        "$ref": "#/$defs/Dimension"
+      },
+      "type": "array"
+    },
+    "top_strengths": {
+      "items": {
+        "$ref": "#/$defs/Contribution"
+      },
+      "type": "array"
+    },
+    "top_risks": {
+      "items": {
+        "$ref": "#/$defs/Contribution"
+      },
+      "type": "array"
+    },
+    "timing": {
+      "$ref": "#/$defs/Timing"
+    },
+    "cost_estimate_usd": {
+      "type": "number"
+    },
+    "cost": {
+      "$ref": "#/$defs/Cost"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "rubric": {
+      "$ref": "#/$defs/RubricRef"
+    },
+    "config_hash": {
+      "type": "string"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "error": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "status",
+    "id",
+    "backend",
+    "model",
+    "method",
+    "missing",
+    "answers",
+    "composite",
+    "composite_confidence",
+    "dimensions",
+    "top_strengths",
+    "top_risks",
+    "timing",
+    "cost_estimate_usd",
+    "cost",
+    "config_hash",
+    "created_at"
+  ],
+  "title": "ideacheck check result",
+  "description": "Output of `ideacheck -o json` and POST /v1/check. top_strengths/top_risks values are polarity-adjusted: 1 is always good."
+}
