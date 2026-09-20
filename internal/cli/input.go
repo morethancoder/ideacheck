@@ -34,7 +34,7 @@ func osInputEnv() inputEnv {
 	}
 }
 
-// resolveInput applies §1a's order: "-" → stdin; -f or an existing file → file;
+// resolveInput applies the documented order: "-" → stdin; -f or a file → file;
 // piped stdin with no arg → stdin; otherwise the args joined are the idea text.
 func resolveInput(args []string, fileFlag string, env inputEnv) (input, error) {
 	switch {

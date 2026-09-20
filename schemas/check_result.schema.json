@@ -271,6 +271,15 @@
       },
       "type": "array"
     },
+    "partial": {
+      "type": "boolean"
+    },
+    "extracted": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "answers": {
       "items": {
         "$ref": "#/$defs/Answer"

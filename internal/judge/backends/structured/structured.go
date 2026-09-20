@@ -175,6 +175,34 @@ var summarySchema = map[string]any{
 	"additionalProperties": false,
 }
 
+// extractSchema asks for every wanted field as a string. Nothing is required:
+// a field the document does not answer comes back empty or absent.
+func extractSchema(fields []string) object {
+	props := object{}
+	for _, f := range fields {
+		props[f] = object{"type": "string"}
+	}
+	return object{"type": "object", "properties": props, "required": fields, "additionalProperties": false}
+}
+
+// Extract reads the wanted fields out of the document in one call. Like Narrate
+// it is a single plain call: the values are quotes from the text, not judgments.
+func (j *Judge) Extract(ctx context.Context, system, user string, fields []string) (judge.Extraction, error) {
+	done, err := j.LLM.Complete(ctx, system, user, "Fill the fields now.", extractSchema(fields))
+	if err != nil {
+		return judge.Extraction{}, err
+	}
+	values := map[string]string{}
+	if err := decode(done.Text, &values); err != nil {
+		return judge.Extraction{}, err
+	}
+	for k, v := range values {
+		values[k] = strings.TrimSpace(v)
+	}
+	return judge.Extraction{Values: values, Model: done.Model, TokensIn: done.TokensIn,
+		TokensOut: done.TokensOut, TokensCached: done.TokensCached, CostUSD: done.CostUSD}, nil
+}
+
 // Narrate writes the result summary with one plain call: no voting, since the
 // text is shown, not counted. The brief goes in the cacheable state slot.
 func (j *Judge) Narrate(ctx context.Context, system, brief string) (judge.Narration, error) {

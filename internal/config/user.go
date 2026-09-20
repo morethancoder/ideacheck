@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -54,6 +55,53 @@ func SaveChoice(dir string, p Provider, model, effort string) error {
 	backends[p.Backend] = backend
 	doc["backend"], doc["backends"] = p.Backend, backends
 	return writeYAML(path, doc, 0o644)
+}
+
+// SetKey writes one dotted key into dir/config.yaml, keeping every other key the
+// user has there. (Comments in that file are not preserved.) The value is read
+// as YAML, so `4` is a number, `true` a boolean and `30s` a string.
+func SetKey(dir, key, value string) error {
+	path := filepath.Join(dir, mainFile)
+	doc := map[string]any{}
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	parts := strings.Split(key, ".")
+	node := doc
+	for _, p := range parts[:len(parts)-1] {
+		child, _ := node[p].(map[string]any)
+		if child == nil {
+			child = map[string]any{}
+			node[p] = child
+		}
+		node = child
+	}
+	var parsed any
+	if err := yaml.Unmarshal([]byte(value), &parsed); err != nil {
+		return fmt.Errorf("value %q: %w", value, err)
+	}
+	node[parts[len(parts)-1]] = parsed
+	return writeYAML(path, doc, 0o644)
+}
+
+// Restore puts back the bytes of dir/config.yaml, for undoing a write that did
+// not load. had is false when there was no file to begin with.
+func Restore(dir string, b []byte, had bool) error {
+	path := filepath.Join(dir, mainFile)
+	if !had {
+		return os.Remove(path)
+	}
+	return os.WriteFile(path, b, 0o644)
+}
+
+// ReadMain returns the raw bytes of dir/config.yaml; had is false when there is none.
+func ReadMain(dir string) (b []byte, had bool) {
+	b, err := os.ReadFile(filepath.Join(dir, mainFile))
+	return b, err == nil
 }
 
 // Secrets resolves API keys: the environment first, then credentials.yaml.

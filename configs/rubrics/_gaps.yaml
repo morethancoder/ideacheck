@@ -3,9 +3,15 @@
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
 #  - `uses` lists only the state fields the question needs (idea, profile).
+#  - `requires` (optional) names state the question cannot be judged without:
+#    when it is absent the question is not asked, and its weight moves to the rest.
 # `ask` is the follow-up shown to the user; `fills` is the intake field the reply is
 # stored in (an idea field, or profile.<field>).
 threshold: 0.5
+# How hard unstated facts discount a result's confidence when the idea is scored
+# anyway (agent and server runs, or the TUI after it has asked once): the
+# confidence is multiplied by 1 - confidence_penalty x (open gaps / questions).
+confidence_penalty: 0.5
 questions:
   - id: has_problem
     kind: noul

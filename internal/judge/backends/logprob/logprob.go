@@ -259,5 +259,44 @@ func (j *Judge) Narrate(ctx context.Context, system, brief string) (judge.Narrat
 	return judge.Narration{Text: text, Model: res.Model, TokensIn: res.Usage.PromptTokens, TokensOut: res.Usage.CompletionTokens}, nil
 }
 
+// Extract reads the wanted fields out of the document as one plain completion.
+// Local servers vary in structured-output support, so the JSON is asked for in
+// the prompt and read leniently; an unparsable reply extracts nothing.
+func (j *Judge) Extract(ctx context.Context, system, user string, fields []string) (judge.Extraction, error) {
+	res, err := j.Client.Chat(ctx, openai.Request{
+		Model:           j.Model,
+		MaxTokens:       extractMaxTokens,
+		Messages:        []openai.Message{{Role: "system", Content: system}, {Role: "user", Content: user}},
+		ReasoningEffort: j.effort(),
+	})
+	if err != nil {
+		return judge.Extraction{}, err
+	}
+	text := strings.TrimSpace(thinkRE.ReplaceAllString(res.Choices[0].Message.Content, ""))
+	values := map[string]string{}
+	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	if start < 0 || end <= start {
+		return judge.Extraction{}, fmt.Errorf("model did not return a JSON object")
+	}
+	if err := json.Unmarshal([]byte(text[start:end+1]), &values); err != nil {
+		return judge.Extraction{}, fmt.Errorf("model reply is not the requested JSON: %w", err)
+	}
+	want := map[string]bool{}
+	for _, f := range fields {
+		want[f] = true
+	}
+	for k, v := range values {
+		if v = strings.TrimSpace(v); v == "" || !want[k] {
+			delete(values, k)
+			continue
+		}
+		values[k] = v
+	}
+	return judge.Extraction{Values: values, Model: res.Model, TokensIn: res.Usage.PromptTokens, TokensOut: res.Usage.CompletionTokens}, nil
+}
+
+// extractMaxTokens covers a handful of short field values, plus thinking.
+const extractMaxTokens = 2048
+
 // narrateMaxTokens leaves room for a reasoning model's thinking before the paragraph.
 const narrateMaxTokens = 2048

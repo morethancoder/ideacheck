@@ -26,6 +26,7 @@ type Question struct {
 	Weight   float64            `yaml:"weight,omitempty" json:"weight,omitempty"`
 	Polarity int                `yaml:"polarity,omitempty" json:"polarity,omitempty"` // +1 good-when-high, -1 bad-when-high, 0 informational
 	Uses     []string           `yaml:"uses,omitempty" json:"uses,omitempty"`         // which state fields to include: ["idea","profile"]
+	Requires []string           `yaml:"requires,omitempty" json:"requires,omitempty"` // state this question cannot be judged without; absent → not asked, not scored
 	Ask      string             `yaml:"ask,omitempty" json:"ask,omitempty"`           // gaps only: follow-up question shown to the user
 	Fills    string             `yaml:"fills,omitempty" json:"fills,omitempty"`       // gaps only: intake field the follow-up reply is stored in
 	Values   map[string]float64 `yaml:"values,omitempty" json:"values,omitempty"`     // choice only: option key -> value in [0,1] for aggregation
@@ -88,6 +89,23 @@ type Capabilities struct {
 // computed from its text.
 type Narrator interface {
 	Narrate(ctx context.Context, system, brief string) (Narration, error)
+}
+
+// Extractor is optionally implemented by backends that can pull named fields
+// out of a document. Like Narrate it is not a judgment: the values only fill
+// intake fields the user left empty, and nothing is scored from the call.
+type Extractor interface {
+	Extract(ctx context.Context, system, user string, fields []string) (Extraction, error)
+}
+
+// Extraction is the values read from the document, plus what the call cost.
+type Extraction struct {
+	Values       map[string]string
+	Model        string
+	TokensIn     int
+	TokensOut    int
+	TokensCached int
+	CostUSD      float64
 }
 
 type Narration struct {

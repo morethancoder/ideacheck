@@ -111,6 +111,8 @@ func stageTitle(stage string) string {
 	switch stage {
 	case pipeline.StagePreflight:
 		return "What is stated · idea type"
+	case pipeline.StageExtract:
+		return "Reading the description"
 	case pipeline.StageExplain:
 		return "Summary"
 	}
@@ -126,6 +128,8 @@ func (m liveModel) renderRow(r row) string {
 		return fmt.Sprintf("  %s %s %s", bad.Render("✗"), name, bad.Render(r.answer.Err))
 	case r.stage == pipeline.StageExplain:
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render("written"))
+	case r.stage == pipeline.StageExtract:
+		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render("read"))
 	case r.value == nil:
 		return fmt.Sprintf("  %s %s %s  %s", good.Render("✓"), name, r.answer.Choice, dim.Render(pct(r.answer.Confidence)))
 	}

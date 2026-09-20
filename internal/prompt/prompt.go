@@ -24,15 +24,19 @@ const (
 	logprobFile    = "question_logprob.tmpl"
 	explainSysFile = "explain_system.md"
 	explainFile    = "explain.tmpl"
+	extractSysFile = "extract_system.md"
+	extractFile    = "extract.tmpl"
 )
 
 // Set is every prompt the model-backed judges use.
 type Set struct {
 	System        string
 	ExplainSystem string // system prompt for the plain-language summary
+	ExtractSystem string // system prompt for reading fields out of the document
 	structured    *template.Template
 	logprob       *template.Template
 	explain       *template.Template
+	extract       *template.Template
 }
 
 func Load(r Reader, dir string) (*Set, error) {
@@ -57,7 +61,15 @@ func Load(r Reader, dir string) (*Set, error) {
 		return nil, fmt.Errorf("prompt %s: %w", explainSysFile, err)
 	}
 	s.ExplainSystem = string(bytes.TrimSpace(exp))
-	s.explain, err = parse(r, dir, explainFile)
+	if s.explain, err = parse(r, dir, explainFile); err != nil {
+		return nil, err
+	}
+	ext, err := r.Read(path.Join(dir, extractSysFile))
+	if err != nil {
+		return nil, fmt.Errorf("prompt %s: %w", extractSysFile, err)
+	}
+	s.ExtractSystem = string(bytes.TrimSpace(ext))
+	s.extract, err = parse(r, dir, extractFile)
 	return s, err
 }
 
@@ -151,6 +163,16 @@ func (s *Set) Explain(b Brief) (string, error) {
 		return "", err
 	}
 	return render(s.explain, explainFile, map[string]any{"StateJSON": js, "Verdict": b.Verdict, "Reason": b.Reason, "Findings": b.Findings, "Missing": b.Missing})
+}
+
+// Field is one intake field the extraction call is asked to fill: the name the
+// reply must use, and what it means, both from the fields catalogue.
+type Field struct{ Name, Description string }
+
+// Extract renders the document the extraction call reads. fields are the intake
+// fields still empty — the only ones worth asking for.
+func (s *Set) Extract(idea, context string, fields []Field) (string, error) {
+	return render(s.extract, extractFile, map[string]any{"Idea": idea, "Context": context, "Fields": fields})
 }
 
 func render(t *template.Template, name string, data any) (string, error) {

@@ -48,6 +48,7 @@ func validateQuestion(q judge.Question) []error {
 	errs = append(errs, validateKind(q)...)
 	errs = append(errs, validateWeight(q)...)
 	errs = append(errs, validateUses(q.Uses)...)
+	errs = append(errs, validateRequires(q)...)
 	return errs
 }
 
@@ -140,9 +141,37 @@ func validateUses(uses []string) []error {
 	return errs
 }
 
+// validateRequires: a question cannot require state it does not even look at,
+// and requiring everything would make the question unanswerable in every run.
+func validateRequires(q judge.Question) []error {
+	var errs []error
+	for _, r := range q.Requires {
+		if !stateFields[r] {
+			errs = append(errs, fmt.Errorf("requires %q is not one of idea, profile", r))
+			continue
+		}
+		if !contains(q.Uses, r) {
+			errs = append(errs, fmt.Errorf("requires %q but does not use it", r))
+		}
+	}
+	return errs
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 func (rb *Rubric) validateGaps() error {
 	if rb.Threshold <= 0 || rb.Threshold >= 1 {
 		return fmt.Errorf("threshold %v must be strictly between 0 and 1", rb.Threshold)
+	}
+	if rb.ConfidencePenalty < 0 || rb.ConfidencePenalty > 1 {
+		return fmt.Errorf("confidence_penalty %v must be within [0,1]", rb.ConfidencePenalty)
 	}
 	for _, q := range rb.Questions {
 		if q.Kind != judge.Noul {
@@ -163,6 +192,9 @@ func (rb *Rubric) validateRouter() error {
 }
 
 func (rb *Rubric) validateScoring() error {
+	if rb.ConfidencePenalty != 0 {
+		return errors.New("confidence_penalty belongs to _gaps.yaml only")
+	}
 	var total float64
 	for _, q := range rb.Questions {
 		total += q.Weight

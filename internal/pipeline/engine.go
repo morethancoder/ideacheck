@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -27,8 +28,9 @@ type Options struct {
 	ID         string // preset check id (the server needs it before the check ends); "" = generate
 	Rubric     string // force a rubric instead of routing
 	Sequential bool
-	// Proceed scores the idea even when gaps remain (used after the user has
-	// already been asked once). Otherwise gaps stop the check with needs_input.
+	// Proceed scores the idea even when gaps remain, reporting them next to the
+	// scores (status ok, partial true). It is the default everywhere except the
+	// TUI, which can ask; without it a gap stops the check with needs_input.
 	Proceed bool
 	// Answered lists intake fields the user was already offered and chose to
 	// leave blank (the TUI's detail steps). A gap on such a field, or on a field
@@ -49,22 +51,28 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	if o.ID != "" {
 		res.ID = o.ID
 	}
-	state := in.State()
-
 	gaps, router, err := e.loadPreflight()
 	if err != nil {
 		return nil, err
 	}
+	var extra []judge.Answer
+	in, read := e.extract(ctx, in, res, o)
+	if read != nil {
+		extra = append(extra, *read)
+	}
+	state := in.State()
 	pre := e.fanout(ctx, state, append(append([]judge.Question{}, gaps.Questions...), router.Questions...), o, StagePreflight)
 	gapAnswers, routeAnswer := pre[:len(gaps.Questions)], pre[len(gaps.Questions)]
 	res.Answers = pre
-	res.Missing = FindMissing(gaps, gapAnswers)
+	res.Missing = FindMissing(gaps, gapAnswers, in)
 	res.IdeaType = ideaType(routeAnswer)
 
-	if len(Unanswered(res.Missing, in, o.Answered)) > 0 && !o.Proceed {
+	open := Unanswered(res.Missing, in, o.Answered)
+	if len(open) > 0 && !o.Proceed {
 		res.Status = StatusNeedsInput
-		return e.finish(res, start), nil
+		return e.finish(res, start, extra...), nil
 	}
+	res.Partial = len(open) > 0
 
 	name, warnings := e.pickRubric(o.Rubric, routeAnswer)
 	res.Warnings = warnings
@@ -74,12 +82,16 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	}
 	res.Rubric = &RubricRef{Name: rb.Name, Hash: rb.Hash}
 
-	answers := e.fanout(ctx, state, rb.Questions, o, StageScore)
+	ask, held := withheld(rb.Questions, state)
+	answers := restore(e.fanout(ctx, state, ask, o, StageScore), held, len(rb.Questions))
 	res.Answers = append(res.Answers, answers...)
 	if err := e.conclude(res, rb, answers); err != nil {
 		return nil, err
 	}
-	var extra []judge.Answer
+	if res.Partial {
+		res.CompositeConfidence *= confidenceFactor(gaps, len(open))
+		res.Warnings = append(res.Warnings, fmt.Sprintf("scored with %d fact(s) the description does not state: confidence is discounted; see missing[]", len(open)))
+	}
 	if a := e.explain(ctx, res, state, rb, answers, o); a != nil {
 		extra = append(extra, *a)
 	}
@@ -156,16 +168,71 @@ func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Quest
 }
 
 // FindMissing turns gap nouls below the threshold into follow-up questions. A gap
-// question that failed is not evidence of a gap, so it is skipped.
-func FindMissing(gaps *rubric.Rubric, answers []judge.Answer) []Missing {
+// question that failed is not evidence of a gap, so it is skipped — and neither
+// is one whose field the intake already fills: that fact is not missing, however
+// the prose reads.
+func FindMissing(gaps *rubric.Rubric, answers []judge.Answer, in Intake) []Missing {
 	missing := []Missing{}
 	for i, q := range gaps.Questions {
 		a := answers[i]
-		if !a.Failed() && a.Noul < gaps.Threshold {
+		if !a.Failed() && a.Noul < gaps.Threshold && !in.Has(q.Fills) {
 			missing = append(missing, Missing{ID: q.ID, Probability: a.Noul, Ask: q.Ask, Fills: q.Fills})
 		}
 	}
 	return missing
+}
+
+// confidenceFactor discounts the composite confidence for facts nobody stated.
+// The size of the discount is the gaps rubric's business, not this code's:
+// confidence_penalty 1 means "all gaps open, no confidence left".
+func confidenceFactor(gaps *rubric.Rubric, open int) float64 {
+	if gaps.ConfidencePenalty <= 0 || len(gaps.Questions) == 0 {
+		return 1
+	}
+	return 1 - gaps.ConfidencePenalty*float64(open)/float64(len(gaps.Questions))
+}
+
+// withheld holds back questions whose `requires:` state was not given. Scoring a
+// dimension from material we do not have (founder fit with no profile) reads as
+// a judgment of the idea when it is really a judgment of the input.
+func withheld(qs []judge.Question, s judge.State) (ask []judge.Question, held map[int]judge.Answer) {
+	held = map[int]judge.Answer{}
+	for i, q := range qs {
+		if absent := absentState(q, s); len(absent) > 0 {
+			held[i] = judge.Answer{ID: q.ID, Kind: q.Kind, Err: "no " + strings.Join(absent, " or ") + " given"}
+			continue
+		}
+		ask = append(ask, q)
+	}
+	return ask, held
+}
+
+// absentState names the state a question requires that the check does not have.
+func absentState(q judge.Question, s judge.State) []string {
+	var absent []string
+	for _, key := range q.Requires {
+		if v, ok := s[key]; !ok || v == nil {
+			absent = append(absent, key)
+		}
+	}
+	return absent
+}
+
+// restore puts the withheld answers back at their question's index, so answers
+// stay aligned with the rubric.
+func restore(answers []judge.Answer, held map[int]judge.Answer, n int) []judge.Answer {
+	if len(held) == 0 {
+		return answers
+	}
+	out, next := make([]judge.Answer, n), 0
+	for i := range out {
+		if a, ok := held[i]; ok {
+			out[i] = a
+			continue
+		}
+		out[i], next = answers[next], next+1
+	}
+	return out
 }
 
 // Unanswered is the part of missing worth asking about: gaps whose field is
@@ -205,6 +272,10 @@ func (e *Engine) pickRubric(forced string, route judge.Answer) (string, []string
 // conclude aggregates and decides. With nothing answered there is no verdict.
 func (e *Engine) conclude(res *Result, rb *rubric.Rubric, answers []judge.Answer) error {
 	agg := Combine(rb.Questions, answers)
+	reasons := map[string]string{}
+	for _, a := range answers {
+		reasons[a.ID] = a.Err
+	}
 	for i, q := range rb.Questions {
 		d := Dimension{ID: q.ID, Weight: q.Weight, Polarity: q.Polarity, Confidence: answers[i].Confidence, Error: answers[i].Err}
 		if v, ok := agg.Values[q.ID]; ok {
@@ -213,7 +284,7 @@ func (e *Engine) conclude(res *Result, rb *rubric.Rubric, answers []judge.Answer
 		res.Dimensions = append(res.Dimensions, d)
 	}
 	for _, id := range agg.Failed {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("question %s was not answered and is excluded from the composite", id))
+		res.Warnings = append(res.Warnings, fmt.Sprintf("question %s is excluded from the composite: %s", id, reasons[id]))
 	}
 	if agg.Answered == 0 {
 		res.Status = StatusError

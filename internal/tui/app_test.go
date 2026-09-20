@@ -144,12 +144,16 @@ func TestCheckFlowAsksOnceThenShowsAndSavesTheResult(t *testing.T) {
 	if a.intake.Fields["why_now"] != "Tip-credit rules changed this year" || len(h.persists) != 1 {
 		t.Errorf("reply not stored or result not saved once: %+v persists=%d", a.intake.Fields, len(h.persists))
 	}
-	for tab, want := range []string{"Top strengths", "problem_acuity", "What changed recently", "mock values"} {
+	for tab, want := range []string{"Top strengths", "problem_acuity", "", "mock values"} {
 		a.tab = tab
-		if view := a.View(); !strings.Contains(view, want) {
+		if view := a.View(); want != "" && !strings.Contains(view, want) {
 			t.Errorf("tab %d (%s) missing %q", tab, resultTabs[tab], want)
 		}
 	}
+	if a.tab = 2; strings.Contains(a.View(), "What changed recently") {
+		t.Error("a gap the user has just answered must not be reported as missing")
+	}
+	a.tab = len(resultTabs) - 1
 	a.Update(tea.KeyMsg{Type: tea.KeyRight})
 	if a.tab != 0 {
 		t.Errorf("→ from the last tab must wrap to the first, got %d", a.tab)

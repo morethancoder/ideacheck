@@ -34,6 +34,7 @@ type Config struct {
 	Backends    map[string]Backend `koanf:"backends" json:"backends"`
 	Pricing     map[string]Price   `koanf:"pricing" json:"pricing"`
 	Explain     bool               `koanf:"explain" json:"explain"` // add a plain-language summary to every result
+	Extract     bool               `koanf:"extract" json:"extract"` // read stated facts out of the document before looking for gaps
 	Setup       Setup              `koanf:"setup" json:"-"`         // wizard presets: not part of a result's config hash
 	RubricsDir  string             `koanf:"rubrics_dir" json:"rubrics_dir"`
 	PromptsDir  string             `koanf:"prompts_dir" json:"prompts_dir"`

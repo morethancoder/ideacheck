@@ -3,6 +3,8 @@
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
 #  - `uses` lists only the state fields the question needs (idea, profile).
+#  - `requires` (optional) names state the question cannot be judged without:
+#    when it is absent the question is not asked, and its weight moves to the rest.
 questions:
   - id: idea_type
     kind: choice

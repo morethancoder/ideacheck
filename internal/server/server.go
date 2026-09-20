@@ -104,7 +104,10 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	opts := pipeline.Options{ID: pipeline.NewID(), Rubric: q.Get("rubric"), Proceed: q.Get("proceed") == "1"}
+	// Nothing on this side can answer a follow-up, so missing facts are reported
+	// beside the scores rather than instead of them; ?strict=1 asks for the old
+	// needs_input behavior.
+	opts := pipeline.Options{ID: pipeline.NewID(), Rubric: q.Get("rubric"), Proceed: q.Get("strict") != "1"}
 	live := s.runs.start(opts.ID)
 	if q.Get("async") == "1" {
 		// The check outlives this request, so it must not inherit its context.

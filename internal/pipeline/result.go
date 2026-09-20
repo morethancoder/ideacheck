@@ -11,16 +11,23 @@ const (
 	StatusError      = "error"
 )
 
-// Result is the stable output contract for agent mode and the server (§12).
-// schemas/check_result.schema.json is generated from this type.
+// Result is the stable output contract for agent mode and the server;
+// schemas/check_result.schema.json is generated from this type, and a test fails
+// when the two drift.
 type Result struct {
-	Status              string         `json:"status"`
-	ID                  string         `json:"id"`
-	Backend             string         `json:"backend"`
-	Model               string         `json:"model"`
-	Method              string         `json:"method"`
-	IdeaType            *IdeaType      `json:"idea_type,omitempty"`
-	Missing             []Missing      `json:"missing"`
+	Status   string    `json:"status"`
+	ID       string    `json:"id"`
+	Backend  string    `json:"backend"`
+	Model    string    `json:"model"`
+	Method   string    `json:"method"`
+	IdeaType *IdeaType `json:"idea_type,omitempty"`
+	Missing  []Missing `json:"missing"`
+	// Partial is true when the idea was scored although facts in missing[] were
+	// never stated. The scores stand; the confidence is discounted.
+	Partial bool `json:"partial,omitempty"`
+	// Extracted names the intake fields read out of the document by the extract
+	// stage rather than given by the user.
+	Extracted           []string       `json:"extracted,omitempty"`
 	Answers             []judge.Answer `json:"answers"`
 	Composite           float64        `json:"composite"`
 	CompositeConfidence float64        `json:"composite_confidence"`

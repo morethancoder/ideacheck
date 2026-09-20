@@ -120,26 +120,71 @@ ideacheck "..." -i                 # edit the idea step by step first
 ideacheck idea.md -r side_project  # read a file, force a rubric
 ideacheck "..." -b logprob -m qwen3:8b
 ideacheck "..." -o json | jq .verdict
-cat idea.json | ideacheck -A -o json      # agent mode: never asks, JSON out, logs on stderr
+cat idea.json | ideacheck --agent         # agent mode: never asks, JSON out, logs on stderr
 ideacheck -- "serve"               # `--` forces the next arg to be idea text
 ideacheck serve -p 9000            # local HTTP API, same JSON contract
-ideacheck setup | history | last | show 12 | rubrics | profile | config dump
+ideacheck fields | rubrics | setup | history | last | show 12 | profile | config path
 ideacheck bench -b structured,logprob -n 3
 ```
 
-Agent mode never prompts: with nothing set up it uses the local Ollama default; if
-that model cannot be reached it exits 1 with a one-line reason and the fix (start
-Ollama, `ollama pull`, `ideacheck setup`, or `-b` / `-m`).
+## Agents and scripts
+
+`ideacheck --help-agent` prints this whole contract at any time.
+
+Two ways to call it, best first:
+
+```sh
+# Send the facts themselves — nothing has to be inferred, and one call less
+ideacheck --agent --answer problem="..." --answer audience="..." --answer why_now="..."
+
+# Send a document — one call reads the fields it already states; --answer fills the rest
+ideacheck PRODUCT.md --agent --answer why_now="agents read repos now"
+```
+
+`ideacheck fields` prints every field and what it means, with an example;
+`ideacheck fields -o json` is the same as data, each entry carrying the flag that
+sets it. That catalogue (`fields.yaml`) is also what the document reader is told
+each field means, so the two cannot drift apart.
+
+`--agent` means JSON on stdout, logs on stderr, no question is ever asked, and the
+idea is **scored even when facts are missing**: what nobody stated comes back in
+`missing[]`, `partial` is true, and the confidence is discounted by how much is
+unknown. Nothing is withheld unless you ask for that with `--strict`.
+
+Supply the facts instead of being asked, in whichever form suits the caller:
+
+| | |
+|---|---|
+| `--answer field=value` | an idea field, repeatable — enough on its own, no file needed |
+| `--answer profile.background=…` | anything about you |
+| `--profile-text "…"` | shorthand for `profile.background` |
+| `--context "…"` | supporting material that is not the pitch |
+| YAML frontmatter | `context:`, `fields:`, `profile:` at the top of the document |
+| stdin JSON | `{"idea": "...", "context": "...", "fields": {...}, "profile": {...}}` |
+
+Fields: `title problem audience solution why_now monetization competitors_known differentiation`.
+Profile: `skills domains network would_use_myself time_horizon background` — saved to
+`$XDG_CONFIG_HOME/ideacheck/profile.yaml`; `-P NAME|FILE` picks another. Set it
+without a terminal with `ideacheck profile set background="..."` (merges; an empty
+value clears a field) and read it back with `ideacheck profile show`. Without a
+profile, founder-fit questions are left unscored rather than guessed, so this one
+command is worth it.
+
+Before looking for gaps, one call reads the fields your document already states and
+fills the ones you left empty (`extracted[]` says which; `extract: false` turns it
+off). So a fact written in prose stops being asked about, and a question that has
+no basis at all — founder fit with no profile — is left unscored with its weight
+moved to the others, rather than guessed.
+
+Exit codes: **0** scored · **2** `needs_input`, nothing scored (only under
+`--strict`) · **3** the check ran but no question could be scored · **1** the command
+itself failed. With nothing set up it uses the local Ollama default; if that model
+cannot be reached it exits 1 with a one-line reason and the fix (start Ollama,
+`ollama pull`, `ideacheck setup`, or `-b` / `-m`).
 
 When stdout is not a terminal, output is JSON without being asked. The contract is
 published as [`schemas/check_result.schema.json`](schemas/check_result.schema.json)
-(generated from the Go types; a test fails if it drifts). Exit code is 0 whenever a
-result was produced — read `status` (`ok`, `needs_input`, `error`).
-
-Intake JSON: `{"idea": "...", "fields": {...}, "profile": {...}}`.
-Fields: `title problem audience solution why_now monetization competitors_known differentiation`.
-Profile: `skills domains network would_use_myself time_horizon background` — saved to
-`$XDG_CONFIG_HOME/ideacheck/profile.yaml` after first entry; `-P NAME|FILE` picks another.
+(generated from the Go types; a test fails if it drifts).
 
 ## Backends
 
@@ -163,9 +208,17 @@ in config, not in Go. Defaults are embedded in the binary; any file you place in
 `$XDG_CONFIG_HOME/ideacheck/` (or `-c DIR`) with the same relative path replaces it.
 
 ```sh
-ideacheck config dump      # write the defaults there to start editing (never overwrites your edits)
-ideacheck config path
+ideacheck config path                 # which directory is in use
+ideacheck config dump                 # print every effective file
+ideacheck config dump ./my-rubrics    # write them somewhere to start editing
+ideacheck config set backends.claude-cli.model opus
 ```
+
+`config dump DIR` never overwrites a file you have edited, and it refuses to write
+into the directory ideacheck reads unless you pass `--force`: a copy there shadows
+the built-in default from then on, upgrades included. `config set` keeps a choice
+that `-b` / `-m` would otherwise make for one run, and undoes itself if the value
+does not load.
 
 Precedence: flags > env (`IDEACHECK_BACKEND=jev`, nest with `__`:
 `IDEACHECK_BACKENDS__JEV__MODEL=…`) > your config dir > embedded defaults.
@@ -177,7 +230,7 @@ expressions may only reference real question ids. Gates see **normalized** value
 
 ## HTTP API
 
-`POST /v1/check` (body = intake JSON; `?rubric=`, `?proceed=1`, `?async=1`),
+`POST /v1/check` (body = intake JSON; `?rubric=`, `?strict=1`, `?async=1`),
 `GET /v1/checks`, `GET /v1/checks/{id}`, `GET /v1/checks/{id}/events` (SSE:
 `progress` events, then `result`), `GET /v1/rubrics`, `GET /v1/healthz`.
 CORS is allowed for localhost origins only. Binds to 127.0.0.1 by default.

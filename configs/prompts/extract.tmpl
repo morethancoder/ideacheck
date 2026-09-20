@@ -1,0 +1,19 @@
+{{- /* The document the extraction call reads. Only fields the user left empty
+are asked for, and only values the document states may be filled in. The field
+meanings come from fields.yaml, the same catalogue `ideacheck fields` prints. */ -}}
+DOCUMENT:
+```
+{{ .Idea }}
+```
+{{- if .Context }}
+
+CONTEXT THE AUTHOR ADDED:
+```
+{{ .Context }}
+```
+{{- end }}
+
+Fill these fields from the document, leaving any the document does not answer as "":
+{{ range .Fields }}
+- {{ .Name }}: {{ .Description }}
+{{- end }}

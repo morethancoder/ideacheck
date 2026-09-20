@@ -83,15 +83,17 @@ func TestEndToEndOutputMatchesPublishedSchema(t *testing.T) {
 	}
 	cases := []struct {
 		name, status string
+		code         int
 		args         []string
 	}{
-		{"verdict", "ok", []string{"A CLI that scores ideas", "-o", "json", "-b", "mock"}},
-		{"gaps", "needs_input", []string{"A CLI that scores ideas", "-o", "json", "-b", "mock", "-c", cfgDir}},
+		{"verdict", "ok", 0, []string{"A CLI that scores ideas", "-o", "json", "-b", "mock"}},
+		{"gaps scored anyway", "ok", 0, []string{"A CLI that scores ideas", "-o", "json", "-b", "mock", "-c", cfgDir}},
+		{"gaps under --strict", "needs_input", 2, []string{"A CLI that scores ideas", "-o", "json", "-b", "mock", "-c", cfgDir, "--strict"}},
 	}
 	for _, c := range cases {
 		r := runCLI(t, "", c.args...)
-		if r.code != 0 {
-			t.Fatalf("%s: exit %d: %s", c.name, r.code, r.stderr)
+		if r.code != c.code {
+			t.Fatalf("%s: exit %d (want %d): %s", c.name, r.code, c.code, r.stderr)
 		}
 		doc, err := jsonschema.UnmarshalJSON(strings.NewReader(r.stdout))
 		if err != nil {
@@ -233,18 +235,111 @@ func TestSavedProfileFillsOnlyWhatIntakeLeftEmpty(t *testing.T) {
 
 func TestConfigDumpNeverOverwritesEdits(t *testing.T) {
 	dir := t.TempDir()
-	if r := runCLI(t, "", "config", "dump", dir); r.code != 0 || strings.Count(r.stdout, "wrote") != 14 {
-		t.Fatalf("first dump: %+v", r)
+	first := runCLI(t, "", "config", "dump", dir)
+	wrote := strings.Count(first.stdout, "wrote")
+	if first.code != 0 || wrote == 0 {
+		t.Fatalf("first dump: %+v", first)
 	}
 	edited := filepath.Join(dir, "rubrics", "business.yaml")
 	if err := os.WriteFile(edited, []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if r := runCLI(t, "", "config", "dump", dir); strings.Count(r.stdout, "kept") != 14 {
+	if r := runCLI(t, "", "config", "dump", dir); strings.Count(r.stdout, "kept") != wrote {
 		t.Fatalf("second dump: %+v", r)
 	}
 	if b, _ := os.ReadFile(edited); string(b) != "mine" {
 		t.Error("dump overwrote an edited file")
+	}
+}
+
+// `config dump` with no directory prints. It used to write, and writing into the
+// config directory ideacheck reads leaves copies that shadow later upgrades.
+func TestConfigDumpPrintsAndRefusesTheLiveDir(t *testing.T) {
+	dir := t.TempDir()
+	printed := runCLI(t, "", "-c", dir, "config", "dump")
+	if printed.code != 0 || !strings.Contains(printed.stdout, "# ==> rubrics/_gaps.yaml <==") {
+		t.Fatalf("dump did not print the effective files: %+v", printed)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("dump wrote %d file(s) into the config dir", len(entries))
+	}
+	if r := runCLI(t, "", "-c", dir, "config", "dump", dir); r.code == 0 || !strings.Contains(r.stderr, "--force") {
+		t.Errorf("writing into the live config dir must be refused: %+v", r)
+	}
+	if r := runCLI(t, "", "-c", dir, "config", "dump", dir, "--force"); r.code != 0 || !strings.Contains(r.stdout, "wrote") {
+		t.Errorf("--force must allow it: %+v", r)
+	}
+}
+
+// An agent has no terminal to answer in, so every fact has a flag, and the
+// status is in the exit code.
+func TestAgentModeTakesFactsAsFlags(t *testing.T) {
+	r := runCLI(t, "", "A CLI that scores ideas", "-b", "mock", "--agent",
+		"--answer", "why_now=the models got cheap", "--answer", "profile.background=ten years in payroll",
+		"--context", "a working prototype exists")
+	if r.code != 0 {
+		t.Fatalf("exit %d: %s", r.code, r.stderr)
+	}
+	var got struct {
+		Status  string
+		Missing []struct{ Fills string }
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, r.stdout)
+	}
+	if got.Status != "ok" {
+		t.Errorf("status = %q", got.Status)
+	}
+	for _, m := range got.Missing {
+		if m.Fills == "why_now" || m.Fills == "profile.background" {
+			t.Errorf("%s was given on the command line but reported missing", m.Fills)
+		}
+	}
+	if r := runCLI(t, "", "x", "-b", "mock", "--agent", "--answer", "why_now"); r.code != 1 || !strings.Contains(r.stderr, "field=value") {
+		t.Errorf("a malformed --answer must fail loudly: %+v", r)
+	}
+	if r := runCLI(t, "", "x", "-b", "mock", "--agent", "--answer", "pitch=x"); r.code != 1 || !strings.Contains(r.stderr, "not an intake field") {
+		t.Errorf("an unknown field must fail loudly: %+v", r)
+	}
+}
+
+// A fact in the document's frontmatter is a fact given, the same as --answer.
+func TestFrontmatterSuppliesFacts(t *testing.T) {
+	doc := "---\ncontext: a prototype has been running for a year\nfields: {why_now: the models got cheap}\n---\nA CLI that scores ideas\n"
+	r := runCLI(t, doc, "-b", "mock", "--agent")
+	if r.code != 0 {
+		t.Fatalf("exit %d: %s", r.code, r.stderr)
+	}
+	var got struct {
+		Missing []struct{ Fills string }
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &got); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, r.stdout)
+	}
+	for _, m := range got.Missing {
+		if m.Fills == "why_now" {
+			t.Error("why_now was in the frontmatter but reported missing")
+		}
+	}
+	if r := runCLI(t, "---\nnope: 1\n---\nan idea\n", "-b", "mock", "--agent"); r.code != 1 || !strings.Contains(r.stderr, "frontmatter") {
+		t.Errorf("an unknown frontmatter key must fail loudly: %+v", r)
+	}
+}
+
+func TestConfigSetKeepsAChoiceAndUndoesABadOne(t *testing.T) {
+	dir := t.TempDir()
+	if r := runCLI(t, "", "-c", dir, "config", "set", "backends.mock.seed", "7"); r.code != 0 {
+		t.Fatalf("set: %+v", r)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil || !strings.Contains(string(b), "seed: 7") {
+		t.Fatalf("config.yaml = %q err=%v", b, err)
+	}
+	if r := runCLI(t, "", "-c", dir, "config", "set", "timeouts.question", "[1,2]"); r.code == 0 {
+		t.Errorf("a value that does not load must fail: %+v", r)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "config.yaml")); string(after) != string(b) {
+		t.Errorf("a failed set must leave config.yaml as it was:\n%s", after)
 	}
 }
 
@@ -343,5 +438,37 @@ func TestAgentModeWithoutSetupUsesLocalOllamaOrSaysWhatToDo(t *testing.T) {
 	msg := errb.String()
 	if code != 1 || !strings.Contains(msg, "ollama pull qwen3:8b") || !strings.Contains(msg, "llama3.2:3b") || !strings.Contains(msg, "ideacheck setup") {
 		t.Errorf("unconfigured agent mode: code=%d stderr=%q", code, msg)
+	}
+}
+
+// The profile decides whether founder-fit is scored at all, so it must be
+// settable without a terminal — the caller who needs it most has none.
+func TestProfileCanBeSetWithoutATerminal(t *testing.T) {
+	home := t.TempDir()
+	set := func(args ...string) run {
+		var out, errb bytes.Buffer
+		a := &app{stdout: &out, stderr: &errb, home: home,
+			environ: func() []string { return nil }, getenv: func(string) string { return "" }, input: osInputEnv()}
+		return run{a.run(context.Background(), args), out.String(), errb.String()}
+	}
+	if r := set("profile", "show"); r.code != 0 || !strings.Contains(r.stdout, "no profile saved") {
+		t.Fatalf("show with none saved: %+v", r)
+	}
+	if r := set("profile", "set", "background=ten years in payroll", "skills=go"); r.code != 0 ||
+		!strings.Contains(r.stdout, "ten years in payroll") || !strings.Contains(r.stdout, "go") {
+		t.Fatalf("set: %+v", r)
+	}
+	if r := set("profile", "set", "skills=go and svelte"); r.code != 0 || !strings.Contains(r.stdout, "ten years in payroll") {
+		t.Errorf("set must merge, not replace: %+v", r)
+	}
+	if r := set("profile", "set", "skills="); r.code != 0 || strings.Contains(r.stdout, "svelte") {
+		t.Errorf("an empty value must clear the field: %+v", r)
+	}
+	if r := set("profile", "set", "nope=x"); r.code == 0 || !strings.Contains(r.stderr, "not a profile field") {
+		t.Errorf("an unknown field must fail loudly: %+v", r)
+	}
+	saved, err := os.ReadFile(filepath.Join(home, ".config", "ideacheck", "profile.yaml"))
+	if err != nil || !strings.Contains(string(saved), "background: ten years in payroll") {
+		t.Errorf("profile.yaml = %q err=%v", saved, err)
 	}
 }

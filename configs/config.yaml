@@ -9,6 +9,11 @@ backend: logprob             # jev | logprob | structured | claude-cli | codex-c
 # After scoring, one more call writes a short plain-language paragraph on why the
 # idea got its verdict (result.summary). It explains; it never changes a score.
 explain: true
+# Before looking for gaps, one call reads the idea fields the document already
+# states (problem, audience, why_now...) and fills the ones you left empty. It
+# never overwrites what you gave and never invents a fact; it stops the check
+# asking for something the text already answers. Backends that cannot do it skip it.
+extract: true
 timeouts: { question: 30s, batch: 90s }
 retries: { max_attempts: 4, base_backoff: 500ms, max_backoff: 5s }
 concurrency: { default_max: 16 }

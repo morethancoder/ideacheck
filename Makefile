@@ -48,7 +48,7 @@ bench: build ## compare backends on the seed dataset
 dry: build ## exercise the bench harness with the mock backend
 	@./bin/ideacheck bench --dry-run $(ARGS)
 
-dump: build ## write the effective config files to the user config dir
+dump: build ## print the effective config files (pass ARGS=DIR to write them)
 	@./bin/ideacheck config dump $(ARGS)
 
 schema: ## regenerate schemas/check_result.schema.json from the Go types

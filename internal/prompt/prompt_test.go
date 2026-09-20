@@ -101,7 +101,8 @@ func (m mem) Read(n string) ([]byte, error) {
 
 func TestLoadRejectsBrokenOverrides(t *testing.T) {
 	base := mem{"p/judge_system.md": "sys", "p/question_logprob.tmpl": "x", "p/question_structured.tmpl": `{{define "state"}}s{{end}}{{define "questions"}}q{{end}}`,
-		"p/explain_system.md": "exp", "p/explain.tmpl": "e"}
+		"p/explain_system.md": "exp", "p/explain.tmpl": "e",
+		"p/extract_system.md": "ext", "p/extract.tmpl": "x"}
 	if _, err := Load(base, "p"); err != nil {
 		t.Fatalf("valid set: %v", err)
 	}

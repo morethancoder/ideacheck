@@ -235,8 +235,8 @@ func TestEmbeddedShipsUnderscoreFilesAndAllSkipsGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 1+7+6 {
-		t.Errorf("All() = %d files %v, want 14", len(all), all)
+	if want := 2 + 7 + 8; len(all) != want { // config.yaml + fields.yaml, 7 rubrics, 8 prompts
+		t.Errorf("All() = %d files %v, want %d", len(all), all, want)
 	}
 	for _, p := range all {
 		if strings.HasSuffix(p, ".go") {

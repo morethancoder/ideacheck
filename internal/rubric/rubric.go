@@ -30,12 +30,15 @@ type Reader interface {
 }
 
 type Rubric struct {
-	Name        string           `yaml:"name" json:"name"`
-	Description string           `yaml:"description" json:"description,omitempty"`
-	Threshold   float64          `yaml:"threshold" json:"threshold,omitempty"` // _gaps only
-	Questions   []judge.Question `yaml:"questions" json:"questions"`
-	Verdict     Verdict          `yaml:"verdict" json:"verdict"`
-	Hash        string           `yaml:"-" json:"hash"`
+	Name        string  `yaml:"name" json:"name"`
+	Description string  `yaml:"description" json:"description,omitempty"`
+	Threshold   float64 `yaml:"threshold" json:"threshold,omitempty"` // _gaps only
+	// ConfidencePenalty is _gaps only: how hard unstated facts discount a
+	// result's confidence. 0 = no discount, 1 = every gap open leaves none.
+	ConfidencePenalty float64          `yaml:"confidence_penalty" json:"confidence_penalty,omitempty"`
+	Questions         []judge.Question `yaml:"questions" json:"questions"`
+	Verdict           Verdict          `yaml:"verdict" json:"verdict"`
+	Hash              string           `yaml:"-" json:"hash"`
 }
 
 type Verdict struct {

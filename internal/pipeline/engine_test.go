@@ -12,6 +12,7 @@ import (
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/internal/judge"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/mock"
+	"github.com/morethancoder/ideacheck/internal/rubric"
 )
 
 type memFiles map[string]string
@@ -111,8 +112,9 @@ func TestGapsStopTheCheckUnlessProceed(t *testing.T) {
 	}
 }
 
-// A gap on a field the user already filled or was offered is reported, but
-// never stops the check to ask again.
+// A fact the intake already carries is not missing, however the prose reads; a
+// field the user was offered and left blank is reported but never stops the
+// check to ask again.
 func TestGapsOnAnsweredFieldsDoNotStopTheCheck(t *testing.T) {
 	dir := t.TempDir()
 	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.2})
@@ -121,8 +123,8 @@ func TestGapsOnAnsweredFieldsDoNotStopTheCheck(t *testing.T) {
 	filled := idea.With("why_now", "a vague reason")
 
 	res, _ := e.Check(context.Background(), filled, Options{Answered: []string{"differentiation"}})
-	if res.Status != StatusOK || len(res.Missing) != 2 {
-		t.Errorf("status=%q missing=%+v, want ok with both gaps still reported", res.Status, res.Missing)
+	if res.Status != StatusOK || len(res.Missing) != 1 || res.Missing[0].Fills != "differentiation" {
+		t.Errorf("status=%q missing=%+v, want ok reporting only differentiation", res.Status, res.Missing)
 	}
 	res, _ = e.Check(context.Background(), filled, Options{})
 	if ask := Unanswered(res.Missing, filled, nil); res.Status != StatusNeedsInput || len(ask) != 1 || ask[0].Fills != "differentiation" {
@@ -260,8 +262,10 @@ func TestEventsCarryQuestionStageAndValue(t *testing.T) {
 			acuity = &e
 		}
 	}
-	if stages[StagePreflight] != 8 || stages[StageScore] != 15 {
-		t.Errorf("answered per stage = %v, want preflight 8, score 15", stages)
+	// 14 of the business rubric's 15: founder_market_fit requires a profile,
+	// and this idea has none, so it is never asked.
+	if stages[StagePreflight] != 8 || stages[StageScore] != 14 {
+		t.Errorf("answered per stage = %v, want preflight 8, score 14", stages)
 	}
 	if acuity == nil || acuity.Value == nil || !near(*acuity.Value, 0.5) || acuity.Question.Weight != 2 {
 		t.Errorf("problem_acuity event = %+v", acuity)
@@ -312,5 +316,135 @@ func TestFindingsPutTheBiggestPullFirstInPlainWords(t *testing.T) {
 	}
 	if got[1].Reading != "high" || got[1].Effect != "strength" || got[2].Effect != "context" {
 		t.Errorf("rest = %+v", got[1:])
+	}
+}
+
+// A question that requires state the check does not have is left unscored, not
+// guessed: its weight goes to the questions that could be answered.
+func TestQuestionsRequiringAProfileAreNotGuessed(t *testing.T) {
+	e := engine(t, &mock.Judge{Seed: 1})
+	res, err := e.Check(context.Background(), idea, Options{Rubric: "business", Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := dimension(res, "founder_market_fit")
+	if !ok || d.Value != nil || !containsSub(d.Error, "no profile") {
+		t.Fatalf("without a profile: dimension = %+v", d)
+	}
+	if res.Verdict == "" || res.Composite == 0 {
+		t.Errorf("one unscored dimension must not stop the verdict: %+v", res)
+	}
+	withProfile := idea.With("profile.background", "ten years in payroll software")
+	res, err = e.Check(context.Background(), withProfile, Options{Rubric: "business", Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := dimension(res, "founder_market_fit"); !ok || d.Value == nil || d.Error != "" {
+		t.Errorf("with a profile: dimension = %+v", d)
+	}
+}
+
+// Scoring around gaps is allowed, but the result says so and the confidence is
+// discounted by the share of facts nobody stated.
+func TestPartialResultDiscountsConfidence(t *testing.T) {
+	dir := t.TempDir()
+	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.2})
+	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
+
+	full, err := e.Check(context.Background(), idea.With("why_now", "the models got cheap"), Options{Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.Partial || len(full.Missing) != 0 || !near(full.CompositeConfidence, weightedConfidence(full)) {
+		t.Fatalf("nothing missing: partial=%v missing=%+v confidence=%v", full.Partial, full.Missing, full.CompositeConfidence)
+	}
+	part, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every gap the run reports is open here, and _gaps.yaml asks for the
+	// confidence to be halved when all of them are.
+	gaps, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.GapsName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(part.Missing) == 0 {
+		t.Fatal("expected at least the why_now gap")
+	}
+	want := weightedConfidence(part) * (1 - gaps.ConfidencePenalty*float64(len(part.Missing))/float64(len(gaps.Questions)))
+	if !part.Partial || part.Status != StatusOK || !near(part.CompositeConfidence, want) {
+		t.Errorf("partial=%v status=%q confidence=%v, want %v", part.Partial, part.Status, part.CompositeConfidence, want)
+	}
+}
+
+// weightedConfidence is the undiscounted composite confidence, read back off
+// the dimensions the way Combine computes it.
+func weightedConfidence(res *Result) float64 {
+	var sum, weights float64
+	for _, d := range res.Dimensions {
+		if d.Value == nil || d.Weight <= 0 || d.Polarity == 0 {
+			continue
+		}
+		sum, weights = sum+d.Confidence*d.Weight, weights+d.Weight
+	}
+	return sum / weights
+}
+
+func dimension(res *Result, id string) (Dimension, bool) {
+	for _, d := range res.Dimensions {
+		if d.ID == id {
+			return d, true
+		}
+	}
+	return Dimension{}, false
+}
+
+// extractingJudge answers like the mock, and also reads two fields out of any
+// document — the stand-in for a backend that can fill in what the prose states.
+type extractingJudge struct {
+	*mock.Judge
+	values map[string]string
+	asked  [][]string
+}
+
+func (j *extractingJudge) Extract(_ context.Context, _, _ string, fields []string) (judge.Extraction, error) {
+	j.asked = append(j.asked, fields)
+	return judge.Extraction{Values: j.values, Model: "mock"}, nil
+}
+
+// A fact the description states is read out of it once, up front, so it is not
+// reported missing and does not depend on how a gap question reads that run.
+func TestExtractFillsOnlyEmptyFields(t *testing.T) {
+	dir := t.TempDir()
+	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.1})
+	j := &extractingJudge{Judge: &mock.Judge{Seed: 1, FixturesDir: dir},
+		values: map[string]string{"why_now": "the models got cheap", "problem": "  ", "audience": "solo founders"}}
+	e := engine(t, j)
+	e.Config.Extract = true
+
+	in := idea.With("problem", "nobody can tell a good idea from a bad one")
+	res, err := e.Check(context.Background(), in, Options{Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j.asked) != 1 || containsSub(strings.Join(j.asked[0], ","), "problem") {
+		t.Fatalf("extraction asked for %v: a field the user filled is not asked for", j.asked)
+	}
+	if len(res.Extracted) != 2 || res.Extracted[0] != "audience" || res.Extracted[1] != "why_now" {
+		t.Errorf("extracted = %v, want the two fields the document answered", res.Extracted)
+	}
+	for _, m := range res.Missing {
+		if m.Fills == "why_now" {
+			t.Error("why_now was read out of the document but reported missing")
+		}
+	}
+
+	e.Config.Extract = false
+	res, err = e.Check(context.Background(), in, Options{Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(j.asked) != 1 || len(res.Extracted) != 0 {
+		t.Errorf("extract: false must not call the backend: asked=%v extracted=%v", j.asked, res.Extracted)
 	}
 }
