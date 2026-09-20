@@ -53,7 +53,7 @@ ok "pushed v$version"
 step "Building the release"
 say "  GitHub Actions is building it now:"
 gh run list --workflow=release.yml --limit 1 || true
-if confirm "watch the build?"; then
+if [ -t 0 ] && confirm "watch the build?"; then
   sleep 5 # give the push event time to create the run
   gh run watch --exit-status || { err "the release build failed; see: gh run view --log-failed"; exit 1; }
 fi
