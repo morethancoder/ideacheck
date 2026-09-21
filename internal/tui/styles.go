@@ -4,6 +4,7 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -28,8 +29,10 @@ var (
 	// open tab, the menu line under the cursor. It is the accent in reverse
 	// video — cyan fill, text in the terminal's own background color — never
 	// palette black on cyan: many themes set black near their cyan, and a
-	// terminal that draws bold as bright turns it into grey.
-	pill  = lipgloss.NewStyle().Bold(true).Reverse(true).Foreground(lipgloss.Color("6")).Padding(0, 1)
+	// terminal that draws bold as bright turns it into grey. Not bold either:
+	// the padding is drawn without it, and the same terminal then fills the bar
+	// in two shades of cyan, brighter under the text than beside it.
+	pill  = lipgloss.NewStyle().Reverse(true).Foreground(lipgloss.Color("6")).Padding(0, 1)
 	panel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")).Padding(0, 1)
 	// callout is a note or an error set off by a colored bar on its left.
 	callout = lipgloss.NewStyle().Border(lipgloss.ThickBorder(), false, false, false, true).PaddingLeft(1)
@@ -63,9 +66,11 @@ func formTheme() *huh.Theme {
 	f.TextInput.Prompt = f.TextInput.Prompt.Foreground(lipgloss.Color("6"))
 	f.TextInput.Placeholder = f.TextInput.Placeholder.Faint(true)
 	f.TextInput.Text = f.TextInput.Text.Bold(true)
-	f.FocusedButton = f.FocusedButton.Bold(true).Reverse(true).Foreground(lipgloss.Color("6")).UnsetBackground()
+	// Buttons are the pill and its quiet neighbour. The base theme fills the
+	// other button with palette black, a dark box on any theme that is not black.
+	f.FocusedButton = f.FocusedButton.Reverse(true).Foreground(lipgloss.Color("6")).UnsetBackground()
 	f.Next = f.FocusedButton
-	f.BlurredButton = f.BlurredButton.Faint(true)
+	f.BlurredButton = f.BlurredButton.Faint(true).UnsetForeground().UnsetBackground()
 
 	t.Blurred = t.Focused
 	t.Blurred.Base = t.Focused.Base.BorderStyle(lipgloss.HiddenBorder())
@@ -76,6 +81,13 @@ func formTheme() *huh.Theme {
 	t.Group.Title = t.Focused.Title
 	t.Group.Description = t.Focused.Description
 	return t
+}
+
+// tableStyles dresses the history table like the menu: quiet column titles and
+// the row under the cursor as the same bar. The default is Charm's pink.
+func tableStyles() table.Styles {
+	cell := lipgloss.NewStyle().Padding(0, 1)
+	return table.Styles{Header: cell.Faint(true), Cell: cell, Selected: lipgloss.NewStyle().Reverse(true).Foreground(lipgloss.Color("6"))}
 }
 
 // help renders key bindings as "key what": the key in the accent, what it

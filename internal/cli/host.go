@@ -155,12 +155,13 @@ func (h *host) SaveRoles(judge, writer config.Provider) error {
 	return config.SaveRoles(h.app.files().Dir, judge, writer)
 }
 
-func (h *host) Writer() string {
+func (h *host) Writer() (string, string, string) {
 	cfg, err := h.config()
 	if err != nil || !cfg.Split() || h.app.needsSetup(h.flags) {
-		return ""
+		return "", "", ""
 	}
-	return joined(cfg.Writer, cfg.Backends[cfg.Writer].Model)
+	w := cfg.Backends[cfg.Writer]
+	return cfg.Writer, w.Model, w.Effort
 }
 
 // Engine is only handed out once the model can be reached; a *tui.NotReady

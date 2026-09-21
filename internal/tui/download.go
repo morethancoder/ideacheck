@@ -35,8 +35,9 @@ type download struct {
 	cancel       context.CancelFunc
 }
 
-// openDownload fetches a model, then carries on with setup; a failure goes back
-// to the wizard, because a model that is not here cannot be saved as the choice.
+// openDownload fetches a model, then carries on with setup (which may have
+// another to fetch); a failure goes back to the wizard, because a model that is
+// not here cannot be saved as the choice.
 func (a *App) openDownload(p config.Provider, model string) tea.Cmd {
 	return a.await("Downloading "+model, "once; it stays on this machine and runs free",
 		func(ctx context.Context, progress func(Progress)) error {
@@ -44,7 +45,8 @@ func (a *App) openDownload(p config.Provider, model string) tea.Cmd {
 		},
 		func(err error, stopped bool) tea.Cmd {
 			if err == nil {
-				return a.afterModel()
+				a.setup.fetched[model] = true
+				return a.finishSetup()
 			}
 			note := fmt.Sprintf("Could not download %s: %v", model, err)
 			if stopped {

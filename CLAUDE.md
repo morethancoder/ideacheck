@@ -186,6 +186,15 @@ same tool:
   own cyan as its accent (`accent`, `heading`, `pill` in `styles.go`): where you
   are, what has focus, which key does what. Scores are colored by good news
   (`scoreStyle`: polarity-aware green/yellow/red), never by raw height.
+- **One highlight.** "Here" is always the same cyan bar: `pill` for the app's
+  name, the open tab and the menu line, `tableStyles` for the history row,
+  `formTheme` for a form's focused button. A bubbles or huh default (pink row,
+  black button) is a second program showing through. The bar is never bold:
+  lipgloss draws padding without it, and a bold-as-bright terminal then fills
+  one bar in two shades.
+- **One model line.** Who judges, who writes (`modelLine`, `who` in `app.go`)
+  sits under every page's title in one format; in Settings the same line shows
+  the choices being made (`rolesLine`) instead of a second panel.
 
 ## Flags
 
@@ -219,6 +228,10 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list
   of findings), so offline runs and old tests are unchanged; `bench` never researches.
+- Setup picks every model the same way: `modelSteps` (list, typed id, effort)
+  runs once for the provider chosen first and once for the writer beside a judge
+  that cannot write. Each provider keeps its own `pick`, so no step may assume
+  "the" model.
 - Setup's last step (`Research`, `internal/tui/pages.go`) offers `search up` through
   `Host.Search` / `Host.StartSearch`. A wizard default belongs in the step's
   `build`, never in the draft's constructor: a skipped step must not answer yes

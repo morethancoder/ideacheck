@@ -37,9 +37,10 @@ type Host interface {
 	StartSearch(ctx context.Context, progress func(Progress)) error
 	SaveSetup(p config.Provider, model, effort, key string) error
 	// SaveRoles records who judges and who writes; a zero writer means the judge
-	// does both. Writer names the current writer, "" when there is none.
+	// does both. Writer is the current writer, as Current is the judge: all ""
+	// when the judge writes too.
 	SaveRoles(judge, writer config.Provider) error
-	Writer() string
+	Writer() (backend, model, effort string)
 	Engine() (*pipeline.Engine, error)
 	Profile() map[string]string
 	SaveProfile(map[string]string) error
@@ -298,13 +299,8 @@ func (a *App) wizardDone() tea.Cmd {
 }
 
 func (a *App) View() string {
-	backend, model, effort := a.host.Current()
-	if effort != "" {
-		effort = "effort " + effort
-	}
 	title := map[page]string{pageMenu: "Home", pageSetup: "Settings", pageDownload: "Downloading", pageIdea: "New check", pageLive: "Checking", pageAsk: "A few questions", pageResult: "Result", pageHistory: "History", pageProfile: "Profile"}[a.page]
-	writer := a.host.Writer()
-	header := pill.Render("ideacheck") + accent.Render("  ›  ") + bold.Render(title) + "\n" + modelLine(backend, model, effort, writer) + "\n"
+	header := pill.Render("ideacheck") + accent.Render("  ›  ") + bold.Render(title) + "\n" + a.modelLine() + "\n"
 	body, keys := a.body()
 	if a.note != "" {
 		body = callout.BorderForeground(lipgloss.Color("3")).Render(warnSty.Width(max(a.width-9, 20)).Render(a.note)) + "\n\n" + body
@@ -315,25 +311,47 @@ func (a *App) View() string {
 	return lipgloss.NewStyle().Padding(1, 2).Render(header + "\n" + body + "\n\n" + help(max(a.width-4, 20), keys...))
 }
 
-// modelLine is who does what: the judge (and the writer, when another model
-// writes), the backend in the accent and the model in bold, so the one thing
-// that decides cost and quality stands out of the line.
-func modelLine(backend, model, effort, writer string) string {
+// modelLine is who does what, under the title of every page: the saved
+// choices, or in Settings the ones being made.
+func (a *App) modelLine() string {
+	if a.page == pageSetup && a.setup != nil {
+		return a.rolesLine(a.setup)
+	}
+	backend, model, effort := a.host.Current()
 	if model == "" && backend == "not set up" {
 		return warnSty.Render(backend)
 	}
+	writer := ""
+	if b, m, e := a.host.Writer(); b != "" {
+		writer = who(b, m, e)
+	}
+	return modelLine(formWidth(a.width), who(backend, model, effort), writer, "")
+}
+
+// modelLine names the judge, the writer when another model writes, and what
+// research searches with when that is worth saying, each written by who.
+func modelLine(width int, judge, writer, search string) string {
+	parts := []string{dim.Render("judge + writer ") + judge}
+	if writer != "" {
+		parts = []string{dim.Render("judge ") + judge, dim.Render("writer ") + writer}
+	}
+	if search != "" {
+		parts = append(parts, dim.Render("search ")+search)
+	}
+	return flow(width, "   ", parts)
+}
+
+// who is one model wherever it is named: the backend in the accent and the
+// model in bold, so the one thing that decides cost and quality stands out.
+func who(backend, model, effort string) string {
 	parts := []string{accent.Render(backend)}
 	if model != "" {
 		parts = append(parts, bold.Render(model))
 	}
 	if effort != "" {
-		parts = append(parts, dim.Render(effort))
+		parts = append(parts, dim.Render("effort "+effort))
 	}
-	line := strings.Join(parts, dim.Render(" · "))
-	if writer == "" {
-		return dim.Render("judge + writer ") + line
-	}
-	return dim.Render("judge ") + line + dim.Render("   writer ") + accent.Render(writer)
+	return strings.Join(parts, dim.Render(" · "))
 }
 
 // body is the page and its key bindings, as key/what pairs for help.

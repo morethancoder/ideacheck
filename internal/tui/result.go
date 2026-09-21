@@ -230,7 +230,7 @@ func contributions(title string, color lipgloss.Style, mark string, cs []pipelin
 		bar := Bar(c.Value)
 		filled := strings.TrimRight(bar, "░")
 		fmt.Fprintf(&b, "  %s %-28s %s %s  %s\n", color.Render(mark), c.ID, color.Render(filled)+dim.Render(bar[len(filled):]),
-			bold.Render(fmt.Sprintf("%.2f", c.Value)), dim.Render(fmt.Sprintf("weight %.1f", c.Weight)))
+			color.Bold(true).Render(fmt.Sprintf("%.2f", c.Value)), dim.Render(fmt.Sprintf("weight %.1f", c.Weight)))
 	}
 	return b.String()
 }

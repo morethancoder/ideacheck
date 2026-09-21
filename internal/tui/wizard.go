@@ -29,9 +29,9 @@ type wizard struct {
 	at            int
 	form          *huh.Form
 	width, height int
-	// aside, when set, is drawn under the step line on every step: settings
-	// uses it to keep who does what (judge, writer, search) in view.
-	aside func() string
+	// over, when set, is how many lines the app draws around this wizard beyond
+	// chromeHeight: settings' model line wraps in a narrow window.
+	over func() int
 }
 
 type wizardState int
@@ -102,7 +102,7 @@ func (w *wizard) update(msg tea.Msg) (wizardState, tea.Cmd) {
 // it laid out on its last update, so without one the text keeps the old
 // width — a description on one long line, cut off at the window's edge.
 func (w *wizard) fit(form *huh.Form) *huh.Form {
-	room := max(w.height-chromeHeight-w.asideHeight(), 6)
+	room := max(w.height-chromeHeight-w.overHeight(), 6)
 	form = form.WithWidth(formWidth(w.width)).WithHeight(room)
 	form.Update(relayout{})
 	if h := lipgloss.Height(strings.TrimRight(form.View(), " \n")); h < room {
@@ -119,11 +119,11 @@ type relayout struct{}
 // less the app's padding, never wider than reads comfortably.
 func formWidth(window int) int { return min(max(window-4, 20), 90) }
 
-func (w *wizard) asideHeight() int {
-	if w.aside == nil {
+func (w *wizard) overHeight() int {
+	if w.over == nil {
 		return 0
 	}
-	return lipgloss.Height(w.aside()) + 1
+	return w.over()
 }
 
 // position is "2 of 4" counting only the steps that are shown.
@@ -156,8 +156,5 @@ func (w *wizard) view() string {
 		}
 	}
 	head := heading.Render(fmt.Sprintf("Step %d of %d", at, total)) + dim.Render(" · ") + bold.Render(w.steps[w.at].title) + "  " + strings.Join(marks, " ")
-	if w.aside != nil {
-		head += "\n\n" + w.aside()
-	}
 	return head + "\n\n" + w.form.View()
 }
