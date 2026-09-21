@@ -56,6 +56,14 @@ func renderPlain(w io.Writer, res *pipeline.Result) error {
 	}
 	plainList(&b, "Strengths", res.TopStrengths)
 	plainList(&b, "Risks", res.TopRisks)
+	if r := res.Research; r != nil {
+		fmt.Fprintf(&b, "Found on the web (by %s):\n", r.By)
+		for _, f := range r.Findings {
+			if f.Used {
+				fmt.Fprintf(&b, "  %-15s %s  %s\n", f.Topic, f.Title, f.URL)
+			}
+		}
+	}
 	for _, warn := range res.Warnings {
 		fmt.Fprintf(&b, "warning: %s\n", warn)
 	}

@@ -21,7 +21,7 @@ var summaryQuestion = judge.Question{ID: "summary", Instructions: "Plain-languag
 // check: without a summary the scores still stand, so a failure is a warning.
 // It returns the call's usage as an answer so the cost includes it.
 func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb *rubric.Rubric, answers []judge.Answer, o Options) *judge.Answer {
-	narrator, ok := e.Judge.(judge.Narrator)
+	narrator, ok := e.writer().(judge.Narrator)
 	if !ok || !e.Config.Explain || res.Status != StatusOK {
 		return nil
 	}

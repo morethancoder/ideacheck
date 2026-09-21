@@ -18,6 +18,10 @@ import (
 const (
 	GapsName   = "_gaps"
 	RouterName = "_router"
+	// EvidenceName is the question the judge answers about each research
+	// finding: how it relates to the idea. Optional — without the file, every
+	// finding is kept as the researcher reported it.
+	EvidenceName = "_evidence"
 	// Fallback is the rubric used when the router answers "other".
 	Fallback = "business"
 	Other    = "other"
@@ -35,10 +39,15 @@ type Rubric struct {
 	Threshold   float64 `yaml:"threshold" json:"threshold,omitempty"` // _gaps only
 	// ConfidencePenalty is _gaps only: how hard unstated facts discount a
 	// result's confidence. 0 = no discount, 1 = every gap open leaves none.
-	ConfidencePenalty float64          `yaml:"confidence_penalty" json:"confidence_penalty,omitempty"`
-	Questions         []judge.Question `yaml:"questions" json:"questions"`
-	Verdict           Verdict          `yaml:"verdict" json:"verdict"`
-	Hash              string           `yaml:"-" json:"hash"`
+	ConfidencePenalty float64 `yaml:"confidence_penalty" json:"confidence_penalty,omitempty"`
+	// AskLimit is _gaps only: the most follow-ups a person is asked in one
+	// check, taken in file order (most important first). 0 = ask them all.
+	AskLimit int `yaml:"ask_limit" json:"ask_limit,omitempty"`
+	// Drop is _evidence only: the options that remove a finding from the evidence.
+	Drop      []string         `yaml:"drop" json:"drop,omitempty"`
+	Questions []judge.Question `yaml:"questions" json:"questions"`
+	Verdict   Verdict          `yaml:"verdict" json:"verdict"`
+	Hash      string           `yaml:"-" json:"hash"`
 }
 
 type Verdict struct {
@@ -120,6 +129,8 @@ func (rb *Rubric) validateFor(name string) error {
 		return rb.validateGaps()
 	case RouterName:
 		return rb.validateRouter()
+	case EvidenceName:
+		return rb.validateEvidence()
 	}
 	return rb.validateScoring()
 }

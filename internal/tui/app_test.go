@@ -24,6 +24,8 @@ type fakeHost struct {
 	t         *testing.T
 	fixtures  string
 	saved     []string
+	roles     string // "judge+writer" provider ids, as SaveRoles got them
+	keys      map[string]bool
 	providers []config.Provider
 	persists  []*pipeline.Result
 	profile   map[string]string
@@ -64,13 +66,18 @@ func (h *fakeHost) Download(ctx context.Context, _ config.Provider, model string
 	progress(Progress{Status: "success", Done: 2e9, Total: 2e9})
 	return ctx.Err()
 }
-func (h *fakeHost) HasKey(string) bool { return false }
-func (h *fakeHost) HasCLI(string) bool { return true }
+func (h *fakeHost) HasKey(env string) bool { return h.keys[env] }
+func (h *fakeHost) HasCLI(string) bool     { return true }
 func (h *fakeHost) SaveSetup(p config.Provider, model, effort, key string) error {
 	h.saved = append(h.saved, p.ID+"/"+model+"/"+effort+"/"+key)
 	h.notReady = ""
 	return nil
 }
+func (h *fakeHost) SaveRoles(judge, writer config.Provider) error {
+	h.roles = judge.ID + "+" + writer.ID
+	return nil
+}
+func (h *fakeHost) Writer() string { return "" }
 func (h *fakeHost) Engine() (*pipeline.Engine, error) {
 	if h.notReady != "" {
 		return nil, &NotReady{Reason: h.notReady}
@@ -144,13 +151,13 @@ func TestCheckFlowAsksOnceThenShowsAndSavesTheResult(t *testing.T) {
 	if a.intake.Fields["why_now"] != "Tip-credit rules changed this year" || len(h.persists) != 1 {
 		t.Errorf("reply not stored or result not saved once: %+v persists=%d", a.intake.Fields, len(h.persists))
 	}
-	for tab, want := range []string{"Top strengths", "problem_acuity", "", "mock values"} {
+	for tab, want := range []string{"Top strengths", "problem_acuity", "nothing was looked up", "", "mock values"} {
 		a.tab = tab
 		if view := a.View(); want != "" && !strings.Contains(view, want) {
 			t.Errorf("tab %d (%s) missing %q", tab, resultTabs[tab], want)
 		}
 	}
-	if a.tab = 2; strings.Contains(a.View(), "What changed recently") {
+	if a.tab = 3; strings.Contains(a.View(), "What changed recently") {
 		t.Error("a gap the user has just answered must not be reported as missing")
 	}
 	a.tab = len(resultTabs) - 1
@@ -170,7 +177,7 @@ func TestDetailStepsAreNotAskedAgain(t *testing.T) {
 	h := &fakeHost{t: t, fixtures: dir}
 	a := newApp(h, Start{Page: pageIdea, Options: pipeline.Options{Rubric: "business"}})
 	a.Init()
-	a.draft.idea = "A payroll tool"
+	a.draft.idea, a.draft.details = "A payroll tool", true // "Yes, step by step": one box is the default
 	*a.draft.fields["why_now"] = "vague"
 	pump(t, a, a.wizardDone(), pageIdea)
 	pump(t, a, a.live.Init(), pageLive)
@@ -403,5 +410,40 @@ func TestABlankModelIDIsNotSaved(t *testing.T) {
 	}
 	if errs := submit("qwen3:8b"); len(errs) != 0 {
 		t.Errorf("a typed id is accepted: %v", errs)
+	}
+}
+
+// Jev only classifies, so choosing it asks who writes; choosing a chat model
+// while holding a TypeSafe key offers Jev as the judge beside it. Either way
+// the saved roles say who judges and who writes.
+func TestSetupPairsAClassifierWithAWriter(t *testing.T) {
+	providers := []config.Provider{
+		{ID: "claude-cli", Label: "Claude CLI", Backend: "claude-cli", NeedsCLI: "claude", Model: "sonnet"},
+		{ID: "jev", Label: "Jev", Backend: "jev", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true, Model: "jev-1"},
+		{ID: "openai", Label: "OpenAI", Backend: "structured", KeyEnv: "OPENAI_API_KEY", Model: "gpt"},
+	}
+	h := &fakeHost{t: t, providers: providers, keys: map[string]bool{"TYPESAFE_API_KEY": true}}
+	a := newApp(h, Start{Page: pageSetup, ExitAfter: true})
+	a.Init()
+
+	a.setup.id = "jev"
+	if opts := a.writers(a.setup); len(opts) != 2 || opts[0].Value != "claude-cli" || opts[1].Value != noWriter {
+		t.Fatalf("writers = %+v, want the ready chat provider then nobody (OpenAI has no key)", opts)
+	}
+	a.setup.writer = "claude-cli"
+	a.saveSetup()
+	if h.roles != "jev+claude-cli" {
+		t.Errorf("roles = %q, want jev judging and claude-cli writing", h.roles)
+	}
+
+	a.setup.id, a.setup.jevJudges = "claude-cli", true
+	a.saveSetup()
+	if h.roles != "jev+claude-cli" {
+		t.Errorf("roles = %q, want Jev offered as the judge beside the chosen model", h.roles)
+	}
+	a.setup.jevJudges = false
+	a.saveSetup()
+	if h.roles != "claude-cli+" {
+		t.Errorf("roles = %q, want one model doing everything", h.roles)
 	}
 }

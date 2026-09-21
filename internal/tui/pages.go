@@ -26,6 +26,8 @@ type setupDraft struct {
 	id, key       string
 	model, custom string // model is the list choice; custom the typed id (otherModel, or no list)
 	effort        string
+	writer        string // provider id that writes next to a judge that cannot; noWriter = nobody
+	jevJudges     bool   // let Jev answer the typed questions next to the chosen model
 	providers     []config.Provider
 	current       [3]string // backend, model, effort in effect when setup opened
 	defaultsFor   string    // provider id the model/effort defaults were set for
@@ -34,6 +36,47 @@ type setupDraft struct {
 }
 
 func (d *setupDraft) chosen() config.Provider { return providerByID(d.providers, d.id) }
+
+// noWriter is the "scores only" choice in the writer list.
+const noWriter = "\x00none"
+
+// classifier is the provider that only classifies (Jev), if setup offers one.
+func (d *setupDraft) classifier() (config.Provider, bool) {
+	for _, p := range d.providers {
+		if p.NeedsWriter {
+			return p, true
+		}
+	}
+	return config.Provider{}, false
+}
+
+// roles is who judges and who writes, from the choices made.
+func (d *setupDraft) roles() (judge, writer config.Provider) {
+	chosen := d.chosen()
+	switch jev, ok := d.classifier(); {
+	case chosen.NeedsWriter && d.writer != noWriter:
+		return chosen, providerByID(d.providers, d.writer)
+	case !chosen.NeedsWriter && ok && d.jevJudges:
+		return jev, chosen
+	}
+	return chosen, config.Provider{}
+}
+
+// usable reports whether a provider can run right now without more setup.
+func (a *App) usable(p config.Provider) bool {
+	return (p.NeedsCLI == "" || a.host.HasCLI(p.NeedsCLI)) && (p.KeyEnv == "" || a.host.HasKey(p.KeyEnv))
+}
+
+// writers are the providers that can write next to a classifier, ready ones only.
+func (a *App) writers(d *setupDraft) []huh.Option[string] {
+	var opts []huh.Option[string]
+	for _, p := range d.providers {
+		if !p.NeedsWriter && a.usable(p) {
+			opts = append(opts, huh.NewOption(p.Label, p.ID))
+		}
+	}
+	return append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
+}
 
 // models is the list for the chosen provider, once loaded.
 func (d *setupDraft) models() []config.ModelChoice { return d.lists[d.id] }
@@ -110,7 +153,7 @@ func (a *App) loadModels(d *setupDraft) {
 }
 
 func (a *App) openSetup() tea.Cmd {
-	d := &setupDraft{providers: a.host.Providers(), lists: map[string][]config.ModelChoice{}}
+	d := &setupDraft{providers: a.host.Providers(), lists: map[string][]config.ModelChoice{}, jevJudges: true}
 	backend, model, effort := a.host.Current()
 	d.current = [3]string{backend, model, effort}
 	var options []huh.Option[string]
@@ -194,6 +237,26 @@ func (a *App) openSetup() tea.Cmd {
 				Description("Higher effort spends more tokens (and time) per question.").Options(opts...).Value(&d.effort)))
 		}},
 	}
+	steps = append(steps,
+		step{title: "Writer", skip: func() bool { return !d.chosen().NeedsWriter }, build: func() *huh.Form {
+			opts := a.writers(d)
+			if d.writer == "" {
+				d.writer = opts[0].Value
+			}
+			return huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Who reads, researches and writes?").
+				Description(d.chosen().Label + " answers typed questions and nothing else. A second model reads your text, looks the idea up on the web and writes the summary; every score still comes from the classifier.\nOnly providers that are ready to use are listed. It runs with its usual model; set up that provider first to pick another.").
+				Options(opts...).Value(&d.writer)))
+		}},
+		step{title: "Judge", skip: func() bool {
+			jev, ok := d.classifier()
+			return d.chosen().NeedsWriter || !ok || !a.usable(jev)
+		}, build: func() *huh.Form {
+			jev, _ := d.classifier()
+			return huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Let " + jev.Label + " answer the typed questions?").
+				Description("You have a key for it. It returns calibrated probabilities for every yes/no, level and option question, while the model you just chose reads your text, researches the web and writes the summary.").
+				Affirmative("Yes, use both").Negative("No, one model does everything").Value(&d.jevJudges)))
+		}},
+	)
 	var cmd tea.Cmd
 	a.wiz, cmd = newWizard("setup", a.width, a.height, steps)
 	return cmd
@@ -256,6 +319,9 @@ func (a *App) saveSetup() tea.Cmd {
 	if err := a.host.SaveSetup(d.chosen(), d.modelID(), effort, strings.TrimSpace(d.key)); err != nil {
 		return a.fail(err)
 	}
+	if err := a.host.SaveRoles(d.roles()); err != nil {
+		return a.fail(err)
+	}
 	if a.start.NeedSetup { // first run: carry on to what the user came for
 		a.start.NeedSetup = false
 		return a.open(a.start.Page)
@@ -305,7 +371,9 @@ func (d *ideaDraft) intake(base pipeline.Intake) pipeline.Intake {
 }
 
 func (a *App) openIdea() tea.Cmd {
-	d := &ideaDraft{idea: a.intake.Idea, details: true, fields: map[string]*string{}}
+	// One box is the default: the details are read out of the text, what the web
+	// can answer is looked up, and only what is still missing gets asked.
+	d := &ideaDraft{idea: a.intake.Idea, details: false, fields: map[string]*string{}}
 	for _, name := range pipeline.IdeaFields() {
 		v := a.intake.Fields[name]
 		d.fields[name] = &v
@@ -327,15 +395,15 @@ func (a *App) openIdea() tea.Cmd {
 	steps := []step{
 		{title: "The idea", build: func() *huh.Form {
 			return huh.NewForm(huh.NewGroup(
-				huh.NewText().Title("What is the idea?").Description("A sentence or a page. Plain description beats a pitch.").Lines(5).Value(&d.idea).
+				huh.NewText().Title("What is the idea?").Description("A sentence, a page, or a pasted document. Plain description beats a pitch.\nideacheck reads the details out of it, looks up what the web can answer, and asks only what is left.").Lines(6).Value(&d.idea).
 					Validate(func(s string) error {
 						if strings.TrimSpace(s) == "" {
 							return errors.New("describe the idea")
 						}
 						return nil
 					}),
-				huh.NewConfirm().Title("Add details step by step?").Description("Recommended: labelled details are judged more reliably than prose. Every one is optional.").
-					Affirmative("Yes").Negative("Skip, just check it").Value(&d.details)))
+				huh.NewConfirm().Title("Fill in the details yourself?").Description("Optional. Useful when the text above is short and you already know the problem, audience, competitors and timing.").
+					Affirmative("Yes, step by step").Negative("No, just check it").Value(&d.details)))
 		}},
 	}
 	for _, ds := range detailSteps {
@@ -404,6 +472,7 @@ func (a *App) openLive() tea.Cmd {
 	if len(a.intake.Profile) == 0 {
 		a.intake.Profile = a.host.Profile()
 	}
+	a.engine = engine
 	ctx, cancel := context.WithCancel(a.ctx)
 	events := make(chan pipeline.Event, 64)
 	a.done, a.cancel = make(chan outcome, 1), cancel
@@ -437,7 +506,7 @@ func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 			return a.fail(got.err)
 		}
 		if got.res.Status == pipeline.StatusNeedsInput && !a.asked && !a.start.NoAsk {
-			return a.openAsk(pipeline.Unanswered(got.res.Missing, a.intake, a.answered))
+			return a.openAsk(a.engine.FollowUps(got.res, a.intake, a.answered))
 		}
 		a.host.Persist(a.intake, got.res)
 		a.result, a.tab, a.page = got.res, 0, pageResult
@@ -447,7 +516,7 @@ func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 
 // ---- Result ----------------------------------------------------------------
 
-var resultTabs = []string{"Overview", "All scores", "Gaps", "Details"}
+var resultTabs = []string{"Overview", "All scores", "Evidence", "Gaps", "Details"}
 
 func (a *App) updateResult(msg tea.Msg) tea.Cmd {
 	key, ok := msg.(tea.KeyMsg)
@@ -496,8 +565,10 @@ func (a *App) resultView() string {
 	case 1:
 		body = ScoresView(res)
 	case 2:
-		body = gapsView(res)
+		body = evidenceTab(res)
 	case 3:
+		body = gapsView(res)
+	case 4:
 		body = detailsView(res)
 	}
 	return strings.Join(tabs, "   ") + "\n\n" + body
@@ -520,6 +591,13 @@ func ScoresView(res *pipeline.Result) string {
 		}
 	}
 	return b.String() + dim.Render("\n↑ higher is better · ↓ higher is worse · · informational (weight 0)")
+}
+
+func evidenceTab(res *pipeline.Result) string {
+	if res.Research == nil {
+		return dim.Render("This check scored the description alone: nothing was looked up.\nResearch needs something to search with: a SearXNG on localhost:8080, a TAVILY_API_KEY or BRAVE_API_KEY,\nor a writer with its own web tool (Claude CLI, Codex CLI, Anthropic, OpenRouter). See `research:` in config.yaml.")
+	}
+	return EvidenceView(res.Research)
 }
 
 func gapsView(res *pipeline.Result) string {

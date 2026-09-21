@@ -1,0 +1,13 @@
+{{- /* The brief for the search-planning call. ideacheck runs the searches
+itself; the model only names them. Topics come from research.yaml. */ -}}
+IDEA:
+```json
+{{ .StateJSON }}
+```
+
+Write {{ .PerTopic }} search queries for each of these topics:
+{{ range .Topics }}
+- {{ .ID }}: {{ .LookFor }}
+{{- end }}
+
+Each query's "topic" must be one of: {{ range $i, $t := .Topics }}{{ if $i }}, {{ end }}{{ $t.ID }}{{ end }}.

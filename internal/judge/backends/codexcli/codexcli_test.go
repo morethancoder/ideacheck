@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/morethancoder/ideacheck/internal/judge/backends/structured"
 )
 
 // fake plays codex: it checks the schema file exists and writes the -o file.
@@ -90,5 +92,19 @@ func TestNoEffortMeansNoReasoning(t *testing.T) {
 	}
 	if joined := strings.Join(args, " "); !strings.Contains(joined, "-c model_reasoning_effort=none") {
 		t.Errorf("args = %v", args)
+	}
+}
+
+// --search belongs to `codex`, not to `exec`: it has to come first.
+func TestSearchTurnsOnLiveWebSearch(t *testing.T) {
+	var args []string
+	var stdin string
+	cli := &CLI{Model: "gpt-x", Run: fake(t, `{"findings":[]}`, &args, &stdin)}
+	got, err := cli.Search(context.Background(), "SYS", "BRIEF", map[string]any{"type": "object"}, structured.SearchLimits{})
+	if err != nil || got.Text != `{"findings":[]}` {
+		t.Fatalf("search = %+v, %v", got, err)
+	}
+	if args[0] != "--search" || args[1] != "exec" || !strings.Contains(strings.Join(args, " "), "-s read-only") || stdin != "SYS\n\nBRIEF" {
+		t.Errorf("args=%v stdin=%q", args, stdin)
 	}
 }

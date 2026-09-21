@@ -31,6 +31,10 @@ type Host interface {
 	HasKey(env string) bool
 	HasCLI(name string) bool
 	SaveSetup(p config.Provider, model, effort, key string) error
+	// SaveRoles records who judges and who writes; a zero writer means the judge
+	// does both. Writer names the current writer, "" when there is none.
+	SaveRoles(judge, writer config.Provider) error
+	Writer() string
 	Engine() (*pipeline.Engine, error)
 	Profile() map[string]string
 	SaveProfile(map[string]string) error
@@ -84,7 +88,7 @@ var menuItems = []struct {
 	label, hint string
 	page        page
 }{
-	{"Check an idea", "describe it step by step, then watch it being judged", pageIdea},
+	{"Check an idea", "describe it once, then watch it being researched and judged", pageIdea},
 	{"History", "browse and reopen past checks", pageHistory},
 	{"Profile", "who you are — used for founder-fit questions", pageProfile},
 	{"Settings", "choose the model provider, API key and model", pageSetup},
@@ -115,6 +119,7 @@ type App struct {
 	answered []string
 
 	live    liveModel
+	engine  *pipeline.Engine // the running check's engine; it decides what is worth asking
 	done    chan outcome
 	cancel  context.CancelFunc
 	result  *pipeline.Result
@@ -278,7 +283,11 @@ func (a *App) View() string {
 		effort = "effort " + effort
 	}
 	title := map[page]string{pageMenu: "Home", pageSetup: "Settings", pageDownload: "Downloading", pageIdea: "New check", pageLive: "Checking", pageAsk: "A few questions", pageResult: "Result", pageHistory: "History", pageProfile: "Profile"}[a.page]
-	header := bold.Render("ideacheck") + dim.Render("  ›  "+title) + "\n" + dim.Render(joinNonEmpty(" · ", backend, model, effort)) + "\n"
+	writer := a.host.Writer()
+	if writer != "" {
+		writer = "written by " + writer
+	}
+	header := bold.Render("ideacheck") + dim.Render("  ›  "+title) + "\n" + dim.Render(joinNonEmpty(" · ", backend, model, effort, writer)) + "\n"
 	body, help := a.body()
 	if a.note != "" {
 		body = warnSty.Width(max(a.width-6, 20)).Render(a.note) + "\n\n" + body

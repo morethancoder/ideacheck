@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -115,6 +116,38 @@ func seededScore(q judge.Question, f float64) judge.Answer {
 		probs[strconv.Itoa(int(lo)+1)] = pos - lo
 	}
 	return judge.Answer{Score: pos, Probabilities: probs, Confidence: 0.7}
+}
+
+// researchFixture is the file of findings a test or an offline demo supplies.
+const researchFixture = "research.json"
+
+// CanResearch is true only with a findings fixture: the mock never invents a
+// competitor, so without one a mock run is exactly what it was before research.
+func (j *Judge) CanResearch() bool {
+	if j.FixturesDir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(j.FixturesDir, researchFixture))
+	return err == nil
+}
+
+// Research returns the fixture's findings, keeping the topics asked about.
+func (j *Judge) Research(_ context.Context, _, _ string, topics []string) (judge.Research, error) {
+	b, err := os.ReadFile(filepath.Join(j.FixturesDir, researchFixture))
+	if err != nil {
+		return judge.Research{}, err
+	}
+	var all []judge.Finding
+	if err := json.Unmarshal(b, &all); err != nil {
+		return judge.Research{}, fmt.Errorf("fixture %s: %w", researchFixture, err)
+	}
+	out := judge.Research{Model: Name}
+	for _, f := range all {
+		if slices.Contains(topics, f.Topic) {
+			out.Findings = append(out.Findings, f)
+		}
+	}
+	return out, nil
 }
 
 // Narrate returns a fixed paragraph: the mock never writes real prose.

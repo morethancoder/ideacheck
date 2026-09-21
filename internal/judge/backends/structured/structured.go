@@ -3,6 +3,7 @@ package structured
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -28,6 +29,18 @@ type Completer interface {
 	Complete(ctx context.Context, system, state, user string, schema map[string]any) (Completion, error)
 }
 
+// Searcher is optionally implemented by a provider that can run the same call
+// with live web search switched on. The reply is still JSON matching schema.
+type Searcher interface {
+	Search(ctx context.Context, system, user string, schema map[string]any, limits SearchLimits) (Completion, error)
+}
+
+// SearchLimits bound one research call; zero values leave the provider's own.
+type SearchLimits struct {
+	MaxSearches int
+	MaxTokens   int
+}
+
 type Judge struct {
 	Backend       string // reported by Name(): "structured" or "claude-cli"
 	Prompts       *prompt.Set
@@ -35,6 +48,7 @@ type Judge struct {
 	Mode          string
 	VoteK         int
 	MaxConcurrent int
+	Search        SearchLimits
 }
 
 func (j *Judge) Name() string { return j.Backend }
@@ -200,6 +214,106 @@ func (j *Judge) Extract(ctx context.Context, system, user string, fields []strin
 		values[k] = strings.TrimSpace(v)
 	}
 	return judge.Extraction{Values: values, Model: done.Model, TokensIn: done.TokensIn,
+		TokensOut: done.TokensOut, TokensCached: done.TokensCached, CostUSD: done.CostUSD}, nil
+}
+
+// researchSchema asks for findings, each filed under one of the topics asked about.
+func researchSchema(topics []string) object {
+	finding := object{
+		"type": "object",
+		"properties": object{
+			"topic":   object{"type": "string", "enum": topics},
+			"title":   object{"type": "string"},
+			"summary": object{"type": "string"},
+			"url":     object{"type": "string"},
+		},
+		"required":             []string{"topic", "title", "summary", "url"},
+		"additionalProperties": false,
+	}
+	return object{"type": "object", "properties": object{"findings": object{"type": "array", "items": finding}},
+		"required": []string{"findings"}, "additionalProperties": false}
+}
+
+// planSchema asks for searches, each filed under one of the topics asked about.
+func planSchema(topics []string) object {
+	query := object{
+		"type":                 "object",
+		"properties":           object{"topic": object{"type": "string", "enum": topics}, "query": object{"type": "string"}},
+		"required":             []string{"topic", "query"},
+		"additionalProperties": false,
+	}
+	return object{"type": "object", "properties": object{"queries": object{"type": "array", "items": query}},
+		"required": []string{"queries"}, "additionalProperties": false}
+}
+
+// Plan is one plain call: which searches are worth running for this idea.
+func (j *Judge) Plan(ctx context.Context, system, user string, topics []string) (judge.Plan, error) {
+	done, err := j.LLM.Complete(ctx, system, user, "List the searches now.", planSchema(topics))
+	if err != nil {
+		return judge.Plan{}, err
+	}
+	var out struct {
+		Queries []judge.Query `json:"queries"`
+	}
+	if err := decode(done.Text, &out); err != nil {
+		return judge.Plan{}, err
+	}
+	return judge.Plan{Queries: out.Queries, Model: done.Model, TokensIn: done.TokensIn,
+		TokensOut: done.TokensOut, TokensCached: done.TokensCached, CostUSD: done.CostUSD}, nil
+}
+
+// Digest is one plain call over search results ideacheck fetched itself: the
+// same findings Research reports, without the model ever touching the web.
+func (j *Judge) Digest(ctx context.Context, system, user string, topics []string) (judge.Research, error) {
+	done, err := j.LLM.Complete(ctx, system, user, "Report the findings now.", researchSchema(topics))
+	if err != nil {
+		return judge.Research{}, err
+	}
+	return findings(done, topics)
+}
+
+// CanResearch is true when the provider can search the web. A provider that
+// serves several endpoints (Compat) says which of them can.
+func (j *Judge) CanResearch() bool {
+	_, ok := j.LLM.(Searcher)
+	if some, limited := j.LLM.(interface{ CanSearch() bool }); limited {
+		return ok && some.CanSearch()
+	}
+	return ok
+}
+
+// Research is one call with web search on. The findings are reported, not
+// judged: a finding filed under a topic nobody asked about is dropped.
+func (j *Judge) Research(ctx context.Context, system, user string, topics []string) (judge.Research, error) {
+	searcher, ok := j.LLM.(Searcher)
+	if !ok {
+		return judge.Research{}, fmt.Errorf("the %s backend cannot search the web", j.Backend)
+	}
+	done, err := searcher.Search(ctx, system, user, researchSchema(topics), j.Search)
+	if err != nil {
+		return judge.Research{}, err
+	}
+	return findings(done, topics)
+}
+
+// findings reads a findings reply, keeping what is filed under a topic asked about.
+func findings(done Completion, topics []string) (judge.Research, error) {
+	var out struct {
+		Findings []judge.Finding `json:"findings"`
+	}
+	// A search reply may wrap the object in prose: not every provider can
+	// constrain the output while its search tool is on.
+	if err := decode(firstObject(done.Text), &out); err != nil {
+		return judge.Research{}, err
+	}
+	kept := out.Findings[:0]
+	for _, f := range out.Findings {
+		f.Topic, f.Title, f.Summary, f.URL = strings.TrimSpace(f.Topic), strings.TrimSpace(f.Title), strings.TrimSpace(f.Summary), strings.TrimSpace(f.URL)
+		if f.Title != "" && slices.Contains(topics, f.Topic) {
+			kept = append(kept, f)
+		}
+	}
+	return judge.Research{Findings: kept, Model: done.Model, TokensIn: done.TokensIn,
 		TokensOut: done.TokensOut, TokensCached: done.TokensCached, CostUSD: done.CostUSD}, nil
 }
 

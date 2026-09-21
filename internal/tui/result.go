@@ -53,6 +53,9 @@ func result(res *pipeline.Result) string {
 	}
 	b.WriteString(contributions("Top strengths", good.Render("▲"), res.TopStrengths))
 	b.WriteString(contributions("Top risks", bad.Render("▼"), res.TopRisks))
+	if res.Research != nil {
+		b.WriteString("\n" + EvidenceView(res.Research))
+	}
 	for _, w := range res.Warnings {
 		b.WriteString(warnSty.Render("! "+w) + "\n")
 	}
@@ -172,6 +175,47 @@ func missingPanel(missing []pipeline.Missing) string {
 	return strings.Join(lines, "\n")
 }
 
+// EvidenceView lists what the web lookup found, each with its source: a verdict
+// that leans on a search has to show the search. A finding the judge typed as
+// unrelated is shown struck from the evidence rather than hidden.
+func EvidenceView(r *pipeline.ResearchReport) string {
+	head := bold.Render("Found on the web") + dim.Render("  by "+r.By)
+	if n := len(r.Queries); n > 0 {
+		head += dim.Render(fmt.Sprintf(" · %d searches", n))
+	}
+	if r.Cached {
+		head += dim.Render(" · reused from an earlier check of this idea")
+	}
+	if len(r.Findings) == 0 {
+		return head + "\n  " + dim.Render("The search found nothing on any topic.") + "\n"
+	}
+	var b strings.Builder
+	b.WriteString(head + "\n")
+	topic := ""
+	for _, f := range r.Findings {
+		if f.Topic != topic {
+			topic = f.Topic
+			b.WriteString("  " + dim.Render(strings.ReplaceAll(topic, "_", " ")) + "\n")
+		}
+		mark, title := good.Render("•"), f.Title
+		if !f.Used {
+			mark, title = dim.Render("×"), dim.Render(f.Title+" — left out")
+		}
+		line := fmt.Sprintf("    %s %s", mark, title)
+		if f.Relation != "" {
+			line += dim.Render("  " + f.Relation)
+		}
+		b.WriteString(line + "\n")
+		if f.Used && f.Summary != "" {
+			b.WriteString("      " + f.Summary + "\n")
+		}
+		if f.URL != "" {
+			b.WriteString("      " + dim.Render(f.URL) + "\n")
+		}
+	}
+	return b.String()
+}
+
 func contributions(title, mark string, cs []pipeline.Contribution) string {
 	if len(cs) == 0 {
 		return ""
@@ -188,6 +232,9 @@ func footer(res *pipeline.Result) string {
 	parts := []string{}
 	if res.Rubric != nil {
 		parts = append(parts, "rubric "+res.Rubric.Name)
+	}
+	if res.Writer != "" {
+		parts = append(parts, "written by "+res.Writer)
 	}
 	parts = append(parts,
 		fmt.Sprintf("%s/%s", res.Backend, res.Model),

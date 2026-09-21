@@ -2,7 +2,11 @@
 #  - one judgment per question; "yes" must be the natural positive reading;
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
-#  - `uses` lists only the state fields the question needs (idea, profile).
+#  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence` is what a web search found (research.yaml lists the topics); it is
+#    only there when the check could research. A question that merely benefits
+#    from it lists it in `uses`; one that cannot be judged without it also sets
+#    `requires: [evidence]`, and is skipped — not guessed — when nothing was searched.
 #  - `requires` (optional) names state the question cannot be judged without:
 #    when it is absent the question is not asked, and its weight moves to the rest.
 name: research
@@ -25,6 +29,18 @@ questions:
       - Prior work is mentioned without saying what is missing from it
       - A specific gap in prior work is named
       - A specific gap is named along with why earlier approaches could not close it
+  - id: still_open
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea, evidence]
+    # Whether the question is still open can only be judged against what a
+    # search for existing work turned up.
+    requires: [evidence]
+    instructions: Nothing listed in `evidence.competitors` or `evidence.prior_attempts` has already answered the question the description in `idea` poses.
+    criteria:
+      yes: No listed work is described as having answered this question, or the listed work leaves the specific gap the description names.
+      no: A listed work is described as having already answered this question.
   - id: feasibility
     kind: score
     weight: 1.5
@@ -47,8 +63,8 @@ questions:
     kind: score
     weight: 0.5
     polarity: 1
-    uses: [idea]
-    instructions: How strong is the reason this is newly possible or newly needed?
+    uses: [idea, evidence]
+    instructions: How strong is the reason this is newly possible or newly needed? When `evidence` is present, `evidence.recent_changes` lists recent changes a web search found.
     levels:
       - Nothing has changed; this could have been done years ago
       - A weak or generic trend is cited

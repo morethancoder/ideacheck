@@ -11,6 +11,16 @@ The model is only asked narrow judgments ("is this a tarpit idea?"). The loop, t
 arithmetic, the gates and the verdict are ordinary code. The model is never asked
 for a final score.
 
+Before scoring, ideacheck **looks the idea up on the web** — who already does this,
+who tried and failed, how big the market is, what changed recently — and the
+questions about the world read what it found instead of guessing from your
+description. Every finding is shown with its source.
+
+Two jobs, and they need not be the same model: a **judge** answers every typed
+question, a **writer** reads your text, researches and writes the summary. One LLM
+can do both, or a classifier built for typed judgments (Jev) can judge next to an
+LLM that writes: `ideacheck "..." -b jev -w claude-cli`.
+
 ## Install
 
 ```sh
@@ -117,11 +127,16 @@ app. The choice is saved to `config.yaml`; a typed API key goes to `credentials.
 (mode 0600) in the same directory — never into `config.yaml`. An exported environment
 variable always wins over the saved key.
 
-The app is paged: **menu → idea, step by step → live check → follow-up questions →
-result** (tabs: Overview · All scores · Gaps · Details), plus History, Profile and
-Settings pages. `esc` goes back a step; the last result stays in your scrollback on exit.
-Details you left blank in the step-by-step form count as answered ("I don't know"), so
-the follow-up page only asks about what you were never shown.
+The app is paged: **menu → the idea, in one box → live check (reading, research,
+scoring) → a few follow-up questions → result** (tabs: Overview · All scores ·
+Evidence · Gaps · Details), plus History, Profile and Settings pages. `esc` goes back
+a step; the last result stays in your scrollback on exit.
+
+You type the idea once. ideacheck reads the details out of it, looks up what the web
+can answer (you are never asked for competitors a search can find), and then asks at
+most `ask_limit` follow-ups (3, in `rubrics/_gaps.yaml`), most important first. The
+step-by-step detail form is still there if you want it; details you leave blank in
+it count as answered ("I don't know") and are not asked again.
 
 Every result opens with a short plain-language paragraph on why the idea got its
 verdict (one extra model call after scoring; it explains the scores, never changes
@@ -136,6 +151,8 @@ ideacheck "an app that ..."        # check it: live view, then the result page
 ideacheck "..." -i                 # edit the idea step by step first
 ideacheck idea.md -r side_project  # read a file, force a rubric
 ideacheck "..." -b logprob -m qwen3:8b
+ideacheck "..." -b jev -w claude-cli   # Jev judges; Claude reads, researches, writes
+ideacheck "..." --no-research          # score the description alone
 ideacheck "..." -o json | jq .verdict
 cat idea.json | ideacheck --agent         # agent mode: never asks, JSON out, logs on stderr
 ideacheck -- "serve"               # `--` forces the next arg to be idea text
@@ -208,13 +225,82 @@ published as [`schemas/check_result.schema.json`](schemas/check_result.schema.js
 | `-b` | Probabilities come from | Needs | Notes |
 |---|---|---|---|
 | `structured` | k-sample vote frequencies, or model-stated | an Anthropic, OpenAI, OpenRouter or Ollama Cloud key (`provider:` in config) | Anthropic goes through the official Go SDK (`output_config.format` JSON schema, state block prompt-cached, no temperature — current Claude models reject it). OpenAI/OpenRouter use the OpenAI-compatible API with a strict `json_schema` response format. Ollama Cloud (`provider: ollama`, `base_url: https://ollama.com/v1`) has no structured outputs, so the schema goes in the prompt and the JSON is cut out of the reply. |
-| `claude-cli` | model-stated | `claude` CLI, logged in | Human use only: spends your Claude subscription's limits (that policy may change). ~11k tokens of CLI overhead per call, so it batches by default. |
+| `claude-cli` | model-stated | `claude` CLI, logged in | Human use only: spends your Claude subscription's limits (that policy may change). Each call is a process, so it batches by default. Runs with `--strict-mcp-config --disable-slash-commands --setting-sources ""` outside any project directory: your MCP servers, skills, settings and CLAUDE.md would otherwise ride along on every call (12.2k input tokens for one yes/no question, 0.9k without them). |
 | `codex-cli` | model-stated | `codex` CLI, logged in | Human use only, same trade-offs (~12k tokens overhead per call). Runs `codex exec` read-only and ephemeral with `--output-schema`. |
 | `logprob` | token logits over answer labels | Ollama ≥ 0.12, llama.cpp, vLLM, or an OpenRouter provider that returns logprobs | Local and free. **Raw logits, not calibrated.** Runs each choice/score question `shuffle_runs` times in shuffled order and averages, to damp position bias. Ollama Cloud returns no logprobs — use `structured` with `provider: ollama` for it. |
 | `jev` | model-native, calibrated | `TYPESAFE_API_KEY` ([typesafe.ai](https://typesafe.ai)) | TypeSafe's System One model: typed noul/score/choice answers with probabilities, no sampling. Wire format checked against docs.typesafe.ai/api (2026-09-21); one request per state group. Pinned to `jev-1.13.0` (`jev-latest` moves). Offered in `ideacheck setup`. |
 | `mock` | seeded / fixtures | nothing | Tests and `bench --dry-run`. |
 
 `serve` refuses the two CLI-login backends unless you pass `--allow-cli-backend`.
+
+### Judge and writer
+
+`backend:` (`-b`) judges: every typed question — what is stated, the idea type, the
+rubric, and how each research finding relates to the idea. `writer:` (`-w`) reads,
+researches and writes: extract, research, explain. Leave `writer` empty and the
+judging backend does both. Set it to pair a classifier that cannot write with a
+model that can:
+
+```yaml
+backend: jev          # calibrated probabilities for every noul / score / choice
+writer: claude-cli    # reads your text, searches the web, writes the summary
+```
+
+`ideacheck setup` asks for this: choose Jev and it asks who writes; choose a chat
+model while a TypeSafe key is available and it offers Jev as the judge beside it.
+Without a writer, Jev still scores — there is just no extraction, research or summary.
+The result's `backend` is the judge and `writer` the writer; verdict cuts
+(`verdict.backends.<name>`) follow the judge.
+
+### Research
+
+ideacheck does the searching itself, in Go, and no model drives a loop:
+
+1. **plan** — the writer names the searches, `queries_per_topic` for each topic in
+   `research.yaml` (one small call). With no writer — Jev judging alone — the
+   topic's own `queries:` run, rendered over the idea.
+2. **search** — all of them at once against a search service; a page found twice is
+   kept once.
+3. **read** — the first `read_pages` results of each topic are fetched and boiled
+   down to their text (`internal/search`: an article extractor first, the visible
+   body minus nav/header/footer/scripts when a page is no article), `page_chars` each.
+   Only public addresses are ever fetched.
+4. **digest** — the writer turns snippets and page text into findings (one call). A
+   finding whose URL was not among the results is dropped: a source it was never
+   shown is a source it made up. With no writer, the results are the findings.
+5. **sift** — the judge types each finding (below).
+
+| `research.search` | What searches | Needs |
+|---|---|---|
+| `auto` (default) | the first of the next three that is there, else `llm` | — |
+| `searxng` | your own [SearXNG](https://docs.searxng.org) at `research.endpoints.searxng` (`http://localhost:8080`) | free, no key. `docker run -p 8080:8080 searxng/searxng`, and add `json` under `search.formats` in its `settings.yml` — JSON output is off by default, and public instances refuse it |
+| `tavily` | api.tavily.com | `TAVILY_API_KEY` (free monthly allowance) |
+| `brave` | api.search.brave.com | `BRAVE_API_KEY` |
+| `llm` | the writer's own web tool: `claude -p --tools WebSearch`, `codex --search exec`, Anthropic's `web_search` server tool, OpenRouter's `web` plugin | a writer that has one. Slow and token-hungry: an agent loop re-reads every earlier result on every turn |
+
+Because the model never touches the web in the first four, research works with a
+local Ollama model and with Jev alone. Measured on one idea through the Claude CLI
+(Haiku): the writer's own web tool spent ~146k input tokens and ~70 s on research;
+plan + digest over Go-fetched results spent ~5k tokens and a few seconds. With
+nothing to search with, the check scores the description, as before.
+
+`research.yaml` lists the topics (competitors, prior attempts, market, recent
+changes) and `prompts/research_system.md` + `prompts/research.tmpl` what the researcher is told. The findings become
+`evidence` state; a rubric question reads it by listing `evidence` in `uses:`, and
+one that cannot be judged without it sets `requires: [evidence]` and is skipped —
+not guessed — when nothing was searched (`differentiation_holds`: does the claimed
+difference survive the list of what exists?). Research never produces a score.
+
+When judge and writer differ, the judge types every finding with the one choice
+question in `rubrics/_evidence.yaml` (direct / adjacent / unrelated) and the
+unrelated ones never reach the rubric (`research.sift: auto | always | never`).
+A topic with `covers: competitors_known` settles that gap when findings come back,
+so it is neither asked nor reported as missing.
+
+The same idea reuses its findings for `research.cache_ttl` (a week): it saves the
+searches, and it keeps two checks of one idea from disagreeing because the web
+answered differently. `--no-research` or
+`research.enabled: false` turns it off; `bench` always runs without it.
 
 API keys come from the environment, or from `credentials.yaml` written by `ideacheck setup` — never from `config.yaml`.
 In a checkout, `make run/dev/serve/bench` also load a gitignored `.env` (copy `.env.example`); a blank line there leaves your shell's value alone.

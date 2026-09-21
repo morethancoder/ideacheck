@@ -38,6 +38,13 @@ type Request struct {
 	TopLogprobs         int             `json:"top_logprobs,omitempty"`
 	ResponseFormat      *ResponseFormat `json:"response_format,omitempty"`
 	ReasoningEffort     string          `json:"reasoning_effort,omitempty"` // reasoning models: low | medium | high ...
+	Plugins             []Plugin        `json:"plugins,omitempty"`          // OpenRouter only
+}
+
+// Plugin is an OpenRouter request plugin; {id: "web"} adds live search results.
+type Plugin struct {
+	ID         string `json:"id"`
+	MaxResults int    `json:"max_results,omitempty"`
 }
 
 type ResponseFormat struct {

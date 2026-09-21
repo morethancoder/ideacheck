@@ -208,6 +208,21 @@ What comes back
    "extracted":["problem","audience"],"dimensions":[...],"top_strengths":[...],"top_risks":[...],
    "warnings":[...],"rubric":{"name":"business"},"model":"...","cost":{...}}
 
+Research and the two roles
+  Before scoring, the idea is looked up on the web (existing products, earlier
+  attempts, market signals, recent changes) and the rubric reads what was found.
+  ideacheck searches itself — a SearXNG at research.endpoints.searxng, or Tavily
+  / Brave when TAVILY_API_KEY / BRAVE_API_KEY is set — reads the best pages down
+  to text, and the writer turns that into findings. With none of those, a writer
+  with its own web tool searches (claude-cli, codex-cli, structured with provider
+  anthropic or openrouter); with nothing, the description alone is scored.
+  research.queries[] are the searches run; research.findings[] lists every
+  finding with its url, how the judge typed it (relation) and whether it was
+  used. The same idea reuses its findings for a week.
+  --no-research            score the description alone
+  -b jev -w claude-cli     one backend judges every typed question, another
+                           reads, researches and writes (config: backend + writer)
+
   partial true means facts in missing[] were never stated: the scores stand and
   the confidence is discounted. Each missing entry names the field it fills, so
   the fix is --answer <fills>="...". extracted[] are fields read out of your

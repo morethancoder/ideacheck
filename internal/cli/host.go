@@ -104,6 +104,18 @@ func (h *host) SaveSetup(p config.Provider, model, effort, key string) error {
 	return config.SaveChoice(h.app.files().Dir, p, model, effort)
 }
 
+func (h *host) SaveRoles(judge, writer config.Provider) error {
+	return config.SaveRoles(h.app.files().Dir, judge, writer)
+}
+
+func (h *host) Writer() string {
+	cfg, err := h.config()
+	if err != nil || !cfg.Split() || h.app.needsSetup(h.flags) {
+		return ""
+	}
+	return joined(cfg.Writer, cfg.Backends[cfg.Writer].Model)
+}
+
 // Engine is only handed out once the model can be reached; a *tui.NotReady
 // error sends the app to Settings with the reason instead of failing every question.
 func (h *host) Engine() (*pipeline.Engine, error) {

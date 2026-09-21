@@ -57,6 +57,50 @@ func SaveChoice(dir string, p Provider, model, effort string) error {
 	return writeYAML(path, doc, 0o644)
 }
 
+// SaveRoles records who judges and who writes. judge is the provider whose
+// backend answers every typed question; writer is the one that reads, researches
+// and writes next to it, or the zero Provider when the judge does it all. The
+// role that setup did not just configure gets its provider's preset, unless
+// config.yaml already holds settings for that same provider.
+func SaveRoles(dir string, judge, writer Provider) error {
+	path := filepath.Join(dir, mainFile)
+	doc := map[string]any{}
+	b, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	backends, _ := doc["backends"].(map[string]any)
+	if backends == nil {
+		backends = map[string]any{}
+	}
+	for _, p := range []Provider{judge, writer} {
+		if p.Backend == "" {
+			continue
+		}
+		entry, _ := backends[p.Backend].(map[string]any)
+		if held, _ := entry["provider"].(string); entry != nil && held == p.Provider {
+			continue
+		}
+		entry = map[string]any{"model": p.Model}
+		for k, v := range map[string]string{"provider": p.Provider, "base_url": p.BaseURL, "billing": p.Billing} {
+			if v != "" {
+				entry[k] = v
+			}
+		}
+		backends[p.Backend] = entry
+	}
+	doc["backend"], doc["backends"] = judge.Backend, backends
+	if writer.Backend == "" || writer.Backend == judge.Backend {
+		delete(doc, "writer")
+	} else {
+		doc["writer"] = writer.Backend
+	}
+	return writeYAML(path, doc, 0o644)
+}
+
 // SetKey writes one dotted key into dir/config.yaml, keeping every other key the
 // user has there. (Comments in that file are not preserved.) The value is read
 // as YAML, so `4` is a number, `true` a boolean and `30s` a string.

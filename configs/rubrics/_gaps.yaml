@@ -2,7 +2,11 @@
 #  - one judgment per question; "yes" must be the natural positive reading;
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
-#  - `uses` lists only the state fields the question needs (idea, profile).
+#  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence` is what a web search found (research.yaml lists the topics); it is
+#    only there when the check could research. A question that merely benefits
+#    from it lists it in `uses`; one that cannot be judged without it also sets
+#    `requires: [evidence]`, and is skipped — not guessed — when nothing was searched.
 #  - `requires` (optional) names state the question cannot be judged without:
 #    when it is absent the question is not asked, and its weight moves to the rest.
 # `ask` is the follow-up shown to the user; `fills` is the intake field the reply is
@@ -12,6 +16,11 @@ threshold: 0.5
 # anyway (agent and server runs, or the TUI after it has asked once): the
 # confidence is multiplied by 1 - confidence_penalty x (open gaps / questions).
 confidence_penalty: 0.5
+# The most follow-ups a person is asked in one check, taken in the order below
+# (most important first). The rest are still reported in missing[] and still
+# discount the confidence; they are just not worth turning a one-line idea into
+# a form for. 0 = ask them all.
+ask_limit: 3
 questions:
   - id: has_problem
     kind: noul

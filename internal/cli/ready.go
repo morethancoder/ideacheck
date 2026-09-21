@@ -19,8 +19,16 @@ const readyTimeout = 3 * time.Second
 // local Ollama that is not running, or a model that was never pulled — and
 // says how to fix it in one calm sentence instead of a wall of HTTP errors.
 func ready(ctx context.Context, cfg config.Config) error {
-	b := cfg.Active()
-	local := cfg.Backend == logprob.Name || (cfg.Backend == structured.Name && b.Provider == "ollama")
+	if err := reachable(ctx, cfg, cfg.Backend); err != nil || !cfg.Split() {
+		return err
+	}
+	return reachable(ctx, cfg, cfg.Writer)
+}
+
+// reachable checks one backend: the judge, or the writer beside it.
+func reachable(ctx context.Context, cfg config.Config, backend string) error {
+	b := cfg.Backends[backend]
+	local := backend == logprob.Name || (backend == structured.Name && b.Provider == "ollama")
 	if !local || strings.Contains(b.BaseURL, "ollama.com") {
 		return nil
 	}

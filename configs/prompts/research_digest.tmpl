@@ -1,0 +1,26 @@
+{{- /* The brief for the digest call: the idea, then every result ideacheck
+fetched, grouped by the topic it was searched for. Text is the page boiled down
+by internal/search; it is absent for results that were not read. */ -}}
+IDEA:
+```json
+{{ .StateJSON }}
+```
+
+Report at most {{ .MaxFindings }} findings per topic.
+{{ range .Topics }}
+## Topic {{ .ID }}: {{ .LookFor }}
+{{ range .Hits }}
+- {{ .Title }}
+  url: {{ .URL }}
+  snippet: {{ .Snippet }}
+{{- if .Text }}
+  page:
+  """
+  {{ .Text }}
+  """
+{{- end }}
+{{ else }}
+(no results)
+{{ end }}
+{{- end }}
+Each finding's "topic" must be one of: {{ range $i, $t := .Topics }}{{ if $i }}, {{ end }}{{ $t.ID }}{{ end }}.

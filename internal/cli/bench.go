@@ -9,9 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/morethancoder/ideacheck/internal/bench"
-	"github.com/morethancoder/ideacheck/internal/judge/backends"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/mock"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
 )
 
 const benchResultsDir = "bench/results"
@@ -43,11 +41,15 @@ func (a *app) benchCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				judge, err := backends.New(cfg, backends.Deps{Files: a.files(), Secret: a.secrets().Get})
+				// The bench measures the judge on a fixed dataset: a live web
+				// search would make two runs of one idea differ for reasons that
+				// have nothing to do with the backend being compared.
+				cfg.Research.Enabled = false
+				engine, err := a.newEngine(cfg)
 				if err != nil {
 					return err
 				}
-				runner.Engines[name] = &pipeline.Engine{Config: cfg, Files: a.files(), Judge: judge}
+				runner.Engines[name] = engine
 			}
 			cfg, err := a.loadConfig(&checkFlags{backend: mock.Name})
 			if err != nil {

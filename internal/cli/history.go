@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -23,6 +24,31 @@ func (a *app) openStore() (*store.Store, error) {
 		return nil, err
 	}
 	return store.Open(store.ExpandHome(cfg.Store.Path, a.home))
+}
+
+// findingsCache keeps research findings in the history database. It opens the
+// store per call, as persist does: a check holds no database handle while a
+// model is thinking, and a store that cannot be opened only costs a search.
+type findingsCache struct {
+	path string
+}
+
+func (c findingsCache) Get(ctx context.Context, key string, maxAge time.Duration) ([]byte, bool) {
+	s, err := store.Open(c.path)
+	if err != nil {
+		return nil, false
+	}
+	defer s.Close()
+	return s.Findings(ctx, key, maxAge)
+}
+
+func (c findingsCache) Put(ctx context.Context, key string, findings []byte) error {
+	s, err := store.Open(c.path)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	return s.KeepFindings(ctx, key, findings)
 }
 
 // persist saves a finished check. History is a convenience: failing to write it

@@ -2,7 +2,11 @@
 #  - one judgment per question; "yes" must be the natural positive reading;
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
-#  - `uses` lists only the state fields the question needs (idea, profile).
+#  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence` is what a web search found (research.yaml lists the topics); it is
+#    only there when the check could research. A question that merely benefits
+#    from it lists it in `uses`; one that cannot be judged without it also sets
+#    `requires: [evidence]`, and is skipped — not guessed — when nothing was searched.
 #  - `requires` (optional) names state the question cannot be judged without:
 #    when it is absent the question is not asked, and its weight moves to the rest.
 name: creative
@@ -12,8 +16,8 @@ questions:
     kind: score
     weight: 1.5
     polarity: 1
-    uses: [idea]
-    instructions: How original is the concept as described?
+    uses: [idea, evidence]
+    instructions: How original is the concept as described? When `evidence` is present, `evidence.competitors` lists similar existing works a web search found.
     levels:
       - A direct copy of a familiar work or formula
       - A familiar formula with a minor twist

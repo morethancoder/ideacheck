@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/morethancoder/ideacheck/internal/judge/backends/structured"
@@ -23,6 +24,15 @@ type CLI struct {
 	Effort string // passed as --effort; "" = thinking off
 	Run    Runner // nil = exec `claude`
 }
+
+// lean keeps the caller's own Claude Code setup out of the call: their MCP
+// servers, skills, settings files and project instructions all ride along on
+// every `claude -p` otherwise, and a judgment needs none of them. Measured on
+// claude 2.1.278 with one yes/no question: 12.2k input tokens without these
+// flags, 0.9k with them — on every call of every check. The login survives
+// (unlike with --bare). execClaude also runs outside any project directory, so
+// no CLAUDE.md is picked up.
+var lean = []string{"--strict-mcp-config", "--disable-slash-commands", "--setting-sources", ""}
 
 // noThinking is passed as --settings. The CLI has no thinking flag; verified
 // against claude 2.1.278 that MAX_THINKING_TOKENS=0 stops it (haiku answered a
@@ -48,6 +58,24 @@ type envelope struct {
 }
 
 func (c *CLI) Complete(ctx context.Context, system, state, user string, schema map[string]any) (structured.Completion, error) {
+	// --tools "" disables every tool: this is a decision function, not an agent.
+	return c.run(ctx, system, state+"\n\n"+user, schema, "--tools", "")
+}
+
+// webTools is the only tool a research call may use. Verified against claude
+// 2.1.278: with both flags set, `claude -p` searches without asking and still
+// returns structured_output matching --json-schema. WebFetch is deliberately
+// not allowed: every fetched page rides along on every later turn, and a check
+// measured with it spent ~146k input tokens on research alone.
+const webTools = "WebSearch"
+
+// Search is Complete with the web tools on and nothing else: no shell, no files.
+// The CLI has no cap on searches, so limits are left to the prompt.
+func (c *CLI) Search(ctx context.Context, system, user string, schema map[string]any, _ structured.SearchLimits) (structured.Completion, error) {
+	return c.run(ctx, system, user, schema, "--tools", webTools, "--allowedTools", webTools)
+}
+
+func (c *CLI) run(ctx context.Context, system, stdin string, schema map[string]any, tools ...string) (structured.Completion, error) {
 	schemaJSON, err := json.Marshal(schema)
 	if err != nil {
 		return structured.Completion{}, err
@@ -56,18 +84,18 @@ func (c *CLI) Complete(ctx context.Context, system, state, user string, schema m
 	if run == nil {
 		run = execClaude
 	}
-	// --tools "" disables every tool: this is a decision function, not an agent.
 	// (--bare is NOT used: it drops the subscription login.)
 	args := []string{"-p", "--output-format", "json", "--model", c.Model,
-		"--system-prompt", system, "--json-schema", string(schemaJSON),
-		"--tools", "", "--no-session-persistence"}
+		"--system-prompt", system, "--json-schema", string(schemaJSON)}
+	args = append(args, lean...)
+	args = append(append(args, tools...), "--no-session-persistence")
 	// A narrow judgment needs no thinking: it is off unless an effort was chosen.
 	if c.Effort != "" {
 		args = append(args, "--effort", c.Effort)
 	} else {
 		args = append(args, "--settings", noThinking)
 	}
-	out, err := run(ctx, state+"\n\n"+user, args...)
+	out, err := run(ctx, stdin, args...)
 	if err != nil {
 		return structured.Completion{}, err
 	}
@@ -108,6 +136,7 @@ func (c *CLI) model(env envelope) string {
 
 func execClaude(ctx context.Context, stdin string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd.Dir = os.TempDir()
 	cmd.Stdin = bytes.NewBufferString(stdin)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

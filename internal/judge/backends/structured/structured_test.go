@@ -315,3 +315,106 @@ func TestThinkingIsOnlyDisabledWhereTheModelAllowsIt(t *testing.T) {
 		}
 	}
 }
+
+// searching is a provider that can search; its reply wraps the JSON in prose,
+// as a model does when the API cannot constrain a reply that carries citations.
+type searching struct {
+	scripted
+	reply  string
+	limits SearchLimits
+}
+
+func (s *searching) Search(_ context.Context, _, _ string, _ map[string]any, l SearchLimits) (Completion, error) {
+	s.limits = l
+	return Completion{Text: s.reply, Model: "m-1", TokensIn: 900, TokensOut: 80}, nil
+}
+
+func TestResearchKeepsOnlyFindingsForTheTopicsAsked(t *testing.T) {
+	llm := &searching{reply: "Here is what I found:\n```json\n" + `{"findings":[
+		{"topic":"competitors","title":" Weave ","summary":"Texts patients.","url":"https://w.example"},
+		{"topic":"gossip","title":"Off topic","summary":"x","url":"https://x.example"},
+		{"topic":"market","title":"","summary":"no title","url":""}]}` + "\n```"}
+	j := newJudge(t, ModeVote, 5, llm)
+	j.Search = SearchLimits{MaxSearches: 4}
+	if !j.CanResearch() || newJudge(t, ModeVote, 5, &scripted{}).CanResearch() {
+		t.Fatal("only a provider that can search can research")
+	}
+	got, err := j.Research(context.Background(), "SYS", "BRIEF", []string{"competitors", "market"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Findings) != 1 || got.Findings[0].Title != "Weave" || got.TokensIn != 900 || llm.limits.MaxSearches != 4 {
+		t.Errorf("research = %+v limits = %+v", got, llm.limits)
+	}
+	if _, err := newJudge(t, ModeVote, 5, &scripted{}).Research(context.Background(), "", "", nil); err == nil {
+		t.Error("a provider that cannot search must say so")
+	}
+}
+
+func TestAnthropicSearchWireFormat(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(bodies) == 1 { // a long search turn is paused once, then resumed
+			io.WriteString(w, `{"id":"m1","type":"message","role":"assistant","model":"claude-sonnet-5","stop_reason":"pause_turn","content":[{"type":"text","text":"searching"}],"usage":{"input_tokens":100,"output_tokens":5}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"m2","type":"message","role":"assistant","model":"claude-sonnet-5","stop_reason":"end_turn","content":[{"type":"text","text":"{\"findings\":[]}"}],"usage":{"input_tokens":200,"output_tokens":9}}`)
+	}))
+	defer srv.Close()
+
+	llm := NewAnthropic("claude-sonnet-5", 1024, "disabled", "", option.WithBaseURL(srv.URL), option.WithAPIKey("test"))
+	got, err := llm.Search(context.Background(), "SYSTEM", "BRIEF", researchSchema([]string{"competitors"}), SearchLimits{MaxSearches: 6, MaxTokens: 16000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != `{"findings":[]}` || got.TokensIn != 300 || got.TokensOut != 14 || len(bodies) != 2 {
+		t.Fatalf("completion = %+v after %d requests; usage must add up across the resumed turn", got, len(bodies))
+	}
+	first := bodies[0]
+	tool := first["tools"].([]any)[0].(map[string]any)
+	if tool["type"] != "web_search_20260209" || tool["max_uses"] != float64(6) || first["max_tokens"] != float64(16000) {
+		t.Errorf("tools=%v max_tokens=%v", first["tools"], first["max_tokens"])
+	}
+	if _, constrained := first["output_config"]; constrained {
+		t.Error("a search reply carries citations, which the API rejects together with a JSON format")
+	}
+	if _, off := first["thinking"]; off {
+		t.Error("thinking stays at the model's default for research")
+	}
+	user := first["messages"].([]any)[0].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
+	if !strings.Contains(user, "BRIEF") || !strings.Contains(user, `"findings"`) {
+		t.Errorf("the schema must be stated in the prompt: %q", user)
+	}
+	if msgs := bodies[1]["messages"].([]any); len(msgs) != 2 || msgs[1].(map[string]any)["role"] != "assistant" {
+		t.Errorf("a paused turn is resumed by sending the reply back: %v", msgs)
+	}
+	if tool := searchTool("claude-haiku-4-5", 0); tool.OfWebSearchTool20250305 == nil {
+		t.Error("Haiku takes the basic web search tool")
+	}
+}
+
+func TestOpenRouterSearchUsesTheWebPlugin(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		io.WriteString(w, `{"model":"vendor/model","choices":[{"message":{"role":"assistant","content":"{\"findings\":[]}"}}],"usage":{"prompt_tokens":50,"completion_tokens":4}}`)
+	}))
+	defer srv.Close()
+	llm := &Compat{Client: &openai.Client{BaseURL: srv.URL + "/", APIKey: "k"}, Model: "vendor/model", MaxTokens: 64, WebPlugin: true}
+	if _, err := llm.Search(context.Background(), "SYSTEM", "BRIEF", researchSchema([]string{"market"}), SearchLimits{MaxSearches: 5, MaxTokens: 4000}); err != nil {
+		t.Fatal(err)
+	}
+	plugin := body["plugins"].([]any)[0].(map[string]any)
+	if plugin["id"] != "web" || plugin["max_results"] != float64(5) || body["max_tokens"] != float64(4000) || len(body["messages"].([]any)) != 2 {
+		t.Errorf("body = %v", body)
+	}
+	if (&Compat{}).CanSearch() || !llm.CanSearch() {
+		t.Error("only a server with the web plugin can search")
+	}
+}

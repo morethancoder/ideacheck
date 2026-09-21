@@ -1,0 +1,19 @@
+# Asked once per research finding, by the judging backend: how does this finding
+# relate to the idea? The answer is kept on the finding (`relation`), so rubric
+# questions read typed evidence instead of a researcher's prose, and findings
+# whose answer is listed under `drop` never reach the rubric at all.
+#
+# This is the split the whole tool rests on: a writer searches and reports, a
+# classifier decides what the report means. Exactly one choice question; it sees
+# `idea` and `finding` (one item: topic, title, summary).
+drop: [unrelated]
+questions:
+  - id: relation
+    kind: choice
+    uses: [idea, finding]
+    instructions: How does the item described in `finding` relate to the idea described in `idea`?
+    options:
+      direct: It concerns the same problem for the same audience as the idea
+      adjacent: It concerns a related problem, a neighbouring audience, or the wider market the idea sits in
+      unrelated: It has nothing to do with the idea's problem, audience, or market
+      other: None of the above

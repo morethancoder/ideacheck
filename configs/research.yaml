@@ -1,0 +1,42 @@
+# What the writer looks up on the web before an idea is scored.
+#
+# Each topic is one thing worth knowing that the person describing the idea may
+# not know or may not have said. The findings become `evidence` state, grouped by
+# topic id, and rubric questions that list `evidence` in `uses:` read them. A
+# finding never carries a score: it is a fact with a source, and every number
+# still comes from a typed question asked afterwards.
+#
+#   id       the key the findings appear under in `evidence`
+#   look_for what to search for, in the words the researcher is given
+#   covers   (optional) the intake field this topic answers. When findings come
+#            back, that field is no longer reported as missing or asked about:
+#            nobody should be asked what a search already answered.
+#
+#   queries  searches to run when no writer can name better ones (Jev judging
+#            alone, say). {{.Subject}} is the idea in a few words: its solution,
+#            else its problem, else its title, else the start of its text.
+#
+# max_findings caps each topic, so one noisy topic cannot crowd out the rest.
+max_findings: 5
+topics:
+  - id: competitors
+    look_for: Products, services or open-source projects that already address the same problem for the same audience. Name each one and say what it does and who it is for.
+    covers: competitors_known
+    queries:
+      - "{{.Subject}} software"
+      - "{{.Subject}} alternatives"
+  - id: prior_attempts
+    look_for: Earlier attempts at this same idea that shut down, pivoted away or never took off, and the reason given when one is known.
+    queries:
+      - "{{.Subject}} startup shut down"
+      - "{{.Subject}} startup failed why"
+  - id: market
+    look_for: Concrete signals of how large or fast-growing the market is — number of potential customers, spending on the problem, funding or revenue of companies in the space.
+    queries:
+      - "{{.Subject}} market size"
+      - "{{.Subject}} funding raised"
+  - id: recent_changes
+    look_for: Changes in the last two or three years (technology, regulation, platform rules, prices, behavior) that make this idea newly possible or newly needed.
+    queries:
+      - "{{.Subject}} new regulation OR trend"
+      - "{{.Subject}} recent changes"

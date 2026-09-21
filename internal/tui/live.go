@@ -113,6 +113,8 @@ func stageTitle(stage string) string {
 		return "What is stated · idea type"
 	case pipeline.StageExtract:
 		return "Reading the description"
+	case pipeline.StageResearch:
+		return "Looking it up on the web"
 	case pipeline.StageExplain:
 		return "Summary"
 	}
@@ -120,7 +122,7 @@ func stageTitle(stage string) string {
 }
 
 func (m liveModel) renderRow(r row) string {
-	name := fmt.Sprintf("%-28s", r.q.ID)
+	name := fmt.Sprintf("%-28s", clip(r.q.ID, 28))
 	switch {
 	case r.answer == nil:
 		return fmt.Sprintf("  %s %s", m.spin.View(), dim.Render(name))
@@ -130,10 +132,20 @@ func (m liveModel) renderRow(r row) string {
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render("written"))
 	case r.stage == pipeline.StageExtract:
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render("read"))
+	case r.value == nil && r.answer.Confidence == 0: // a step of the web lookup: a count, not a judgment
+		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render(r.answer.Choice))
 	case r.value == nil:
 		return fmt.Sprintf("  %s %s %s  %s", good.Render("✓"), name, r.answer.Choice, dim.Render(pct(r.answer.Confidence)))
 	}
 	return fmt.Sprintf("  %s %s %s %.2f  %s  %s", good.Render("✓"), name, Bar(*r.value), *r.value, dim.Render(pct(r.answer.Confidence)), Arrow(r.q.Polarity))
+}
+
+// clip shortens a row name to the column: findings are named by their title.
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
 
 func pct(v float64) string { return fmt.Sprintf("%3.0f%%", v*100) }

@@ -14,7 +14,6 @@ import (
 
 	"github.com/morethancoder/ideacheck/internal/judge/backends"
 	"github.com/morethancoder/ideacheck/internal/logging"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
 	"github.com/morethancoder/ideacheck/internal/server"
 	"github.com/morethancoder/ideacheck/internal/store"
 )
@@ -30,10 +29,12 @@ func (a *app) serveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if backends.HumanOnly(cfg.Backend) && !allowCLI {
-				return fmt.Errorf("the %s backend is for human CLI use (it spends your personal login's limits); pass --allow-cli-backend to serve it anyway", cfg.Backend)
+			for _, name := range []string{cfg.Backend, cfg.WriterName()} {
+				if backends.HumanOnly(name) && !allowCLI {
+					return fmt.Errorf("the %s backend is for human CLI use (it spends your personal login's limits); pass --allow-cli-backend to serve it anyway", name)
+				}
 			}
-			judge, err := backends.New(cfg, backends.Deps{Files: a.files(), Secret: a.secrets().Get})
+			engine, err := a.newEngine(cfg)
 			if err != nil {
 				return err
 			}
@@ -43,7 +44,7 @@ func (a *app) serveCmd() *cobra.Command {
 			}
 			defer st.Close()
 			log := logging.New(a.stderr, cfg.Log.Level, cfg.Log.Format, !a.global.noColor && a.getenv("NO_COLOR") == "")
-			api := &server.Server{Engine: &pipeline.Engine{Config: cfg, Files: a.files(), Judge: judge}, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: log}
+			api := &server.Server{Engine: engine, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: log}
 			return listen(cmd.Context(), net.JoinHostPort(host, strconv.Itoa(port)), api.Handler(), func(addr string) {
 				// A person watching a terminal gets the step column; anything
 				// else — a supervisor, a log file — gets the structured line.
@@ -54,6 +55,9 @@ func (a *app) serveCmd() *cobra.Command {
 				p := a.printer(a.stderr)
 				p.Title("ideacheck", "serve")
 				p.Row("judge", joined(cfg.Backend, cfg.Active().Model))
+				if cfg.Split() {
+					p.Row("writer", joined(cfg.Writer, cfg.Backends[cfg.Writer].Model))
+				}
 				p.Row("listening", "http://"+addr)
 				p.Blank()
 				p.Hint("POST /v1/check", `{"idea":"..."}`)

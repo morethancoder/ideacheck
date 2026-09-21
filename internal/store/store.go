@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -34,6 +35,11 @@ CREATE TABLE IF NOT EXISTS checks (
   idea        TEXT NOT NULL,
   intake      TEXT NOT NULL,
   result      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS research (
+  key        TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  findings   TEXT NOT NULL
 );`
 
 var ErrNotFound = errors.New("no such check")
@@ -99,6 +105,26 @@ func (s *Store) Save(ctx context.Context, in pipeline.Intake, res *pipeline.Resu
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		res.ID, res.CreatedAt, res.Status, res.Verdict, res.Composite, res.Backend, res.Model,
 		rubric, rubricHash, res.ConfigHash, summary(in), string(intake), string(result))
+	return err
+}
+
+// Findings and KeepFindings hold what a web search found
+// for an idea, kept so the same idea is not searched (and paid for, and scored
+// slightly differently) on every check.
+func (s *Store) Findings(ctx context.Context, key string, maxAge time.Duration) ([]byte, bool) {
+	var raw string
+	var created int64
+	err := s.db.QueryRowContext(ctx, "SELECT findings, created_at FROM research WHERE key = ?", key).Scan(&raw, &created)
+	if err != nil || time.Since(time.Unix(created, 0)) > maxAge {
+		return nil, false
+	}
+	return []byte(raw), true
+}
+
+func (s *Store) KeepFindings(ctx context.Context, key string, findings []byte) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO research (key, created_at, findings) VALUES (?,?,?)
+		ON CONFLICT(key) DO UPDATE SET created_at = excluded.created_at, findings = excluded.findings`,
+		key, time.Now().Unix(), string(findings))
 	return err
 }
 

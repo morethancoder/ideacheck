@@ -15,9 +15,12 @@ const (
 // schemas/check_result.schema.json is generated from this type, and a test fails
 // when the two drift.
 type Result struct {
-	Status   string    `json:"status"`
-	ID       string    `json:"id"`
-	Backend  string    `json:"backend"`
+	Status  string `json:"status"`
+	ID      string `json:"id"`
+	Backend string `json:"backend"`
+	// Writer is the backend that read, researched and wrote, when it was not
+	// the judging backend.
+	Writer   string    `json:"writer,omitempty"`
 	Model    string    `json:"model"`
 	Method   string    `json:"method"`
 	IdeaType *IdeaType `json:"idea_type,omitempty"`
@@ -27,24 +30,27 @@ type Result struct {
 	Partial bool `json:"partial,omitempty"`
 	// Extracted names the intake fields read out of the document by the extract
 	// stage rather than given by the user.
-	Extracted           []string       `json:"extracted,omitempty"`
-	Answers             []judge.Answer `json:"answers"`
-	Composite           float64        `json:"composite"`
-	CompositeConfidence float64        `json:"composite_confidence"`
-	Verdict             string         `json:"verdict,omitempty"`
-	VerdictReason       string         `json:"verdict_reason,omitempty"`
-	Dimensions          []Dimension    `json:"dimensions"`
-	TopStrengths        []Contribution `json:"top_strengths"`
-	TopRisks            []Contribution `json:"top_risks"`
-	Timing              Timing         `json:"timing"`
-	CostEstimateUSD     float64        `json:"cost_estimate_usd"`
-	Cost                Cost           `json:"cost"`
-	Summary             string         `json:"summary,omitempty"` // plain-language why, written by the model after scoring
-	Rubric              *RubricRef     `json:"rubric,omitempty"`
-	ConfigHash          string         `json:"config_hash"`
-	Warnings            []string       `json:"warnings,omitempty"`
-	Error               string         `json:"error,omitempty"`
-	CreatedAt           string         `json:"created_at"`
+	Extracted []string `json:"extracted,omitempty"`
+	// Research is what the web lookup found, with sources; absent when the
+	// check scored the description alone.
+	Research            *ResearchReport `json:"research,omitempty"`
+	Answers             []judge.Answer  `json:"answers"`
+	Composite           float64         `json:"composite"`
+	CompositeConfidence float64         `json:"composite_confidence"`
+	Verdict             string          `json:"verdict,omitempty"`
+	VerdictReason       string          `json:"verdict_reason,omitempty"`
+	Dimensions          []Dimension     `json:"dimensions"`
+	TopStrengths        []Contribution  `json:"top_strengths"`
+	TopRisks            []Contribution  `json:"top_risks"`
+	Timing              Timing          `json:"timing"`
+	CostEstimateUSD     float64         `json:"cost_estimate_usd"`
+	Cost                Cost            `json:"cost"`
+	Summary             string          `json:"summary,omitempty"` // plain-language why, written by the model after scoring
+	Rubric              *RubricRef      `json:"rubric,omitempty"`
+	ConfigHash          string          `json:"config_hash"`
+	Warnings            []string        `json:"warnings,omitempty"`
+	Error               string          `json:"error,omitempty"`
+	CreatedAt           string          `json:"created_at"`
 }
 
 // Cost is what this check spent, with the working shown.

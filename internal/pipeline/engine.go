@@ -18,6 +18,17 @@ type Engine struct {
 	Config config.Config
 	Files  rubric.Reader
 	Judge  judge.Judge
+	// Writer reads, researches and writes (extract, research, explain) when that
+	// is not the judge's job too; nil = the judge does it all. Every typed
+	// question — including how a research finding relates to the idea — goes to
+	// Judge either way.
+	Writer judge.Judge
+	// Cache keeps research findings between checks of the same idea; nil = none.
+	Cache ResearchCache
+	// Search is the search service ideacheck queries itself and Pages reads the
+	// results' pages; nil Search = leave searching to the writer's own web tool.
+	Search Searcher
+	Pages  PageReader
 
 	Now   func() time.Time // nil = time.Now
 	NewID func() string    // nil = "chk_" + ULID
@@ -56,6 +67,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 		return nil, err
 	}
 	var extra []judge.Answer
+	given := in // as the caller sent it: what a search is remembered under
 	in, read := e.extract(ctx, in, res, o)
 	if read != nil {
 		extra = append(extra, *read)
@@ -67,15 +79,20 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	res.Missing = FindMissing(gaps, gapAnswers, in)
 	res.IdeaType = ideaType(routeAnswer)
 
-	open := Unanswered(res.Missing, in, o.Answered)
-	if len(open) > 0 && !o.Proceed {
+	// A fact the web can answer is not worth stopping to ask a person for.
+	plan := e.plan(in, res)
+	if open := Unanswered(res.Missing, in, append(plan.covers(), o.Answered...)); len(open) > 0 && !o.Proceed {
 		res.Status = StatusNeedsInput
 		return e.finish(res, start, extra...), nil
 	}
+	state, searched := e.research(ctx, plan, given, state, res, o)
+	extra = append(extra, searched...)
+	res.Missing = settled(res.Missing, plan, res.Research)
+	open := Unanswered(res.Missing, in, o.Answered)
 	res.Partial = len(open) > 0
 
 	name, warnings := e.pickRubric(o.Rubric, routeAnswer)
-	res.Warnings = warnings
+	res.Warnings = append(res.Warnings, warnings...)
 	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, name)
 	if err != nil {
 		return nil, err
@@ -98,6 +115,27 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	return e.finish(res, start, extra...), nil
 }
 
+// writer is the backend that reads, researches and writes.
+func (e *Engine) writer() judge.Judge {
+	if e.Writer != nil {
+		return e.Writer
+	}
+	return e.Judge
+}
+
+// FollowUps is what is worth asking a person after a needs_input result: gaps
+// still open, minus what research is about to look up, most important first
+// and no more than the gaps rubric's ask_limit. Asking for everything at once
+// is how a one-line idea turns into a form.
+func (e *Engine) FollowUps(res *Result, in Intake, answered []string) []Missing {
+	open := Unanswered(res.Missing, in, append(e.plan(in, nil).covers(), answered...))
+	gaps, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.GapsName)
+	if err == nil && gaps.AskLimit > 0 && len(open) > gaps.AskLimit {
+		open = open[:gaps.AskLimit]
+	}
+	return open
+}
+
 func (e *Engine) now() time.Time {
 	if e.Now != nil {
 		return e.Now()
@@ -113,10 +151,15 @@ func (e *Engine) newResult(start time.Time) *Result {
 	if e.NewID != nil {
 		id = e.NewID()
 	}
+	writer := ""
+	if e.Writer != nil && e.Writer.Name() != e.Judge.Name() {
+		writer = e.Writer.Name()
+	}
 	return &Result{
 		ID:           id,
 		Status:       StatusOK,
 		Backend:      e.Judge.Name(),
+		Writer:       writer,
 		ConfigHash:   e.Config.Hash(),
 		CreatedAt:    start.UTC().Format(time.RFC3339),
 		Missing:      []Missing{},
@@ -302,9 +345,9 @@ func (e *Engine) conclude(res *Result, rb *rubric.Rubric, answers []judge.Answer
 	return nil
 }
 
-// finish fills the fields derived from the full answer set. extra are calls
-// that are not question answers (the summary) but still cost money.
-func (e *Engine) finish(res *Result, start time.Time, extra ...judge.Answer) *Result {
+// finish fills the fields derived from the full answer set. written are the
+// writer's calls (extract, research, summary): not answers, but still paid for.
+func (e *Engine) finish(res *Result, start time.Time, written ...judge.Answer) *Result {
 	res.Timing.TotalMS = e.now().Sub(start).Milliseconds()
 	var slowest int64 = -1
 	for _, a := range res.Answers {
@@ -315,7 +358,7 @@ func (e *Engine) finish(res *Result, start time.Time, extra ...judge.Answer) *Re
 			res.Model, res.Method = a.Model, a.Method
 		}
 	}
-	res.Cost = e.cost(append(append([]judge.Answer{}, res.Answers...), extra...))
+	res.Cost = e.cost(res.Answers, written)
 	res.CostEstimateUSD = res.Cost.USD
 	return res
 }
@@ -323,42 +366,58 @@ func (e *Engine) finish(res *Result, start time.Time, extra ...judge.Answer) *Re
 const perMTok = 1_000_000
 
 // cost totals the check's spend. A provider-reported cost wins; other tokens
-// are priced from config; a local model costs nothing.
-func (e *Engine) cost(answers []judge.Answer) Cost {
+// are priced from config; a local model costs nothing. The judge and the writer
+// may bill differently (a free local judge next to a paid writer), so each
+// call is priced under its own backend's billing.
+func (e *Engine) cost(judged, written []judge.Answer) Cost {
 	c := Cost{Basis: CostPriced}
-	billing := e.Config.Active().Billing
-	for _, a := range answers {
-		c.TokensIn += a.TokensIn
-		c.TokensCached += a.TokensCached
-		c.TokensOut += a.TokensOut
-		if c.Model == "" && a.Model != "" {
-			c.Model = a.Model
-		}
+	groups := []struct {
+		answers []judge.Answer
+		billing string
+	}{
+		{judged, e.Config.Active().Billing},
+		{written, e.Config.Backends[e.Config.WriterName()].Billing},
 	}
-	unpriced := ""
-	for _, a := range answers {
-		switch p, ok := e.Config.PriceFor(a.Model); {
-		case a.CostUSD > 0:
-			c.USD += a.CostUSD
-			c.Basis = CostReported
-		case billing == BillingLocal || a.TokensIn+a.TokensOut == 0:
-		case ok:
-			c.USD += cost(p, a)
-			c.Price = &p
-		default:
-			unpriced = a.Model
+	unpriced, paid, subscription, named := "", false, false, false
+	for _, g := range groups {
+		for _, a := range g.answers {
+			c.TokensIn += a.TokensIn
+			c.TokensCached += a.TokensCached
+			c.TokensOut += a.TokensOut
+			used := a.TokensIn+a.TokensOut > 0 || a.CostUSD > 0
+			// The model named is one that was paid for: next to a free judge,
+			// that is the writer.
+			if a.Model != "" && (c.Model == "" || (used && !named)) {
+				c.Model, named = a.Model, used
+			}
+			paid = paid || (used && g.billing != BillingLocal)
+			subscription = subscription || (used && g.billing == BillingSubscription)
+			switch p, ok := e.Config.PriceFor(a.Model); {
+			case a.CostUSD > 0:
+				c.USD += a.CostUSD
+				c.Basis = CostReported
+			case g.billing == BillingLocal || a.TokensIn+a.TokensOut == 0:
+			case ok:
+				c.USD += cost(p, a)
+				c.Price = &p
+			default:
+				unpriced = a.Model
+			}
 		}
 	}
 	switch {
-	case billing == BillingLocal:
+	case !paid && c.TokensIn+c.TokensOut > 0:
 		c.Basis, c.Note = CostFree, "local model: no per-token charge"
 	case c.TokensIn+c.TokensOut == 0 && c.USD == 0:
 		c.Basis, c.Note = CostUnpriced, "the backend reported no token usage"
+		if e.Config.Active().Billing == BillingLocal {
+			c.Basis, c.Note = CostFree, "local model: no per-token charge"
+		}
 	case unpriced != "" && c.Basis != CostReported:
 		c.Basis, c.Note = CostUnpriced, fmt.Sprintf("no price for %q under pricing: in config.yaml", unpriced)
-	case billing == BillingSubscription && c.Basis == CostReported:
+	case subscription && c.Basis == CostReported:
 		c.Note = "API list price as reported by the CLI; your subscription covers it"
-	case billing == BillingSubscription:
+	case subscription:
 		c.Note = "API list price; your subscription covers it"
 	}
 	return c

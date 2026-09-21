@@ -74,3 +74,32 @@ func TestSetupPresetsAreUsable(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveRoles(t *testing.T) {
+	dir := t.TempDir()
+	jev := Provider{Backend: "jev", Model: "jev-1", BaseURL: "https://api.typesafe.ai", Billing: "api"}
+	claude := Provider{Backend: "claude-cli", Model: "sonnet", Billing: "subscription"}
+	if err := SaveChoice(dir, claude, "opus", "low"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveRoles(dir, jev, claude); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(NewFiles(dir), LoadOptions{Environ: func() []string { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Backend != "jev" || cfg.Writer != "claude-cli" || !cfg.Split() || cfg.Backends["jev"].Model != "jev-1" {
+		t.Errorf("backend=%q writer=%q jev=%+v", cfg.Backend, cfg.Writer, cfg.Backends["jev"])
+	}
+	if m := cfg.Backends["claude-cli"]; m.Model != "opus" || m.Effort != "low" {
+		t.Errorf("the writer setup just configured must keep its model: %+v", m)
+	}
+	if err := SaveRoles(dir, claude, Provider{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = Load(NewFiles(dir), LoadOptions{Environ: func() []string { return nil }})
+	if cfg.Backend != "claude-cli" || cfg.Writer != "" || cfg.Split() {
+		t.Errorf("one model for everything: backend=%q writer=%q", cfg.Backend, cfg.Writer)
+	}
+}

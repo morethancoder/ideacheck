@@ -16,6 +16,8 @@ import (
 	"github.com/morethancoder/ideacheck/internal/judge/backends"
 	"github.com/morethancoder/ideacheck/internal/logging"
 	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/internal/search"
+	"github.com/morethancoder/ideacheck/internal/store"
 	"github.com/morethancoder/ideacheck/internal/tui"
 )
 
@@ -31,6 +33,9 @@ type checkFlags struct {
 	ask, noAsk  bool
 	explain     bool
 	noExplain   bool
+	writer      string
+	research    bool
+	noResearch  bool
 	timeout     time.Duration
 	sequential  bool
 	answers     []string
@@ -43,20 +48,24 @@ type checkFlags struct {
 
 func (c *checkFlags) register(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.StringVarP(&c.output, "output", "o", "", "pretty (default on a terminal), json, plain")                      // -o = output format (kubectl, gcc, curl)
-	f.BoolVar(&c.json, "json", false, "alias for -o json")                                                         // no -j: that means jobs in make/cargo/ninja
-	f.StringVarP(&c.backend, "backend", "b", "", "jev, logprob, structured, claude-cli, mock")                     // b = backend
-	f.StringVarP(&c.model, "model", "m", "", "override the backend's model")                                       // -m = model in llm, ollama
-	f.StringVarP(&c.rubric, "rubric", "r", "", "force a rubric instead of auto-routing")                           // r = rubric
-	f.StringVarP(&c.profile, "profile", "P", "", "use a named or alternate profile file")                          // -P: lowercase -p is port/print nearly everywhere
-	f.StringVarP(&c.file, "file", "f", "", "read the idea from a file")                                            // -f = file (docker, kubectl, tar, make)
-	f.BoolVarP(&c.interactive, "interactive", "i", false, "open the form even when text was given")                // -i = interactive (docker, ssh, git add)
-	f.BoolVarP(&c.ask, "ask", "a", false, "ask follow-up questions for missing info (default on a terminal)")      // lowercase enables
-	f.BoolVarP(&c.noAsk, "no-ask", "A", false, "never ask: report the gaps and score around them")                 // uppercase negates
-	f.BoolVarP(&c.explain, "explain", "e", false, "add a plain-language summary of why (default: config explain)") // e = explain
-	f.BoolVarP(&c.noExplain, "no-explain", "E", false, "skip the summary: one model call fewer")                   // uppercase negates, as -a/-A
-	f.DurationVarP(&c.timeout, "timeout", "t", 0, "per-question timeout, e.g. 20s")                                // -t = timeout (ping, nc); never "type"
-	f.BoolVar(&c.sequential, "sequential", false, "debug: one question at a time")                                 // debug-only: no short form on purpose
+	f.StringVarP(&c.output, "output", "o", "", "pretty (default on a terminal), json, plain")                                                          // -o = output format (kubectl, gcc, curl)
+	f.BoolVar(&c.json, "json", false, "alias for -o json")                                                                                             // no -j: that means jobs in make/cargo/ninja
+	f.StringVarP(&c.backend, "backend", "b", "", "jev, logprob, structured, claude-cli, mock")                                                         // b = backend
+	f.StringVarP(&c.model, "model", "m", "", "override the backend's model")                                                                           // -m = model in llm, ollama
+	f.StringVarP(&c.rubric, "rubric", "r", "", "force a rubric instead of auto-routing")                                                               // r = rubric
+	f.StringVarP(&c.profile, "profile", "P", "", "use a named or alternate profile file")                                                              // -P: lowercase -p is port/print nearly everywhere
+	f.StringVarP(&c.file, "file", "f", "", "read the idea from a file")                                                                                // -f = file (docker, kubectl, tar, make)
+	f.BoolVarP(&c.interactive, "interactive", "i", false, "open the form even when text was given")                                                    // -i = interactive (docker, ssh, git add)
+	f.BoolVarP(&c.ask, "ask", "a", false, "ask follow-up questions for missing info (default on a terminal)")                                          // lowercase enables
+	f.BoolVarP(&c.noAsk, "no-ask", "A", false, "never ask: report the gaps and score around them")                                                     // uppercase negates
+	f.BoolVarP(&c.explain, "explain", "e", false, "add a plain-language summary of why (default: config explain)")                                     // e = explain
+	f.BoolVarP(&c.noExplain, "no-explain", "E", false, "skip the summary: one model call fewer")                                                       // uppercase negates, as -a/-A
+	f.StringVarP(&c.writer, "writer", "w", "", "backend that reads, researches and writes, next to a -b that only judges (e.g. -b jev -w claude-cli)") // w = writer; curl's -w (write-out) is about output too, and nothing here prints a format
+	// Long-only: -r is the rubric, and -s/-S mean silent in curl and ssh.
+	f.BoolVar(&c.research, "research", false, "look the idea up on the web before scoring (default: config research.enabled, when the writer can search)")
+	f.BoolVar(&c.noResearch, "no-research", false, "score the description alone: no web lookup")
+	f.DurationVarP(&c.timeout, "timeout", "t", 0, "per-question timeout, e.g. 20s") // -t = timeout (ping, nc); never "type"
+	f.BoolVar(&c.sequential, "sequential", false, "debug: one question at a time")  // debug-only: no short form on purpose
 	// Facts and modes for a caller with no terminal to answer in. All long-only:
 	// the sensible letters are taken, and an agent writes the long form anyway.
 	f.StringArrayVar(&c.answers, "answer", nil, `fill a field instead of being asked: --answer why_now="the models got cheap" (repeatable)`)
@@ -75,6 +84,12 @@ func (a *app) overrides(c *checkFlags) map[string]any {
 	}
 	if c.explain || c.noExplain {
 		o["explain"] = c.explain && !c.noExplain
+	}
+	if c.writer != "" {
+		o["writer"] = c.writer
+	}
+	if c.research || c.noResearch {
+		o["research.enabled"] = c.research && !c.noResearch
 	}
 	if c.timeout > 0 {
 		o["timeouts.question"] = c.timeout.String()
@@ -163,11 +178,37 @@ func (a *app) engine(c *checkFlags) (*pipeline.Engine, config.Config, error) {
 	if err != nil {
 		return nil, cfg, err
 	}
-	judge, err := backends.New(cfg, backends.Deps{Files: a.files(), Secret: a.secrets().Get})
+	engine, err := a.newEngine(cfg)
+	return engine, cfg, err
+}
+
+// newEngine builds the judge, the writer when it is a different backend, and
+// the findings cache: every command that checks ideas goes through here.
+func (a *app) newEngine(cfg config.Config) (*pipeline.Engine, error) {
+	deps := backends.Deps{Files: a.files(), Secret: a.secrets().Get}
+	judge, err := backends.New(cfg, deps)
 	if err != nil {
-		return nil, cfg, err
+		return nil, err
 	}
-	return &pipeline.Engine{Config: cfg, Files: a.files(), Judge: judge}, cfg, nil
+	writer, err := backends.NewWriter(cfg, deps)
+	if err != nil {
+		return nil, err
+	}
+	engine := &pipeline.Engine{Config: cfg, Files: a.files(), Judge: judge, Writer: writer,
+		Cache: findingsCache{path: store.ExpandHome(cfg.Store.Path, a.home)}}
+	if !cfg.Research.Enabled {
+		return engine, nil
+	}
+	// A nil provider is not an error: the writer's own web tool searches, or
+	// nothing does and the description is scored as it is.
+	provider, err := search.New(context.Background(), cfg.Research, deps.Secret)
+	if err != nil {
+		return nil, err
+	}
+	if provider != nil {
+		engine.Search, engine.Pages = provider, search.NewReader(cfg.Research.PageTimeout)
+	}
+	return engine, nil
 }
 
 func (a *app) secrets() config.Secrets { return config.Secrets{Getenv: a.getenv, Dir: a.files().Dir} }

@@ -26,6 +26,12 @@ const (
 	explainFile    = "explain.tmpl"
 	extractSysFile = "extract_system.md"
 	extractFile    = "extract.tmpl"
+	researchSys    = "research_system.md"
+	researchFile   = "research.tmpl"
+	planSys        = "research_plan_system.md"
+	planFile       = "research_plan.tmpl"
+	digestSys      = "research_digest_system.md"
+	digestFile     = "research_digest.tmpl"
 )
 
 // Set is every prompt the model-backed judges use.
@@ -163,6 +169,53 @@ func (s *Set) Explain(b Brief) (string, error) {
 		return "", err
 	}
 	return render(s.explain, explainFile, map[string]any{"StateJSON": js, "Verdict": b.Verdict, "Reason": b.Reason, "Findings": b.Findings, "Missing": b.Missing})
+}
+
+// Topic is one thing the research call is asked to look up. Hits are the
+// search results fetched for it, for the digest call only.
+type Topic struct {
+	ID, LookFor string
+	Hits        []Hit
+}
+
+// Hit is one search result as the digest call reads it; Text is the page
+// boiled down, empty when the page was not read.
+type Hit struct{ Title, URL, Snippet, Text string }
+
+// Research loads and renders the research prompts. They are read on demand
+// rather than in Load: a prompts directory written before research existed
+// still loads, and only the research stage notices what it lacks.
+func Research(r Reader, dir string, state judge.State, topics []Topic, maxFindings int) (system, user string, err error) {
+	return pair(r, dir, researchSys, researchFile, state, map[string]any{"Topics": topics, "MaxFindings": maxFindings})
+}
+
+// ResearchPlan renders the call that names the searches ideacheck will run.
+func ResearchPlan(r Reader, dir string, state judge.State, topics []Topic, perTopic int) (system, user string, err error) {
+	return pair(r, dir, planSys, planFile, state, map[string]any{"Topics": topics, "PerTopic": perTopic})
+}
+
+// ResearchDigest renders the call that turns fetched results into findings.
+func ResearchDigest(r Reader, dir string, state judge.State, topics []Topic, maxFindings int) (system, user string, err error) {
+	return pair(r, dir, digestSys, digestFile, state, map[string]any{"Topics": topics, "MaxFindings": maxFindings})
+}
+
+// pair loads a system prompt and renders its template over the state plus data.
+func pair(r Reader, dir, sysFile, tmplFile string, state judge.State, data map[string]any) (system, user string, err error) {
+	sys, err := r.Read(path.Join(dir, sysFile))
+	if err != nil {
+		return "", "", fmt.Errorf("prompt %s: %w", sysFile, err)
+	}
+	t, err := parse(r, dir, tmplFile)
+	if err != nil {
+		return "", "", err
+	}
+	js, err := StateJSON(state)
+	if err != nil {
+		return "", "", err
+	}
+	data["StateJSON"] = js
+	user, err = render(t, tmplFile, data)
+	return string(bytes.TrimSpace(sys)), user, err
 }
 
 // Field is one intake field the extraction call is asked to fill: the name the

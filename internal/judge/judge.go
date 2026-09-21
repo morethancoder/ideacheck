@@ -107,6 +107,61 @@ type Extractor interface {
 	Extract(ctx context.Context, system, user string, fields []string) (Extraction, error)
 }
 
+// Researcher is optionally implemented by backends that can look things up on
+// the web. Like Extract it is not a judgment: it returns findings with their
+// sources, and every number still comes from a typed question asked afterwards.
+type Researcher interface {
+	// CanResearch reports whether this backend, as configured, can reach the web.
+	CanResearch() bool
+	Research(ctx context.Context, system, user string, topics []string) (Research, error)
+}
+
+// Planner and Digester are the writer's two jobs when ideacheck does the
+// searching itself (internal/search): say what to search for, then say what
+// the results amount to. Neither touches the web, so any chat model can do
+// them — including a local one that could never research on its own.
+type Planner interface {
+	Plan(ctx context.Context, system, user string, topics []string) (Plan, error)
+}
+
+type Digester interface {
+	Digest(ctx context.Context, system, user string, topics []string) (Research, error)
+}
+
+// Query is one search to run for a topic.
+type Query struct {
+	Topic string `json:"topic"`
+	Query string `json:"query"`
+}
+
+// Plan is the searches worth running, plus what the call cost.
+type Plan struct {
+	Queries      []Query
+	Model        string
+	TokensIn     int
+	TokensOut    int
+	TokensCached int
+	CostUSD      float64
+}
+
+// Finding is one thing the research turned up, with where it came from.
+type Finding struct {
+	Topic   string `json:"topic"` // a topic id from research.yaml
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+	URL     string `json:"url"`
+}
+
+// Research is the findings, plus what the call cost.
+type Research struct {
+	Findings     []Finding
+	Model        string
+	TokensIn     int
+	TokensOut    int
+	TokensCached int
+	CostUSD      float64
+}
+
 // Extraction is the values read from the document, plus what the call cost.
 type Extraction struct {
 	Values       map[string]string

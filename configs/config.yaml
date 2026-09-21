@@ -6,6 +6,13 @@
 
 backend: logprob             # jev | logprob | structured | claude-cli | codex-cli | mock
                              # default: a local Ollama model — free, no key, no login
+# Two jobs, and they need not be the same model:
+#   backend  judges: every typed question (noul, score, choice) — gaps, the idea
+#            type, the rubric, and how each research finding relates to the idea.
+#   writer   reads, researches and writes: extract, research, explain.
+# "" = the judging backend does both. Set it to pair a classifier that cannot
+# write (jev) with a model that can: `backend: jev` + `writer: claude-cli`.
+writer: ""
 # After scoring, one more call writes a short plain-language paragraph on why the
 # idea got its verdict (result.summary). It explains; it never changes a score.
 explain: true
@@ -14,6 +21,43 @@ explain: true
 # never overwrites what you gave and never invents a fact; it stops the check
 # asking for something the text already answers. Backends that cannot do it skip it.
 extract: true
+# Before scoring, the idea is looked up on the web — who already does this, who
+# tried and failed, how big the market is, what changed recently (research.yaml
+# lists the topics) — and the findings become `evidence` state that world-facing
+# rubric questions read. It never scores anything.
+#
+# ideacheck does the searching itself: the writer names the searches (one small
+# call), ideacheck runs them against a search service and reads the best pages
+# down to their text, and the writer turns that into findings (one more call).
+# No model drives a search loop, so it takes seconds and a few thousand tokens,
+# and it works with a local model that could never search on its own.
+#   search: auto     a SearXNG answering at endpoints.searxng, else tavily or
+#                    brave when its key is set (TAVILY_API_KEY, BRAVE_API_KEY),
+#                    else llm
+#           searxng  free, no key, self-hosted: `docker run -p 8080:8080 searxng/searxng`,
+#                    with `json` added under search.formats in its settings.yml
+#           tavily | brave   hosted, a key each
+#           llm      the writer's own web tool (claude-cli, codex-cli, structured
+#                    with provider anthropic or openrouter). Thorough and slow: an
+#                    agent loop re-reads every earlier result on every turn
+# With nothing that can search, the check scores the description alone.
+research:
+  enabled: true
+  search: auto
+  endpoints:
+    searxng: http://localhost:8080
+    tavily: https://api.tavily.com
+    brave: https://api.search.brave.com
+  queries_per_topic: 2
+  results_per_query: 5
+  read_pages: 2              # per topic: pages fetched and boiled down to text; 0 = snippets only
+  page_chars: 2500           # of each page's text handed to the writer
+  page_timeout: 8s
+  sift: auto                 # auto | always | never: the judge types each finding and drops unrelated ones
+  max_searches: 6            # search: llm only, as are max_tokens and (mostly) timeout
+  max_tokens: 16000
+  timeout: 240s
+  cache_ttl: 168h            # the same idea reuses its findings for a week; 0 = always search again
 timeouts: { question: 30s, batch: 90s }
 retries: { max_attempts: 4, base_backoff: 500ms, max_backoff: 5s }
 concurrency: { default_max: 16 }
@@ -179,6 +223,7 @@ setup:
     # does not reason. Pinned rather than jev-latest, which moves.
     - id: jev
       label: TypeSafe Jev API key (built for typed judgments)
+      needs_writer: true
       backend: jev
       base_url: https://api.typesafe.ai
       model: jev-1.13.0

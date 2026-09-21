@@ -63,13 +63,13 @@ func TestCheckEndToEnd(t *testing.T) {
 	if res.IdeaType == nil || res.IdeaType.Choice != "business" || res.IdeaType.Confidence != 0.91 {
 		t.Errorf("idea_type = %+v", res.IdeaType)
 	}
-	if len(res.Answers) != 7+1+15 {
-		t.Errorf("answers = %d, want 7 gaps + 1 router + 15 business", len(res.Answers))
+	if len(res.Answers) != 7+1+17 {
+		t.Errorf("answers = %d, want 7 gaps + 1 router + 17 business", len(res.Answers))
 	}
 	if res.Composite <= 0 || res.Composite >= 1 || res.Verdict == "" || res.VerdictReason == "" {
 		t.Errorf("composite=%v verdict=%q reason=%q", res.Composite, res.Verdict, res.VerdictReason)
 	}
-	if len(res.Dimensions) != 15 || res.Dimensions[0].ID != "problem_acuity" || res.Dimensions[0].Value == nil || res.Dimensions[0].Weight != 2 || res.Dimensions[1].Polarity != -1 {
+	if len(res.Dimensions) != 17 || res.Dimensions[0].ID != "problem_acuity" || res.Dimensions[0].Value == nil || res.Dimensions[0].Weight != 2 || res.Dimensions[1].Polarity != -1 {
 		t.Errorf("dimensions = %+v", res.Dimensions[:2])
 	}
 	if res.Backend != "mock" || res.Model != "mock" || res.Method != "mock" {
@@ -199,21 +199,26 @@ func TestCostSummary(t *testing.T) {
 	e := engine(t, &mock.Judge{})
 	e.Config.Pricing = map[string]config.Price{"claude-haiku-4-5": {In: 1, Out: 5}}
 	priced := []judge.Answer{{Model: "claude-haiku-4-5-20251001", TokensIn: 1_000_000, TokensOut: 100_000}}
-	if c := e.cost(priced); c.Basis != CostPriced || !near(c.USD, 1.5) || c.Price == nil || c.Model != "claude-haiku-4-5-20251001" {
+	if c := e.cost(priced, nil); c.Basis != CostPriced || !near(c.USD, 1.5) || c.Price == nil || c.Model != "claude-haiku-4-5-20251001" {
 		t.Errorf("priced = %+v", c)
 	}
 	reported := append(priced, judge.Answer{Model: "claude-haiku-4-5", TokensIn: 10, CostUSD: 0.25})
-	if c := e.cost(reported); c.Basis != CostReported || !near(c.USD, 1.75) {
+	if c := e.cost(reported, nil); c.Basis != CostReported || !near(c.USD, 1.75) {
 		t.Errorf("reported = %+v, want the reported 0.25 plus the priced 1.5", c)
 	}
-	if c := e.cost([]judge.Answer{{Model: "mystery", TokensIn: 5}}); c.Basis != CostUnpriced || c.USD != 0 || !strings.Contains(c.Note, "mystery") {
+	if c := e.cost([]judge.Answer{{Model: "mystery", TokensIn: 5}}, nil); c.Basis != CostUnpriced || c.USD != 0 || !strings.Contains(c.Note, "mystery") {
 		t.Errorf("unpriced = %+v", c)
 	}
 	b := e.Config.Backends[e.Config.Backend]
 	b.Billing = BillingLocal
 	e.Config.Backends[e.Config.Backend] = b
-	if c := e.cost(priced); c.Basis != CostFree || c.USD != 0 || c.TokensIn != 1_000_000 {
+	if c := e.cost(priced, nil); c.Basis != CostFree || c.USD != 0 || c.TokensIn != 1_000_000 {
 		t.Errorf("local = %+v", c)
+	}
+	// A free local judge next to a paid writer: only the writer's calls cost.
+	e.Config.Writer = "structured"
+	if c := e.cost(priced, priced); c.Basis != CostPriced || !near(c.USD, 1.5) || c.TokensIn != 2_000_000 {
+		t.Errorf("local judge + paid writer = %+v, want the writer's 1.5 only", c)
 	}
 }
 

@@ -1,0 +1,14 @@
+{{- /* The brief for the research call. The idea is the labelled state every
+question sees (without the profile: who the person is has no bearing on what
+already exists). Topics come from research.yaml. */ -}}
+IDEA:
+```json
+{{ .StateJSON }}
+```
+
+Look these up, and report at most {{ .MaxFindings }} findings per topic:
+{{ range .Topics }}
+- {{ .ID }}: {{ .LookFor }}
+{{- end }}
+
+Each finding's "topic" must be one of: {{ range $i, $t := .Topics }}{{ if $i }}, {{ end }}{{ $t.ID }}{{ end }}.

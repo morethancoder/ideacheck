@@ -27,7 +27,11 @@ const (
 )
 
 type Config struct {
-	Backend     string             `koanf:"backend" json:"backend"`
+	Backend string `koanf:"backend" json:"backend"`
+	// Writer names the backend that reads, researches and writes prose (extract,
+	// research, explain); "" = the judging backend does it all. It lets a
+	// classifier that cannot write (Jev) judge next to a model that can.
+	Writer      string             `koanf:"writer" json:"writer,omitempty"`
 	Timeouts    Timeouts           `koanf:"timeouts" json:"timeouts"`
 	Retries     Retries            `koanf:"retries" json:"retries"`
 	Concurrency Concurrency        `koanf:"concurrency" json:"concurrency"`
@@ -35,12 +39,51 @@ type Config struct {
 	Pricing     map[string]Price   `koanf:"pricing" json:"pricing"`
 	Explain     bool               `koanf:"explain" json:"explain"` // add a plain-language summary to every result
 	Extract     bool               `koanf:"extract" json:"extract"` // read stated facts out of the document before looking for gaps
-	Setup       Setup              `koanf:"setup" json:"-"`         // wizard presets: not part of a result's config hash
+	Research    Research           `koanf:"research" json:"research"`
+	Setup       Setup              `koanf:"setup" json:"-"` // wizard presets: not part of a result's config hash
 	RubricsDir  string             `koanf:"rubrics_dir" json:"rubrics_dir"`
 	PromptsDir  string             `koanf:"prompts_dir" json:"prompts_dir"`
 	Store       Store              `koanf:"store" json:"store"`
 	Log         Log                `koanf:"log" json:"log"`
 }
+
+// Research is the stage that looks the idea up on the web before it is scored.
+// What is looked up lives in research.yaml; this is only how hard and how long.
+type Research struct {
+	Enabled bool `koanf:"enabled" json:"enabled"` // runs only when the writer can search the web
+	// Sift is whether the judge types each finding (rubrics/_evidence.yaml) and
+	// drops the unrelated ones: auto = only when judge and writer are different
+	// backends, always, never.
+	Sift string `koanf:"sift" json:"sift"`
+	// Search is who does the searching: a search service ideacheck queries
+	// itself (searxng, tavily, brave), the writer's own web tool (llm), or auto —
+	// a SearXNG that answers, else a service whose key is set, else llm.
+	Search          string            `koanf:"search" json:"search"`
+	Endpoints       map[string]string `koanf:"endpoints" json:"endpoints"`
+	QueriesPerTopic int               `koanf:"queries_per_topic" json:"queries_per_topic"`
+	ResultsPerQuery int               `koanf:"results_per_query" json:"results_per_query"`
+	ReadPages       int               `koanf:"read_pages" json:"read_pages"` // per topic; 0 = snippets only
+	PageChars       int               `koanf:"page_chars" json:"page_chars"`
+	PageTimeout     time.Duration     `koanf:"page_timeout" json:"page_timeout"`
+	// The rest bound the writer's own web tool (search: llm).
+	MaxSearches int           `koanf:"max_searches" json:"max_searches"`
+	MaxTokens   int           `koanf:"max_tokens" json:"max_tokens"`
+	Timeout     time.Duration `koanf:"timeout" json:"timeout"`
+	CacheTTL    time.Duration `koanf:"cache_ttl" json:"cache_ttl"` // 0 = never reuse findings
+}
+
+// SearchLLM leaves the searching to the writer's own web tool; SearchAuto picks.
+const (
+	SearchAuto = "auto"
+	SearchLLM  = "llm"
+)
+
+// Sift modes.
+const (
+	SiftAuto   = "auto"
+	SiftAlways = "always"
+	SiftNever  = "never"
+)
 
 type Timeouts struct {
 	Question time.Duration `koanf:"question" json:"question"`
@@ -85,16 +128,19 @@ type Setup struct {
 
 // Provider is one choice in `ideacheck setup`.
 type Provider struct {
-	ID       string `koanf:"id"`
-	Label    string `koanf:"label"`
-	Backend  string `koanf:"backend"`
-	Provider string `koanf:"provider"`
-	BaseURL  string `koanf:"base_url"`
-	Model    string `koanf:"model"`
-	KeyEnv   string `koanf:"key_env"`   // "" = no API key needed
-	KeyURL   string `koanf:"key_url"`   // where to get one
-	NeedsCLI string `koanf:"needs_cli"` // executable that must be on PATH
-	Billing  string `koanf:"billing"`   // copied to backends.<backend>.billing
+	ID    string `koanf:"id"`
+	Label string `koanf:"label"`
+	// NeedsWriter marks a provider that only classifies (Jev): setup then asks
+	// which other provider reads, researches and writes next to it.
+	NeedsWriter bool   `koanf:"needs_writer"`
+	Backend     string `koanf:"backend"`
+	Provider    string `koanf:"provider"`
+	BaseURL     string `koanf:"base_url"`
+	Model       string `koanf:"model"`
+	KeyEnv      string `koanf:"key_env"`   // "" = no API key needed
+	KeyURL      string `koanf:"key_url"`   // where to get one
+	NeedsCLI    string `koanf:"needs_cli"` // executable that must be on PATH
+	Billing     string `koanf:"billing"`   // copied to backends.<backend>.billing
 	// Discover names a live model list to offer instead of Models: "codex"
 	// (`codex debug models`) or "ollama" (the server's /api/tags).
 	Discover string        `koanf:"discover"`
@@ -216,6 +262,17 @@ func (c Config) Validate() error {
 	if _, ok := c.Backends[c.Backend]; !ok {
 		return fmt.Errorf("backend %q has no entry under backends:", c.Backend)
 	}
+	if c.Writer != "" {
+		if _, ok := c.Backends[c.Writer]; !ok {
+			return fmt.Errorf("writer %q has no entry under backends:", c.Writer)
+		}
+	}
+	if s := c.Research.Sift; s != SiftAuto && s != SiftAlways && s != SiftNever {
+		return fmt.Errorf("research.sift %q is not one of auto, always, never", s)
+	}
+	if r := c.Research; r.Enabled && (r.Timeout <= 0 || r.PageTimeout <= 0 || r.QueriesPerTopic < 1 || r.ResultsPerQuery < 1 || r.ReadPages < 0) {
+		return fmt.Errorf("research: timeout, page_timeout, queries_per_topic and results_per_query must be positive, read_pages not negative")
+	}
 	if c.Timeouts.Question <= 0 || c.Timeouts.Batch <= 0 {
 		return fmt.Errorf("timeouts.question and timeouts.batch must be positive")
 	}
@@ -236,6 +293,18 @@ func (c Config) Validate() error {
 
 // Active returns the selected backend's settings.
 func (c Config) Active() Backend { return c.Backends[c.Backend] }
+
+// WriterName is the backend that reads, researches and writes: the writer when
+// one is set, else the judging backend.
+func (c Config) WriterName() string {
+	if c.Writer != "" {
+		return c.Writer
+	}
+	return c.Backend
+}
+
+// Split reports whether judging and writing are done by different backends.
+func (c Config) Split() bool { return c.WriterName() != c.Backend }
 
 // MaxConcurrent is the backend's limit, or the global default when unset.
 func (c Config) MaxConcurrent() int {

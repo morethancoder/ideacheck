@@ -19,7 +19,7 @@ var extractQuestion = judge.Question{ID: "extract", Instructions: "Read the stat
 // not vary from run to run. It never overwrites a field the user set, and it
 // never fails the check: without it the check simply knows less.
 func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options) (Intake, *judge.Answer) {
-	extractor, ok := e.Judge.(judge.Extractor)
+	extractor, ok := e.writer().(judge.Extractor)
 	want := in.emptyFields()
 	if !ok || !e.Config.Extract || len(want) == 0 || (in.Idea == "" && in.Context == "") {
 		return in, nil

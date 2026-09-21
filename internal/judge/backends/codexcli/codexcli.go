@@ -39,6 +39,19 @@ type CLI struct {
 }
 
 func (c *CLI) Complete(ctx context.Context, system, state, user string, schema map[string]any) (structured.Completion, error) {
+	// codex has no system-prompt flag: the system text leads the prompt.
+	return c.run(ctx, system+"\n\n"+state+"\n\n"+user, schema)
+}
+
+// Search is Complete with live web search on. --search is a flag of `codex`
+// itself, not of `exec`, so it goes first (verified on codex-cli 0.153.4: the
+// event stream shows web_search items and -o still receives schema-valid JSON).
+// The sandbox stays read-only, and codex has no cap on searches to pass on.
+func (c *CLI) Search(ctx context.Context, system, user string, schema map[string]any, _ structured.SearchLimits) (structured.Completion, error) {
+	return c.run(ctx, system+"\n\n"+user, schema, "--search")
+}
+
+func (c *CLI) run(ctx context.Context, stdin string, schema map[string]any, global ...string) (structured.Completion, error) {
 	dir, err := os.MkdirTemp("", "ideacheck-codex-")
 	if err != nil {
 		return structured.Completion{}, err
@@ -53,7 +66,7 @@ func (c *CLI) Complete(ctx context.Context, system, state, user string, schema m
 		return structured.Completion{}, err
 	}
 	// read-only sandbox + ephemeral: this is a decision function, not an agent.
-	args := []string{"exec", "--json", "--output-schema", schemaPath, "-o", outPath, "--skip-git-repo-check", "--ephemeral", "-s", "read-only"}
+	args := append(global, "exec", "--json", "--output-schema", schemaPath, "-o", outPath, "--skip-git-repo-check", "--ephemeral", "-s", "read-only")
 	if c.Model != "" {
 		args = append(args, "-m", c.Model)
 	}
@@ -64,8 +77,7 @@ func (c *CLI) Complete(ctx context.Context, system, state, user string, schema m
 	if run == nil {
 		run = execCodex
 	}
-	// codex has no system-prompt flag: the system text leads the prompt.
-	events, runErr := run(ctx, system+"\n\n"+state+"\n\n"+user, append(args, "-")...)
+	events, runErr := run(ctx, stdin, append(args, "-")...)
 	usage, failure := readEvents(events)
 	answer, err := os.ReadFile(outPath)
 	if err != nil || len(bytes.TrimSpace(answer)) == 0 {

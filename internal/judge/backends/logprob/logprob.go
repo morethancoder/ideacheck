@@ -12,6 +12,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -294,6 +295,63 @@ func (j *Judge) Extract(ctx context.Context, system, user string, fields []strin
 	}
 	return judge.Extraction{Values: values, Model: res.Model, TokensIn: res.Usage.PromptTokens, TokensOut: res.Usage.CompletionTokens}, nil
 }
+
+// chatJSON is one plain completion whose reply should hold a JSON object; like
+// Extract, it asks in the prompt and reads leniently.
+func (j *Judge) chatJSON(ctx context.Context, system, user string, maxTokens int, into any) (*openai.Response, error) {
+	res, err := j.Client.Chat(ctx, openai.Request{
+		Model:           j.Model,
+		MaxTokens:       maxTokens,
+		Messages:        []openai.Message{{Role: "system", Content: system}, {Role: "user", Content: user}},
+		ReasoningEffort: j.effort(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	text := thinkRE.ReplaceAllString(res.Choices[0].Message.Content, "")
+	start, end := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	if start < 0 || end <= start {
+		return nil, fmt.Errorf("model did not return a JSON object")
+	}
+	if err := json.Unmarshal([]byte(text[start:end+1]), into); err != nil {
+		return nil, fmt.Errorf("model reply is not the requested JSON: %w", err)
+	}
+	return res, nil
+}
+
+// Plan lists the searches worth running. A local model cannot search, but it
+// can say what to search for — ideacheck does the searching.
+func (j *Judge) Plan(ctx context.Context, system, user string, topics []string) (judge.Plan, error) {
+	var out struct {
+		Queries []judge.Query `json:"queries"`
+	}
+	res, err := j.chatJSON(ctx, system, user, extractMaxTokens, &out)
+	if err != nil {
+		return judge.Plan{}, err
+	}
+	return judge.Plan{Queries: out.Queries, Model: res.Model, TokensIn: res.Usage.PromptTokens, TokensOut: res.Usage.CompletionTokens}, nil
+}
+
+// Digest turns fetched search results into findings.
+func (j *Judge) Digest(ctx context.Context, system, user string, topics []string) (judge.Research, error) {
+	var out struct {
+		Findings []judge.Finding `json:"findings"`
+	}
+	res, err := j.chatJSON(ctx, system, user, digestMaxTokens, &out)
+	if err != nil {
+		return judge.Research{}, err
+	}
+	kept := out.Findings[:0]
+	for _, f := range out.Findings {
+		if strings.TrimSpace(f.Title) != "" && slices.Contains(topics, f.Topic) {
+			kept = append(kept, f)
+		}
+	}
+	return judge.Research{Findings: kept, Model: res.Model, TokensIn: res.Usage.PromptTokens, TokensOut: res.Usage.CompletionTokens}, nil
+}
+
+// digestMaxTokens covers a few findings per topic, plus thinking.
+const digestMaxTokens = 4096
 
 // extractMaxTokens covers a handful of short field values, plus thinking.
 const extractMaxTokens = 2048

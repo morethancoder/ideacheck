@@ -2,7 +2,11 @@
 #  - one judgment per question; "yes" must be the natural positive reading;
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
-#  - `uses` lists only the state fields the question needs (idea, profile).
+#  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence` is what a web search found (research.yaml lists the topics); it is
+#    only there when the check could research. A question that merely benefits
+#    from it lists it in `uses`; one that cannot be judged without it also sets
+#    `requires: [evidence]`, and is skipped — not guessed — when nothing was searched.
 #  - `requires` (optional) names state the question cannot be judged without:
 #    when it is absent the question is not asked, and its weight moves to the rest.
 name: business
@@ -43,8 +47,8 @@ questions:
     kind: score
     weight: 1.0
     polarity: 1
-    uses: [idea]
-    instructions: Based only on the description in `idea`, how large could the market plausibly become?
+    uses: [idea, evidence]
+    instructions: How large could the market for the idea in `idea` plausibly become? When `evidence` is present, go by the market signals in `evidence.market` over the description's own claims.
     levels:
       - Tiny niche unlikely to grow
       - Small niche
@@ -54,8 +58,8 @@ questions:
     kind: noul
     weight: 1.5
     polarity: -1
-    uses: [idea]
-    instructions: This is an idea many people independently come up with and that has repeatedly been tried without success (for example apps to plan meetups with friends, generic social networks, restaurant or music discovery apps).
+    uses: [idea, evidence]
+    instructions: This is an idea many people independently come up with and that has repeatedly been tried without success (for example apps to plan meetups with friends, generic social networks, restaurant or music discovery apps). When `evidence` is present, `evidence.prior_attempts` lists earlier attempts a web search found.
     criteria:
       yes: A common idea many teams have launched, in a category that keeps failing to become a lasting business.
       no: An idea few people arrive at on their own, or a category where earlier attempts did not repeatedly fail.
@@ -72,8 +76,8 @@ questions:
     kind: noul
     weight: 0
     polarity: 0
-    uses: [idea]
-    instructions: Products or services already exist that address substantially the same problem for the same audience.
+    uses: [idea, evidence]
+    instructions: Products or services already exist that address substantially the same problem for the same audience. When `evidence` is present, `evidence.competitors` lists what a web search found, and an empty list means it found none.
     criteria:
       yes: At least one existing product or service already does this job for this audience, even imperfectly.
       no: No product or service does this job for this audience; people go without it or improvise by hand.
@@ -86,17 +90,39 @@ questions:
     criteria:
       yes: It names something specific that existing alternatives do not do or do not know.
       no: It only claims to be better, simpler, cheaper, or AI-powered without saying what exactly differs.
+  - id: differentiation_holds
+    kind: noul
+    weight: 1.0
+    polarity: 1
+    uses: [idea, evidence]
+    # Whether the claimed difference survives contact with what already exists
+    # can only be judged against a list of what exists.
+    requires: [evidence]
+    instructions: None of the products listed in `evidence.competitors` already offers what the description in `idea` claims as its difference.
+    criteria:
+      yes: The description claims a specific difference, and no product listed in `evidence.competitors` is described as already offering it.
+      no: A product listed in `evidence.competitors` already offers the claimed difference, or the description claims no specific difference.
   - id: why_now
     kind: score
     weight: 1.0
     polarity: 1
-    uses: [idea]
-    instructions: How strong is the reason this is newly possible or newly needed?
+    uses: [idea, evidence]
+    instructions: How strong is the reason this is newly possible or newly needed? When `evidence` is present, `evidence.recent_changes` lists recent changes a web search found.
     levels:
       - Nothing has changed; this could have been built years ago
       - A weak or generic trend is cited
       - A specific recent change makes this newly possible or needed
       - A specific recent change makes this urgent and existing players are poorly positioned
+  - id: why_now_confirmed
+    kind: noul
+    weight: 0.5
+    polarity: 1
+    uses: [idea, evidence]
+    requires: [evidence]
+    instructions: A change listed in `evidence.recent_changes` supports the reason the description in `idea` gives for why this is possible or needed now.
+    criteria:
+      yes: The description gives a reason, and a change listed in `evidence.recent_changes` is that same change or directly supports it.
+      no: The description gives no reason, or nothing listed in `evidence.recent_changes` supports the reason it gives.
   - id: proxy_exists
     kind: noul
     weight: 0.5
@@ -169,6 +195,11 @@ verdict:
     - when: "competitors_exist > 0.7 && differentiating_insight < 0.3"
       max: explore
       reason: Crowded space with no stated differentiation
+    # Only fires when the check researched: without `evidence`,
+    # differentiation_holds is not asked and a gate never reads a missing value.
+    - when: "competitors_exist > 0.7 && differentiation_holds < 0.3"
+      max: explore
+      reason: Existing products already offer the claimed difference
   thresholds:            # on composite in [0,1]
     build: 0.70
     explore: 0.50
@@ -193,3 +224,6 @@ verdict:
         - when: "competitors_exist > 0.7 && differentiating_insight < 0.3"
           max: explore
           reason: Crowded space with no stated differentiation
+        - when: "competitors_exist > 0.7 && differentiation_holds < 0.3"
+          max: explore
+          reason: Existing products already offer the claimed difference

@@ -85,6 +85,25 @@ func New(cfg config.Config, d Deps) (judge.Judge, error) {
 	return nil, fmt.Errorf("unknown backend %q (want one of %v)", cfg.Backend, Names)
 }
 
+// NewWriter builds the backend that reads, researches and writes when that is
+// not the judging backend; nil means the judge does it all. A writer has to be
+// able to write: naming a classifier here is a configuration mistake.
+func NewWriter(cfg config.Config, d Deps) (judge.Judge, error) {
+	if !cfg.Split() {
+		return nil, nil
+	}
+	wcfg := cfg
+	wcfg.Backend = cfg.Writer
+	w, err := New(wcfg, d)
+	if err != nil {
+		return nil, fmt.Errorf("writer %s: %w", cfg.Writer, err)
+	}
+	if _, ok := w.(judge.Narrator); !ok {
+		return nil, fmt.Errorf("writer %q only classifies: it cannot read, research or write. Pick a chat model (claude-cli, codex-cli, structured, logprob) as the writer", cfg.Writer)
+	}
+	return w, nil
+}
+
 // endpointKey sends each hosted service only its own key; local servers get none.
 func endpointKey(baseURL string, d Deps) string {
 	switch {
@@ -110,7 +129,8 @@ func newStructured(cfg config.Config, d Deps, llm structured.Completer) (judge.J
 	if err != nil {
 		return nil, err
 	}
-	return &structured.Judge{Backend: cfg.Backend, Prompts: prompts, LLM: llm, Mode: b.Mode, VoteK: b.VoteK, MaxConcurrent: b.MaxConcurrent}, nil
+	return &structured.Judge{Backend: cfg.Backend, Prompts: prompts, LLM: llm, Mode: b.Mode, VoteK: b.VoteK, MaxConcurrent: b.MaxConcurrent,
+		Search: structured.SearchLimits{MaxSearches: cfg.Research.MaxSearches, MaxTokens: cfg.Research.MaxTokens}}, nil
 }
 
 func structuredProvider(b config.Backend, d Deps) (structured.Completer, error) {
@@ -134,7 +154,8 @@ func structuredProvider(b config.Backend, d Deps) (structured.Completer, error) 
 			return nil, fmt.Errorf("%s is not set; run `ideacheck setup` to enter it or pick another provider", env)
 		}
 		return &structured.Compat{Client: &openai.Client{BaseURL: b.BaseURL, APIKey: key}, Model: b.Model, MaxTokens: b.MaxTokens,
-			CompletionTokens: b.Provider == "openai", Effort: b.Effort, SchemaInPrompt: ollamaCloud(b.BaseURL)}, nil
+			CompletionTokens: b.Provider == "openai", Effort: b.Effort, SchemaInPrompt: ollamaCloud(b.BaseURL),
+			WebPlugin: b.Provider == "openrouter"}, nil
 	}
 	return nil, fmt.Errorf("backends.structured.provider %q is not one of anthropic, openai, openrouter, ollama", b.Provider)
 }

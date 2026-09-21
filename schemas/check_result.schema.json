@@ -162,6 +162,40 @@
         "confidence"
       ]
     },
+    "Evidence": {
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "relation": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "used": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "topic",
+        "title",
+        "summary",
+        "url",
+        "used"
+      ]
+    },
     "IdeaType": {
       "properties": {
         "choice": {
@@ -221,6 +255,53 @@
         "out"
       ]
     },
+    "Query": {
+      "properties": {
+        "topic": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "topic",
+        "query"
+      ]
+    },
+    "ResearchReport": {
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "queries": {
+          "items": {
+            "$ref": "#/$defs/Query"
+          },
+          "type": "array"
+        },
+        "model": {
+          "type": "string"
+        },
+        "cached": {
+          "type": "boolean"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "by",
+        "findings"
+      ]
+    },
     "RubricRef": {
       "properties": {
         "name": {
@@ -263,6 +344,9 @@
     "backend": {
       "type": "string"
     },
+    "writer": {
+      "type": "string"
+    },
     "model": {
       "type": "string"
     },
@@ -286,6 +370,9 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "research": {
+      "$ref": "#/$defs/ResearchReport"
     },
     "answers": {
       "items": {

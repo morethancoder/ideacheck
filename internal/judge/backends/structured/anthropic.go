@@ -70,6 +70,76 @@ func (a *Anthropic) Complete(ctx context.Context, system, state, user string, sc
 	}, nil
 }
 
+// maxPauses bounds how often a paused search turn is resumed.
+const maxPauses = 5
+
+// Search runs one request with the web search server tool on. The reply is not
+// constrained with output_config: search replies carry citations, which the API
+// rejects together with a JSON format, so the schema is stated in the prompt
+// and the caller takes the first object out of the text. Thinking is left at
+// the model's default: deciding what to look up is not a narrow judgment.
+func (a *Anthropic) Search(ctx context.Context, system, user string, schema map[string]any, limits SearchLimits) (Completion, error) {
+	stated, err := withSchema(user, schema)
+	if err != nil {
+		return Completion{}, err
+	}
+	params := anthropic.MessageNewParams{
+		Model:     anthropic.Model(a.Model),
+		MaxTokens: int64(max(a.MaxTokens, limits.MaxTokens)),
+		System:    []anthropic.TextBlockParam{{Text: system}},
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(stated))},
+		Tools:     []anthropic.ToolUnionParam{searchTool(a.Model, limits.MaxSearches)},
+	}
+	var total Completion
+	for range maxPauses {
+		msg, err := a.client.Messages.New(ctx, params)
+		if err != nil {
+			return Completion{}, classify(err)
+		}
+		u := msg.Usage
+		total.Model = string(msg.Model)
+		total.TokensIn += int(u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens)
+		total.TokensOut += int(u.OutputTokens)
+		total.TokensCached += int(u.CacheReadInputTokens)
+		// pause_turn: the server stopped a long search turn; sending the reply
+		// back as it is lets the model carry on from there.
+		if msg.StopReason == anthropic.StopReasonPauseTurn {
+			params.Messages = append(params.Messages, msg.ToParam())
+			continue
+		}
+		if msg.StopReason == anthropic.StopReasonRefusal || msg.StopReason == anthropic.StopReasonMaxTokens {
+			return Completion{}, fmt.Errorf("model stopped with %q before reporting its findings", msg.StopReason)
+		}
+		var text strings.Builder
+		for _, block := range msg.Content {
+			if t, ok := block.AsAny().(anthropic.TextBlock); ok {
+				text.WriteString(t.Text)
+			}
+		}
+		total.Text = text.String()
+		return total, nil
+	}
+	return Completion{}, fmt.Errorf("the search turn was still paused after %d resumes", maxPauses)
+}
+
+// searchTool picks the web search tool the model supports: Haiku 4.5 and older
+// take the basic one; newer models take the one that filters results itself.
+func searchTool(model string, maxUses int) anthropic.ToolUnionParam {
+	uses := anthropic.Int(int64(maxUses))
+	if strings.HasPrefix(model, "claude-haiku") {
+		t := &anthropic.WebSearchTool20250305Param{}
+		if maxUses > 0 {
+			t.MaxUses = uses
+		}
+		return anthropic.ToolUnionParam{OfWebSearchTool20250305: t}
+	}
+	t := &anthropic.WebSearchTool20260209Param{}
+	if maxUses > 0 {
+		t.MaxUses = uses
+	}
+	return anthropic.ToolUnionParam{OfWebSearchTool20260209: t}
+}
+
 // canDisableThinking: Fable/Mythos reject disabled thinking outright, and Opus 5
 // rejects it above high effort (both 400). Those run with their default instead.
 func canDisableThinking(model, effort string) bool {

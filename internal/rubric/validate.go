@@ -14,7 +14,11 @@ const (
 	maxOptions = 255
 )
 
-var stateFields = map[string]bool{"idea": true, "profile": true}
+// stateFields are the names a question may read. `evidence` is what research
+// found; `finding` is one of those findings, seen only by _evidence.yaml.
+var stateFields = map[string]bool{"idea": true, "profile": true, "evidence": true, "finding": true}
+
+const stateNames = "idea, profile, evidence, finding"
 
 // Validate enforces the question-writing rules shared by every rubric file.
 // All problems are reported at once so a rubric author fixes them in one pass.
@@ -140,7 +144,7 @@ func validateUses(uses []string) []error {
 	var errs []error
 	for _, u := range uses {
 		if !stateFields[u] {
-			errs = append(errs, fmt.Errorf("uses %q is not one of idea, profile", u))
+			errs = append(errs, fmt.Errorf("uses %q is not one of %s", u, stateNames))
 		}
 	}
 	return errs
@@ -152,7 +156,7 @@ func validateRequires(q judge.Question) []error {
 	var errs []error
 	for _, r := range q.Requires {
 		if !stateFields[r] {
-			errs = append(errs, fmt.Errorf("requires %q is not one of idea, profile", r))
+			errs = append(errs, fmt.Errorf("requires %q is not one of %s", r, stateNames))
 			continue
 		}
 		if !contains(q.Uses, r) {
@@ -178,12 +182,33 @@ func (rb *Rubric) validateGaps() error {
 	if rb.ConfidencePenalty < 0 || rb.ConfidencePenalty > 1 {
 		return fmt.Errorf("confidence_penalty %v must be within [0,1]", rb.ConfidencePenalty)
 	}
+	if rb.AskLimit < 0 {
+		return fmt.Errorf("ask_limit %d must not be negative", rb.AskLimit)
+	}
 	for _, q := range rb.Questions {
 		if q.Kind != judge.Noul {
 			return fmt.Errorf("%s: gap questions must be noul", q.ID)
 		}
 		if q.Ask == "" || q.Fills == "" {
 			return fmt.Errorf("%s: gap questions must set ask and fills", q.ID)
+		}
+	}
+	return nil
+}
+
+// validateEvidence: one choice question per finding, and the options that drop
+// a finding must be options of it.
+func (rb *Rubric) validateEvidence() error {
+	if len(rb.Questions) != 1 || rb.Questions[0].Kind != judge.Choice {
+		return errors.New("_evidence must contain exactly one choice question")
+	}
+	q := rb.Questions[0]
+	if !contains(q.Uses, "finding") {
+		return fmt.Errorf("%s: must use `finding`, the item it is asked about", q.ID)
+	}
+	for _, d := range rb.Drop {
+		if _, ok := q.Options[d]; !ok {
+			return fmt.Errorf("drop %q is not an option of %s", d, q.ID)
 		}
 	}
 	return nil
@@ -197,8 +222,11 @@ func (rb *Rubric) validateRouter() error {
 }
 
 func (rb *Rubric) validateScoring() error {
-	if rb.ConfidencePenalty != 0 {
-		return errors.New("confidence_penalty belongs to _gaps.yaml only")
+	if rb.ConfidencePenalty != 0 || rb.AskLimit != 0 {
+		return errors.New("confidence_penalty and ask_limit belong to _gaps.yaml only")
+	}
+	if len(rb.Drop) > 0 {
+		return errors.New("drop belongs to _evidence.yaml only")
 	}
 	var total float64
 	for _, q := range rb.Questions {

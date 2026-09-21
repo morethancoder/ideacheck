@@ -2,6 +2,7 @@ package claudecli
 
 import (
 	"context"
+	"github.com/morethancoder/ideacheck/internal/judge/backends/structured"
 	"strings"
 	"testing"
 )
@@ -26,6 +27,11 @@ func TestCompleteReadsTheEnvelope(t *testing.T) {
 	for _, want := range []string{"-p", "--output-format\x00json", "--model\x00sonnet", "--system-prompt\x00SYS", `--json-schema` + "\x00" + `{"type":"object"}`, "--tools\x00\x00--no-session-persistence", "--effort\x00low"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q: %q", want, gotArgs)
+		}
+	}
+	for _, want := range []string{"--strict-mcp-config", "--disable-slash-commands", "--setting-sources\x00\x00"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q: the caller's MCP servers, skills and settings must stay out of a judgment", want)
 		}
 	}
 	if strings.Contains(args, "--bare") {
@@ -69,5 +75,28 @@ func TestThinkingIsOffUnlessAnEffortIsChosen(t *testing.T) {
 		if strings.Contains(args, "--effort") == strings.Contains(args, "--settings") {
 			t.Errorf("effort %q: want exactly one of --effort / --settings: %q", effort, args)
 		}
+	}
+}
+
+// A research call may search and fetch, and nothing else: no shell, no files.
+func TestSearchAllowsOnlyTheWebTools(t *testing.T) {
+	var gotArgs []string
+	var gotStdin string
+	cli := &CLI{Model: "sonnet", Run: func(_ context.Context, stdin string, args ...string) ([]byte, error) {
+		gotArgs, gotStdin = args, stdin
+		return []byte(`{"is_error":false,"structured_output":{"findings":[]},"usage":{"input_tokens":5,"output_tokens":7}}`), nil
+	}}
+	got, err := cli.Search(context.Background(), "SYS", "BRIEF", map[string]any{"type": "object"}, structured.SearchLimits{MaxSearches: 3})
+	if err != nil || got.Text != `{"findings":[]}` {
+		t.Fatalf("search = %+v, %v", got, err)
+	}
+	args := strings.Join(gotArgs, "\x00")
+	for _, want := range []string{"--tools\x00WebSearch\x00", "--allowedTools\x00WebSearch\x00", "--json-schema"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q: %q", want, gotArgs)
+		}
+	}
+	if strings.Contains(args, "Bash") || strings.Contains(args, "WebFetch") || gotStdin != "BRIEF" {
+		t.Errorf("args=%q stdin=%q", gotArgs, gotStdin)
 	}
 }

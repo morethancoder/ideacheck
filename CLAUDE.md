@@ -3,7 +3,9 @@
 `ideacheck` is one Go binary that checks an idea: it asks a judge model a set of
 independent **typed** questions concurrently, combines the answers with weights we
 control, and returns per-dimension scores plus a verdict (`build`, `explore`,
-`park`, `kill`) — plus what information is missing. It is not a success predictor.
+`park`, `kill`) — plus what information is missing. Before scoring it can look the
+idea up on the web, so questions about the world read findings, not the pitch. It
+is not a success predictor.
 
 `README.md` is the user-facing manual (install, backends, config, API, bench).
 This file is the map for working **on** the code. It replaces the old `HANDOFF.md`
@@ -16,6 +18,14 @@ or price lives in a config file, never in Go source.** Go owns the loop, the
 arithmetic, the aggregation and the verdict gates. The model is asked only narrow
 judgments it can answer in one token or one small JSON object; it is never asked
 for a final score.
+
+**Two roles.** The *judge* (`backend:`, `Engine.Judge`) answers every typed
+question — anything whose answer is one of a known set of options, including how a
+research finding relates to the idea. The *writer* (`writer:`, `Engine.Writer`)
+does what has no option list: read a document, search the web, write a paragraph.
+One backend may hold both roles; Jev can only hold the first. When you add a
+model call, decide which role it is: if the answer can be typed, it is a question
+in a rubric file for the judge, not a prompt for the writer.
 
 Corollary: to change behaviour, first ask whether the change belongs in
 `configs/` (embedded defaults, user-overridable) rather than in a `.go` file.
@@ -34,7 +44,8 @@ terminal.
 ## Pipeline (`internal/pipeline`)
 
 ```
-intake → extract → gaps + router (one batch) → score (fan-out) → aggregate → verdict → explain → persist
+intake → extract → gaps + router (one batch) → research + sift → score (fan-out) → aggregate → verdict → explain → persist
+          writer     judge                        writer   judge   judge                                       writer
 ```
 
 | Stage | File | What it does |
@@ -44,6 +55,8 @@ intake → extract → gaps + router (one batch) → score (fan-out) → aggrega
 | extract | `extract.go` | one optional model call that pulls idea fields out of free prose, filling only fields the user left empty (`extract: true`) |
 | gaps | `engine.go` + `rubrics/_gaps.yaml` | nouls "does the description state X"; below `threshold` and the field is still empty → `missing[]` |
 | route | `engine.go` + `rubrics/_router.yaml` | one `choice` over idea types → picks `rubrics/<type>.yaml` (`other` → `business`) |
+| research | `research.go`, `lookup.go` + `research.yaml` + `prompts/research*` | findings (with URLs) about the topics in `research.yaml` land in `result.research` and, grouped by topic, in `evidence` state. `lookup.go` is the default path and has no model in the loop: writer **plans** queries (`Planner`; else the topic's own `queries:`) → Go **searches** (`Engine.Search`: SearXNG / Tavily / Brave) → Go **reads** pages to text (`Engine.Pages`) → writer **digests** (`Digester`; else results are the findings; a finding whose URL was not among the results is dropped). `research.search: llm`, or nothing to search with, falls back to the writer's own web tool (`Researcher`). Cached per idea-as-given (`Engine.Cache`, the history DB). Every step degrades, none fails the check |
+| sift | `research.go` + `rubrics/_evidence.yaml` | the judge types each finding (one `choice` over `idea` + `finding`); options under `drop:` remove it from `evidence`. `research.sift: auto` = only when judge ≠ writer |
 | score | `engine.go`, `judge/fanout.go` | every rubric question at once, one goroutine each |
 | aggregate | `aggregate.go` | normalize to [0,1], apply polarity, weight, divide by the weights **answered** |
 | verdict | `verdict.go` + rubric `verdict:` block | ordered gates, then composite thresholds. No model call |
@@ -56,6 +69,13 @@ Invariants worth keeping:
   it shows up in `warnings[]` and in that dimension's `error`.
 - A question only sees the state it declares in `uses:` (context-rot rule,
   `judge.State.Sub`).
+- Research supplies facts, never numbers. A question that merely benefits from
+  `evidence` lists it in `uses`; one that cannot be judged without it also sets
+  `requires: [evidence]` and is skipped when nothing was searched — so a run
+  without research scores exactly the questions it always did.
+- A gap whose field a research topic `covers:` is never asked about while research
+  will run, and leaves `missing[]` once findings come back. The TUI asks at most
+  `ask_limit` follow-ups (`Engine.FollowUps`).
 - Missing facts do not block a verdict outside the TUI: agent and server runs
   score what is known and report `missing[]` with `partial: true`. `--strict`
   restores the old "stop and ask" behaviour.
@@ -77,6 +97,8 @@ internal/
   rubric/              YAML load, validate, hash; verdict gates
   prompt/              text/template loading of configs/prompts/*
   config/              koanf: flags > env IDEACHECK_* > user dir > embedded
+  search/              the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
+                       page reader (public addresses only) that boils HTML down to text
   store/               SQLite history (modernc.org/sqlite, pure Go)
   tui/                 bubbletea app: menu, idea form, live check, result, setup
   ui/                  the shared step column — install.sh in Go: rows, pending
@@ -88,8 +110,9 @@ internal/
 configs/               EMBEDDED DEFAULTS (go:embed), user-overridable
   config.yaml          backends, pricing, setup wizard choices
   fields.yaml          what a caller can send about an idea, and what each field means
-  rubrics/             _gaps, _router, business, side_project, content, research, creative
-  prompts/             judge_system.md, question_*.tmpl, explain*, extract*
+  research.yaml        what the writer looks up on the web, and which gap each topic covers
+  rubrics/             _gaps, _router, _evidence, business, side_project, content, research, creative
+  prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
 schemas/               check_result.schema.json, generated from the Go types
 scripts/               bash for every non-trivial make target
 ```
@@ -108,8 +131,13 @@ type Judge interface {
 ```
 
 Optional, type-asserted where used: `BatchJudge` (all questions in one request),
-`Narrator` (the explain paragraph), `Extractor` (the extract stage). A backend
-that implements none of them still works.
+and the writer's three — `Narrator` (the explain paragraph), `Extractor` (the
+extract stage), `Planner` + `Digester` (name the searches, then turn fetched
+results into findings — no web access needed, so a local model can), `Researcher`
+(the writer's own web tool; `CanResearch()` says whether this configuration can
+reach the web). A backend that implements none of them still
+works. For the `structured` family, searching is a provider capability:
+`structured.Searcher` (claude-cli, codex-cli, Anthropic, OpenRouter).
 
 Question kinds: `noul` (probability a statement is true, with optional
 `criteria: {yes, no}` for the boundary), `score` (ordered levels), `choice` (named
@@ -125,8 +153,10 @@ answers only — a noul is a probability, not a doubt.
 One judgment per question; "yes" is the natural positive reading; every `choice`
 includes `other`; `score` has 2–10 concrete levels, low → high; weights ≥ 0 and
 every weighted question sets polarity; `uses` lists only the state the question
-needs, and a question about the person sets `requires: [profile]`; name the state
-the question reads (`idea`, `profile`) — Jev reads literally; gate expressions may
+needs, and a question about the person sets `requires: [profile]`; state names are
+`idea`, `profile`, `evidence` (research findings by topic; an empty list means
+"searched, found none") and `finding` (`_evidence.yaml` only); name the state
+the question reads (`idea`, `profile`, `evidence.competitors`) — Jev reads literally; gate expressions may
 reference real question ids only, and see normalized values in [0,1]. After
 changing a question, `make bench ARGS='-b jev'` and compare (`bench --compare`).
 
@@ -177,6 +207,15 @@ make dev        # build + open the TUI
 make schema     # regenerate schemas/check_result.schema.json from the Go types
 ```
 
+- `-b mock` researches only when its fixtures dir holds a `research.json` (a list
+  of findings), so offline runs and old tests are unchanged; `bench` never researches.
+- Pipeline tests replace `Engine.Search` / `Engine.Pages` with fakes; `internal/search`
+  tests use `httptest` per provider. No test touches the network.
+- An agent loop is the expensive way to do anything here: each turn re-sends all
+  earlier tool output. Before adding a tool to a model call, ask whether Go can
+  fetch the material and hand it over in one call instead.
+- The search flags were verified against the installed CLIs (`claude` 2.1.278,
+  `codex` 0.153.4) — re-verify them, as the comments beside them say, when bumping.
 - `-b mock` is the offline backend: use it for anything that is not about a real
   provider's wire format.
 - Prompt output is pinned by golden files: `go test ./internal/prompt -update`.
