@@ -45,6 +45,38 @@ type Verdict struct {
 	Gates         []Gate     `yaml:"gates" json:"gates,omitempty"`
 	Thresholds    Thresholds `yaml:"thresholds" json:"thresholds"`
 	MinConfidence float64    `yaml:"min_confidence" json:"min_confidence"`
+	// Backends replaces parts of the verdict for one backend. Probabilities from
+	// different backends are not on one scale — Jev's are calibrated, vote
+	// frequencies come in steps of 1/k — so a cut tuned on one is not carried to
+	// another. Set only what differs; the rest is inherited.
+	Backends map[string]VerdictOverride `yaml:"backends" json:"backends,omitempty"`
+}
+
+// VerdictOverride is one backend's replacement for parts of a Verdict. Gates,
+// when present, replace the whole list.
+type VerdictOverride struct {
+	Gates         []Gate      `yaml:"gates" json:"gates,omitempty"`
+	Thresholds    *Thresholds `yaml:"thresholds" json:"thresholds,omitempty"`
+	MinConfidence *float64    `yaml:"min_confidence" json:"min_confidence,omitempty"`
+}
+
+// For returns the verdict that applies to backend.
+func (v Verdict) For(backend string) Verdict {
+	o, ok := v.Backends[backend]
+	if !ok {
+		return v
+	}
+	out := v
+	if o.Gates != nil {
+		out.Gates = o.Gates
+	}
+	if o.Thresholds != nil {
+		out.Thresholds = *o.Thresholds
+	}
+	if o.MinConfidence != nil {
+		out.MinConfidence = *o.MinConfidence
+	}
+	return out
 }
 
 // Thresholds are lower bounds on the composite in [0,1]; below Park is "kill".

@@ -85,6 +85,10 @@ func TestValidationRejectsBrokenRubrics(t *testing.T) {
 		{"thresholds out of order", "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\nverdict:\n  thresholds: {build: 0.5, explore: 0.5, park: 0.3}\n", "thresholds"},
 		{"gate with misspelled id", "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\nverdict:\n  gates: [{when: \"aa > 0.5\", max: park, reason: r}]\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n", `unknown question "aa"`},
 		{"gate with bad max", "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\nverdict:\n  gates: [{when: \"a > 0.5\", max: maybe, reason: r}]\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n", "max"},
+		{"criteria on a score", q("    kind: score\n    weight: 1\n    polarity: 1\n    levels: [a, b]\n    criteria: {yes: y, no: n}\n"), "criteria"},
+		{"one-sided noul criteria", q("    kind: noul\n    weight: 1\n    polarity: 1\n    criteria: {yes: y}\n"), "both yes and no"},
+		{"backend gate with misspelled id", "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\nverdict:\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n  backends:\n    jev:\n      gates: [{when: \"aa > 0.5\", max: park, reason: r}]\n", `backends.jev gate 0: when "aa > 0.5" references unknown question "aa"`},
+		{"backend thresholds out of order", "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\nverdict:\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n  backends:\n    jev:\n      thresholds: {build: 0.4, explore: 0.5, park: 0.3}\n", "backends.jev: thresholds"},
 		{"gate that is not boolean", "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\nverdict:\n  gates: [{when: \"a + 1\", max: park, reason: r}]\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n", "when"},
 	}
 	for _, c := range cases {
@@ -145,5 +149,28 @@ func TestRank(t *testing.T) {
 	}
 	if _, ok := Rank(Uncertain); ok {
 		t.Error("uncertain is not a rankable verdict")
+	}
+}
+
+// A backend override replaces only what it sets, and its gates are compiled
+// and ready to fire like the defaults.
+func TestVerdictForBackend(t *testing.T) {
+	body := "questions:\n  - {id: a, kind: noul, instructions: x, uses: [idea], weight: 1, polarity: 1}\n" +
+		"verdict:\n  gates: [{when: \"a > 0.7\", max: park, reason: r}]\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n  min_confidence: 0.45\n" +
+		"  backends:\n    jev:\n      gates: [{when: \"a > 0.6\", max: park, reason: calibrated}]\n      min_confidence: 0.3\n"
+	rb, err := Load(memFiles{"rubrics/custom.yaml": body}, "rubrics", "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jev, other := rb.Verdict.For("jev"), rb.Verdict.For("logprob")
+	if jev.MinConfidence != 0.3 || jev.Thresholds != other.Thresholds || other.MinConfidence != 0.45 {
+		t.Errorf("jev = %+v, logprob = %+v", jev, other)
+	}
+	at := map[string]float64{"a": 0.65}
+	if fires, err := jev.Gates[0].Fires(at); err != nil || !fires {
+		t.Errorf("jev gate at 0.65: %v, %v", fires, err)
+	}
+	if fires, _ := other.Gates[0].Fires(at); fires {
+		t.Error("the default gate must keep its own cut")
 	}
 }

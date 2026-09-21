@@ -15,43 +15,46 @@ confidence_penalty: 0.5
 questions:
   - id: has_problem
     kind: noul
-    instructions: The description states a specific problem that specific people have today.
+    instructions: The description in `idea` states a specific problem that specific people have today.
     uses: [idea]
     ask: What problem does this solve, and for whom?
     fills: problem
   - id: has_audience
     kind: noul
-    instructions: The description names a specific target user or customer group.
+    instructions: The description in `idea` names a specific target user or customer group.
     uses: [idea]
     ask: Who exactly is the first user? Be narrow.
     fills: audience
   - id: has_solution
     kind: noul
-    instructions: The description explains what the product or output actually is.
+    instructions: The description in `idea` explains what the product or output actually is.
     uses: [idea]
     ask: What is the thing you would build or make, concretely?
     fills: solution
   - id: has_why_now
     kind: noul
-    instructions: The description gives a reason this is newly possible or newly needed now.
+    instructions: The description in `idea` gives a reason this is newly possible or newly needed now.
     uses: [idea]
     ask: What changed recently (technology, rules, behavior) that makes this possible or urgent now?
     fills: why_now
   - id: has_competitor_awareness
     kind: noul
-    instructions: The description mentions existing alternatives, competitors, or how people cope today.
+    instructions: The description in `idea` mentions existing alternatives, competitors, or how people cope today.
     uses: [idea]
     ask: What do people use today instead? Name alternatives if you know any.
     fills: competitors_known
   - id: has_differentiation
     kind: noul
-    instructions: The description states what this does differently or better than existing alternatives.
+    instructions: The description in `idea` states what this does differently or better than existing alternatives.
     uses: [idea]
     ask: What is the one thing this does that existing options do not?
     fills: differentiation
   - id: has_founder_context
     kind: noul
-    instructions: The profile contains information about the person's skills, domain experience, or relationship to the problem.
+    instructions: The profile in `profile` contains information about the person's skills, domain experience, or relationship to the problem.
+    criteria:
+      yes: "`profile` is present and states at least one of: the person's skills, their domain experience, or their relationship to the problem."
+      no: "`profile` is absent or empty, or says nothing about the person's skills, experience, or relationship to the problem."
     uses: [profile]
     ask: What is your background relative to this idea (skills, domain, do you have this problem yourself)?
     fills: profile.background

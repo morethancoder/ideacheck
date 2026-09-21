@@ -118,8 +118,9 @@ func TestEventsStreamProgressThenResult(t *testing.T) {
 			}
 		}
 	}
-	// 8 preflight + 7 creative questions + the summary, each started + answered.
-	if counts["progress"] != 32 || counts["result"] != 1 || final.ID != accepted.ID || final.Verdict == "" {
+	// 8 preflight + the 5 creative questions that need no profile + the
+	// summary, each started + answered.
+	if counts["progress"] != 28 || counts["result"] != 1 || final.ID != accepted.ID || final.Verdict == "" {
 		t.Errorf("events = %v final = %+v", counts, final)
 	}
 	if code := getJSON(t, srv.URL+"/v1/checks/chk_nope/events", &struct{}{}); code != 404 {

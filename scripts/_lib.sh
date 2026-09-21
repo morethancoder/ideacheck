@@ -14,9 +14,20 @@ ok()   { printf '%s ok %s %s\n' "$GREEN" "$RESET" "$*"; }
 warn() { printf '%swarn%s %s\n' "$YELLOW" "$RESET" "$*" >&2; }
 err()  { printf '%s err%s %s\n' "$RED" "$RESET" "$*" >&2; }
 
-# load_env sources .env when present. API keys belong here or in your shell, never in config files.
+# load_env exports the non-empty KEY=value lines of .env when present. A blank
+# entry (the .env.example placeholders) leaves a key already in your shell alone.
+# API keys belong here or in your shell, never in config files.
 load_env() {
-  if [ -f .env ]; then set -a; . ./.env; set +a; fi
+  [ -f .env ] || return 0
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"; line="${line#export }"
+    case "$line" in *=*) ;; *) continue ;; esac   # blanks, comments without =, junk
+    key="${line%%=*}"; val="${line#*=}"
+    case "$key" in '' | [!A-Za-z_]* | *[!A-Za-z0-9_]*) continue ;; esac   # comments, bad names
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    if [ -n "$val" ]; then export "$key=$val"; fi
+  done < .env
 }
 
 # has_cli NAME — quiet presence test.

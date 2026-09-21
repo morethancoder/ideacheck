@@ -211,12 +211,13 @@ published as [`schemas/check_result.schema.json`](schemas/check_result.schema.js
 | `claude-cli` | model-stated | `claude` CLI, logged in | Human use only: spends your Claude subscription's limits (that policy may change). ~11k tokens of CLI overhead per call, so it batches by default. |
 | `codex-cli` | model-stated | `codex` CLI, logged in | Human use only, same trade-offs (~12k tokens overhead per call). Runs `codex exec` read-only and ephemeral with `--output-schema`. |
 | `logprob` | token logits over answer labels | Ollama ≥ 0.12, llama.cpp, vLLM, or an OpenRouter provider that returns logprobs | Local and free. **Raw logits, not calibrated.** Runs each choice/score question `shuffle_runs` times in shuffled order and averages, to damp position bias. Ollama Cloud returns no logprobs — use `structured` with `provider: ollama` for it. |
-| `jev` | model-native | `TYPESAFE_API_KEY` (waitlisted) | Wire format verified against the vendor SDKs; one request per state group. Model pinned in config. |
+| `jev` | model-native, calibrated | `TYPESAFE_API_KEY` ([typesafe.ai](https://typesafe.ai)) | TypeSafe's System One model: typed noul/score/choice answers with probabilities, no sampling. Wire format checked against docs.typesafe.ai/api (2026-09-21); one request per state group. Pinned to `jev-1.13.0` (`jev-latest` moves). Offered in `ideacheck setup`. |
 | `mock` | seeded / fixtures | nothing | Tests and `bench --dry-run`. |
 
 `serve` refuses the two CLI-login backends unless you pass `--allow-cli-backend`.
 
 API keys come from the environment, or from `credentials.yaml` written by `ideacheck setup` — never from `config.yaml`.
+In a checkout, `make run/dev/serve/bench` also load a gitignored `.env` (copy `.env.example`); a blank line there leaves your shell's value alone.
 
 ## Configuration
 
@@ -244,6 +245,16 @@ Rubrics (`rubrics/*.yaml`) are validated on load: one judgment per question, eve
 `choice` has `other`, 2–10 score levels, weighted questions declare polarity, gate
 expressions may only reference real question ids. Gates see **normalized** values in
 [0,1] and are skipped when a question they read went unanswered.
+
+- A `noul` may carry `criteria: {yes: …, no: …}` saying where the line between yes
+  and no falls. Every backend sees it (Jev as its native `criteria`).
+- `verdict.backends.<name>` replaces the gates, `thresholds` or `min_confidence`
+  for one backend. Probabilities from different backends are not on one scale:
+  Jev's are calibrated, while vote counts come in steps of 1/k. Tune a cut on
+  `bench` for the backend it applies to.
+- The composite's confidence averages the **choice and score** answers only. A noul
+  is already a probability: 0.25 means "probably not", which is a clear answer, not a
+  doubtful one.
 
 ## HTTP API
 

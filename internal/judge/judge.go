@@ -20,8 +20,9 @@ type Question struct {
 	ID           string            `yaml:"id" json:"id"`
 	Kind         Kind              `yaml:"kind" json:"kind"`
 	Instructions string            `yaml:"instructions" json:"instructions"`
-	Options      map[string]string `yaml:"options,omitempty" json:"options,omitempty"` // choice: key -> description
-	Levels       []string          `yaml:"levels,omitempty" json:"levels,omitempty"`   // score: ordered, index 0 first
+	Options      map[string]string `yaml:"options,omitempty" json:"options,omitempty"`   // choice: key -> description
+	Levels       []string          `yaml:"levels,omitempty" json:"levels,omitempty"`     // score: ordered, index 0 first
+	Criteria     *NoulCriteria     `yaml:"criteria,omitempty" json:"criteria,omitempty"` // noul only, optional: the boundary between yes and no
 	// Rubric-only metadata (ignored by backends):
 	Weight   float64            `yaml:"weight,omitempty" json:"weight,omitempty"`
 	Polarity int                `yaml:"polarity,omitempty" json:"polarity,omitempty"` // +1 good-when-high, -1 bad-when-high, 0 informational
@@ -30,6 +31,14 @@ type Question struct {
 	Ask      string             `yaml:"ask,omitempty" json:"ask,omitempty"`           // gaps only: follow-up question shown to the user
 	Fills    string             `yaml:"fills,omitempty" json:"fills,omitempty"`       // gaps only: intake field the follow-up reply is stored in
 	Values   map[string]float64 `yaml:"values,omitempty" json:"values,omitempty"`     // choice only: option key -> value in [0,1] for aggregation
+}
+
+// NoulCriteria says what counts as a yes and what counts as a no, for a noul
+// whose boundary the statement alone leaves open. The YAML keys are yes/no
+// because a bare `true:` key parses as a boolean.
+type NoulCriteria struct {
+	Yes string `yaml:"yes" json:"yes"`
+	No  string `yaml:"no" json:"no"`
 }
 
 type Answer struct {

@@ -40,7 +40,8 @@ questions:
     weight: 1.5
     polarity: 1
     uses: [idea, profile]
-    instructions: How well does the scope of a first usable version fit the time the person has available?
+    requires: [profile]
+    instructions: How well does the scope of a first usable version fit the time the person in `profile` has available?
     levels:
       - Far larger than the available time; unlikely to be finished
       - Finishable only by cutting most of what is described
@@ -51,7 +52,7 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea]
-    instructions: The description identifies a small first version that would be usable on its own.
+    instructions: The description in `idea` identifies a small first version that would be usable on its own.
   - id: novelty_to_builder
     kind: noul
     weight: 0.5

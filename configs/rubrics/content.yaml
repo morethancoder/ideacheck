@@ -24,13 +24,14 @@ questions:
     weight: 1.5
     polarity: 1
     uses: [idea]
-    instructions: The description names a specific channel through which the first audience will find this.
+    instructions: The description in `idea` names a specific channel through which the first audience will find this.
   - id: sustainable_cadence
     kind: score
     weight: 1.0
     polarity: 1
     uses: [idea, profile]
-    instructions: How sustainable is the planned publishing pace for this person?
+    requires: [profile]
+    instructions: How sustainable is the planned publishing pace for the person in `profile`?
     levels:
       - No pace stated, or one that clearly cannot be kept up
       - Ambitious; likely to slip within months
@@ -40,7 +41,8 @@ questions:
     weight: 1.5
     polarity: 1
     uses: [idea, profile]
-    instructions: How credible is this person on this topic?
+    requires: [profile]
+    instructions: How credible is the person in `profile` on this topic?
     levels:
       - No stated experience with the topic
       - An interested amateur
@@ -51,7 +53,7 @@ questions:
     weight: 1.5
     polarity: 1
     uses: [idea]
-    instructions: The description states an angle or format that existing content on this topic does not offer.
+    instructions: The description in `idea` states an angle or format that existing content on this topic does not offer.
   - id: audience_value
     kind: score
     weight: 1.0

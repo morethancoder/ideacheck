@@ -25,6 +25,9 @@ questions:
     polarity: -1
     uses: [idea]
     instructions: The idea starts from a technology or trend and works backward to find a problem, rather than starting from a problem people already have.
+    criteria:
+      yes: The technology or trend comes first, and the problem or customer is vague, deferred, or picked to fit it.
+      no: A specific problem or customer comes first, and the technology is how it gets solved.
   - id: audience_specificity
     kind: score
     weight: 1.0
@@ -41,7 +44,7 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea]
-    instructions: Based only on the description, how large could the market plausibly become?
+    instructions: Based only on the description in `idea`, how large could the market plausibly become?
     levels:
       - Tiny niche unlikely to grow
       - Small niche
@@ -53,24 +56,36 @@ questions:
     polarity: -1
     uses: [idea]
     instructions: This is an idea many people independently come up with and that has repeatedly been tried without success (for example apps to plan meetups with friends, generic social networks, restaurant or music discovery apps).
+    criteria:
+      yes: A common idea many teams have launched, in a category that keeps failing to become a lasting business.
+      no: An idea few people arrive at on their own, or a category where earlier attempts did not repeatedly fail.
   - id: structural_barrier_named
     kind: noul
     weight: 1.0
     polarity: 1
     uses: [idea]
-    instructions: The description names a specific structural reason this has not been solved before and explains how this idea gets past it.
+    instructions: The description in `idea` names a specific structural reason this has not been solved before and explains how this idea gets past it.
+    criteria:
+      yes: It names a concrete reason earlier attempts failed or could not happen (a missing technology, cost, rule, or access) and says how this idea gets past it.
+      no: It gives no such reason, or only says it will be better, easier, or use AI.
   - id: competitors_exist
     kind: noul
     weight: 0
     polarity: 0
     uses: [idea]
     instructions: Products or services already exist that address substantially the same problem for the same audience.
+    criteria:
+      yes: At least one existing product or service already does this job for this audience, even imperfectly.
+      no: No product or service does this job for this audience; people go without it or improvise by hand.
   - id: differentiating_insight
     kind: noul
     weight: 1.5
     polarity: 1
     uses: [idea]
-    instructions: The description contains a specific insight or approach that existing alternatives are missing.
+    instructions: The description in `idea` contains a specific insight or approach that existing alternatives are missing.
+    criteria:
+      yes: It names something specific that existing alternatives do not do or do not know.
+      no: It only claims to be better, simpler, cheaper, or AI-powered without saying what exactly differs.
   - id: why_now
     kind: score
     weight: 1.0
@@ -87,7 +102,7 @@ questions:
     weight: 0.5
     polarity: 1
     uses: [idea]
-    instructions: The description points to a successful comparable business in another market, geography, or vertical that proves the model works.
+    instructions: The description in `idea` points to a successful comparable business in another market, geography, or vertical that proves the model works.
   - id: scalability
     kind: score
     weight: 1.0
@@ -117,7 +132,7 @@ questions:
     # Without a profile this is a judgment of the input, not of the person, so
     # it is left unscored and its weight goes to the other questions.
     requires: [profile]
-    instructions: How well matched is this person's background to this specific idea?
+    instructions: How well matched is the background of the person in `profile` to this specific idea?
     levels:
       - No relevant skills, domain knowledge, or access
       - Can build it but has no domain insight or access to users
@@ -128,7 +143,8 @@ questions:
     weight: 0.5
     polarity: 1
     uses: [idea, profile]
-    instructions: The person or people they know would use this themselves.
+    requires: [profile]
+    instructions: The person in `profile`, or people they know, would use this themselves.
   - id: clarity
     kind: score
     weight: 0.5
@@ -159,3 +175,21 @@ verdict:
     park: 0.30
     # below park → kill
   min_confidence: 0.45   # below this, verdict is reported as "uncertain" with the composite
+  # Jev's nouls are calibrated probabilities, so they sit nearer the middle than
+  # vote counts do. On bench/ideas.jsonl (jev-1.13.0, 2026-09-21) it put the
+  # four labelled tarpits at 0.57-0.84 and every labelled non-tarpit at 0.18
+  # or below: 0.7 missed three of the four. For a calibrated probability the
+  # plain cut is 0.5, "more likely than not". Re-measure with
+  # `make bench ARGS='-b jev'` after changing a question or moving the model.
+  backends:
+    jev:
+      gates:
+        - when: "sisp > 0.8 && problem_acuity < 0.34"
+          max: park
+          reason: Solution in search of a problem
+        - when: "tarpit > 0.5 && structural_barrier_named < 0.3"
+          max: explore
+          reason: Likely tarpit with no named way past the barrier
+        - when: "competitors_exist > 0.7 && differentiating_insight < 0.3"
+          max: explore
+          reason: Crowded space with no stated differentiation

@@ -149,7 +149,11 @@ func TestRouting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		if res.Rubric.Name != c.want || (len(res.Warnings) > 0) != c.warn {
+		fellBack := false
+		for _, w := range res.Warnings {
+			fellBack = fellBack || strings.Contains(w, "has no rubric")
+		}
+		if res.Rubric.Name != c.want || fellBack != c.warn {
 			t.Errorf("%s: rubric=%q warnings=%v", c.name, res.Rubric.Name, res.Warnings)
 		}
 	}
@@ -262,10 +266,10 @@ func TestEventsCarryQuestionStageAndValue(t *testing.T) {
 			acuity = &e
 		}
 	}
-	// 14 of the business rubric's 15: founder_market_fit requires a profile,
-	// and this idea has none, so it is never asked.
-	if stages[StagePreflight] != 8 || stages[StageScore] != 14 {
-		t.Errorf("answered per stage = %v, want preflight 8, score 14", stages)
+	// 13 of the business rubric's 15: founder_market_fit and personal_want
+	// require a profile, and this idea has none, so they are never asked.
+	if stages[StagePreflight] != 8 || stages[StageScore] != 13 {
+		t.Errorf("answered per stage = %v, want preflight 8, score 13", stages)
 	}
 	if acuity == nil || acuity.Value == nil || !near(*acuity.Value, 0.5) || acuity.Question.Weight != 2 {
 		t.Errorf("problem_acuity event = %+v", acuity)
@@ -378,11 +382,15 @@ func TestPartialResultDiscountsConfidence(t *testing.T) {
 }
 
 // weightedConfidence is the undiscounted composite confidence, read back off
-// the dimensions the way Combine computes it.
+// the dimensions the way Combine computes it: nouls do not count.
 func weightedConfidence(res *Result) float64 {
+	kinds := map[string]judge.Kind{}
+	for _, a := range res.Answers {
+		kinds[a.ID] = a.Kind
+	}
 	var sum, weights float64
 	for _, d := range res.Dimensions {
-		if d.Value == nil || d.Weight <= 0 || d.Polarity == 0 {
+		if d.Value == nil || d.Weight <= 0 || d.Polarity == 0 || kinds[d.ID] == judge.Noul {
 			continue
 		}
 		sum, weights = sum+d.Confidence*d.Weight, weights+d.Weight

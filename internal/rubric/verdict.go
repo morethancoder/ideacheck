@@ -39,6 +39,33 @@ type Gate struct {
 }
 
 func (v *Verdict) validate(qs []judge.Question) error {
+	if err := v.validateOne(qs); err != nil {
+		return err
+	}
+	for name, o := range v.Backends {
+		for i := range o.Gates { // compiled in place: For hands these out
+			if err := o.Gates[i].compile(questionEnv(qs)); err != nil {
+				return fmt.Errorf("backends.%s gate %d: %w", name, i, err)
+			}
+		}
+		merged := v.For(name)
+		merged.Gates = nil // compiled above
+		if err := merged.validateOne(qs); err != nil {
+			return fmt.Errorf("backends.%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func questionEnv(qs []judge.Question) map[string]float64 {
+	env := make(map[string]float64, len(qs))
+	for _, q := range qs {
+		env[q.ID] = 0
+	}
+	return env
+}
+
+func (v *Verdict) validateOne(qs []judge.Question) error {
 	t := v.Thresholds
 	if !(t.Build > t.Explore && t.Explore > t.Park && t.Park > 0 && t.Build <= 1) {
 		return fmt.Errorf("thresholds must satisfy 1 >= build > explore > park > 0, got %+v", t)
@@ -46,10 +73,7 @@ func (v *Verdict) validate(qs []judge.Question) error {
 	if v.MinConfidence < 0 || v.MinConfidence > 1 {
 		return fmt.Errorf("min_confidence %v must be within [0,1]", v.MinConfidence)
 	}
-	env := make(map[string]float64, len(qs))
-	for _, q := range qs {
-		env[q.ID] = 0
-	}
+	env := questionEnv(qs)
 	for i := range v.Gates {
 		if err := v.Gates[i].compile(env); err != nil {
 			return fmt.Errorf("gate %d: %w", i, err)

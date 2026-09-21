@@ -13,13 +13,13 @@ questions:
     weight: 2.0
     polarity: 1
     uses: [idea]
-    instructions: The description poses a question that a specific observation or result could answer or refute.
+    instructions: The description in `idea` poses a question that a specific observation or result could answer or refute.
   - id: novelty_stated
     kind: score
     weight: 1.5
     polarity: 1
     uses: [idea]
-    instructions: How clearly does the description position this against what is already known?
+    instructions: How clearly does the description in `idea` position this against what is already known?
     levels:
       - Prior work is not mentioned
       - Prior work is mentioned without saying what is missing from it
@@ -30,7 +30,8 @@ questions:
     weight: 1.5
     polarity: 1
     uses: [idea, profile]
-    instructions: How feasible is this with the resources the person has?
+    requires: [profile]
+    instructions: How feasible is this with the resources the person in `profile` has?
     levels:
       - Requires data, equipment, or access the person does not have
       - Possible only after securing significant new resources
@@ -41,7 +42,7 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea]
-    instructions: The description names the method or data that will be used to answer the question.
+    instructions: The description in `idea` names the method or data that will be used to answer the question.
   - id: why_now
     kind: score
     weight: 0.5
@@ -67,7 +68,8 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea, profile]
-    instructions: How well matched is this person's background to this investigation?
+    requires: [profile]
+    instructions: How well matched is the background of the person in `profile` to this investigation?
     levels:
       - No relevant training or experience
       - Adjacent experience

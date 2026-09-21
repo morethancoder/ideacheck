@@ -199,7 +199,7 @@ func withheld(qs []judge.Question, s judge.State) (ask []judge.Question, held ma
 	held = map[int]judge.Answer{}
 	for i, q := range qs {
 		if absent := absentState(q, s); len(absent) > 0 {
-			held[i] = judge.Answer{ID: q.ID, Kind: q.Kind, Err: "no " + strings.Join(absent, " or ") + " given"}
+			held[i] = judge.Answer{ID: q.ID, Kind: q.Kind, Probabilities: map[string]float64{}, Err: "no " + strings.Join(absent, " or ") + " given"}
 			continue
 		}
 		ask = append(ask, q)
@@ -291,7 +291,7 @@ func (e *Engine) conclude(res *Result, rb *rubric.Rubric, answers []judge.Answer
 		res.Error = "no weighted question was answered; see answers[].error"
 		return nil
 	}
-	v, err := Decide(rb.Verdict, agg)
+	v, err := Decide(rb.Verdict.For(e.Judge.Name()), agg)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,7 @@ var qs = []judge.Question{
 	{ID: "idea_type", Kind: judge.Choice, Instructions: "Kind?", Options: map[string]string{"business": "Makes money", "other": "None"}, Weight: 9},
 	{ID: "acuity", Kind: judge.Score, Instructions: "How acute?", Levels: []string{"none", "mild", "painful"}},
 	{ID: "tarpit", Kind: judge.Noul, Instructions: "This is a tarpit."},
-	{ID: "skipped", Kind: judge.Noul, Instructions: "Server omits this."},
+	{ID: "skipped", Kind: judge.Noul, Instructions: "Server omits this.", Criteria: &judge.NoulCriteria{Yes: "named", No: "implied"}},
 }
 
 const reply = `{"model":"jev-1.13.0","usage":{"input_tokens":812,"output_tokens":0},"answers":{
@@ -56,7 +56,10 @@ func TestWireFormat(t *testing.T) {
 		t.Errorf("score criteria must be the ordered level list: %v", levels)
 	}
 	if _, has := sent["tarpit"].(map[string]any)["criteria"]; has {
-		t.Error("noul must send no criteria")
+		t.Error("a noul without criteria must send none")
+	}
+	if c := sent["skipped"].(map[string]any)["criteria"].(map[string]any); c["true"] != "named" || c["false"] != "implied" {
+		t.Errorf("noul criteria must go out as {true, false}: %v", c)
 	}
 
 	if len(got) != 3 {

@@ -36,7 +36,7 @@ func (j *Judge) Capabilities() judge.Capabilities {
 }
 
 // question is the wire form. criteria is a label→description map for choice, an
-// ordered list for score, and absent for noul.
+// ordered list for score, and for noul an optional {"true", "false"} pair.
 type question struct {
 	Type         judge.Kind `json:"type"`
 	Instructions string     `json:"instructions"`
@@ -74,6 +74,10 @@ func wire(q judge.Question) question {
 		w.Criteria = q.Options
 	case judge.Score:
 		w.Criteria = q.Levels
+	case judge.Noul:
+		if c := q.Criteria; c != nil {
+			w.Criteria = map[string]string{"true": c.Yes, "false": c.No}
+		}
 	}
 	return w
 }

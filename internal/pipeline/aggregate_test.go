@@ -31,9 +31,10 @@ func TestCombineWeightsPolarityAndConfidence(t *testing.T) {
 	if !near(agg.Composite, 0.47) {
 		t.Errorf("composite = %v, want 0.47", agg.Composite)
 	}
-	// (0.6*2 + 0.8*1.5 + 1.0*1.5) / 5 = 0.78
-	if !near(agg.Confidence, 0.78) {
-		t.Errorf("confidence = %v, want 0.78", agg.Confidence)
+	// Only the score has a spread to be unsure about: the nouls are
+	// probabilities already, so their entropy does not count.
+	if !near(agg.Confidence, 0.6) {
+		t.Errorf("confidence = %v, want 0.6", agg.Confidence)
 	}
 	// Gates read the raw normalized value, before polarity.
 	if !near(agg.Values["sisp"], 0.9) || !near(agg.Values["competitors"], 0.95) || !near(agg.Values["acuity"], 0.5) {
@@ -57,6 +58,10 @@ func TestCombineExcludesFailedAndRenormalizes(t *testing.T) {
 	// acuity dropped: (0.8*1.5 + 0.6*1.5) / 3 = 0.7 — not divided by the full 5.
 	if !near(agg.Composite, 0.7) || !near(agg.Answered, 3) {
 		t.Errorf("composite = %v answered = %v", agg.Composite, agg.Answered)
+	}
+	// With no score or choice answered, confidence falls back to the nouls'.
+	if !near(agg.Confidence, 0.5) {
+		t.Errorf("confidence = %v, want the noul fallback 0.5", agg.Confidence)
 	}
 	if len(agg.Failed) != 1 || agg.Failed[0] != "acuity" {
 		t.Errorf("failed = %v", agg.Failed)

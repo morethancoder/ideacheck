@@ -34,13 +34,14 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea]
-    instructions: The description names who this work is for.
+    instructions: The description in `idea` names who this work is for.
   - id: scope_realism
     kind: score
     weight: 1.5
     polarity: 1
     uses: [idea, profile]
-    instructions: How realistic is the scope for this person to finish?
+    requires: [profile]
+    instructions: How realistic is the scope for the person in `profile` to finish?
     levels:
       - Far beyond what one person or this team could finish
       - Finishable only by cutting most of what is described
@@ -57,7 +58,8 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea, profile]
-    instructions: How well do the person's existing skills cover what the work requires?
+    requires: [profile]
+    instructions: How well do the existing skills of the person in `profile` cover what the work requires?
     levels:
       - None of the required crafts
       - Some of the required crafts, with major gaps

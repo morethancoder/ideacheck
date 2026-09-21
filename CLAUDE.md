@@ -111,18 +111,24 @@ Optional, type-asserted where used: `BatchJudge` (all questions in one request),
 `Narrator` (the explain paragraph), `Extractor` (the extract stage). A backend
 that implements none of them still works.
 
-Question kinds: `noul` (probability a statement is true), `score` (ordered
-levels), `choice` (named options). Rubric-only metadata on a question: `weight`,
-`polarity` (+1 good-when-high, −1 bad-when-high, 0 informational), `uses`,
-`requires`, and for `_gaps.yaml` only `ask`/`fills`.
+Question kinds: `noul` (probability a statement is true, with optional
+`criteria: {yes, no}` for the boundary), `score` (ordered levels), `choice` (named
+options). Rubric-only metadata on a question: `weight`, `polarity` (+1
+good-when-high, −1 bad-when-high, 0 informational), `uses`, `requires`, and for
+`_gaps.yaml` only `ask`/`fills`. A rubric's `verdict.backends.<name>` overrides
+gates/thresholds/min_confidence for one backend: cuts are tuned per backend on
+`bench`, never carried across. Composite confidence averages choice and score
+answers only — a noul is a probability, not a doubt.
 
 ## Writing rubric questions (`rubric.Validate` enforces most of it)
 
 One judgment per question; "yes" is the natural positive reading; every `choice`
 includes `other`; `score` has 2–10 concrete levels, low → high; weights ≥ 0 and
 every weighted question sets polarity; `uses` lists only the state the question
-needs; gate expressions may reference real question ids only, and see normalized
-values in [0,1].
+needs, and a question about the person sets `requires: [profile]`; name the state
+the question reads (`idea`, `profile`) — Jev reads literally; gate expressions may
+reference real question ids only, and see normalized values in [0,1]. After
+changing a question, `make bench ARGS='-b jev'` and compare (`bench --compare`).
 
 ## Look and feel
 

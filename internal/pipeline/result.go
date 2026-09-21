@@ -95,7 +95,7 @@ type RubricRef struct {
 // question, high is bad). Nil Value means unanswered or not valued.
 type Dimension struct {
 	ID         string   `json:"id"`
-	Value      *float64 `json:"value"`
+	Value      *float64 `json:"value" jsonschema:"nullable"` // null when the question went unanswered
 	Weight     float64  `json:"weight"`
 	Polarity   int      `json:"polarity"`
 	Confidence float64  `json:"confidence"`

@@ -78,6 +78,22 @@ func TestRenderedPromptsMatchGolden(t *testing.T) {
 	}
 }
 
+// A noul's criteria must reach every backend, or the same question would mean
+// one thing to Jev and another to a prompted model.
+func TestNoulCriteriaReachEveryPrompt(t *testing.T) {
+	s, _ := Load(config.NewFiles(""), "prompts")
+	q := noul
+	q.Criteria = &judge.NoulCriteria{Yes: "a known failure pattern", No: "a fresh angle"}
+	lp, _ := s.Logprob(judge.State{"idea": "x"}, q, nil)
+	if !strings.Contains(lp, "Y) yes: a known failure pattern\nN) no: a fresh angle") {
+		t.Errorf("logprob prompt lacks the criteria:\n%s", lp)
+	}
+	st, _ := s.Questions([]judge.Question{q}, "verbalized")
+	if !strings.Contains(st, "True means: a known failure pattern\nFalse means: a fresh angle") {
+		t.Errorf("structured prompt lacks the criteria:\n%s", st)
+	}
+}
+
 func TestVoteModeAsksForNoProbabilities(t *testing.T) {
 	s, _ := Load(config.NewFiles(""), "prompts")
 	vote, _ := s.Questions([]judge.Question{choice, noul}, "vote")

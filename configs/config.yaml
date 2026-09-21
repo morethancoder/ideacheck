@@ -85,7 +85,9 @@ backends:
 # ("claude-haiku-4-5-20251001" → claude-haiku-4-5). The Claude CLI reports its
 # own cost, which wins over this table.
 pricing:
+  # TypeSafe bills input tokens only (docs.typesafe.ai/models, checked 2026-09-21)
   jev-1.13.0: { in: 0.042, out: 0 }
+  jev-latest: { in: 0.042, out: 0 }   # alias of jev-1.13.0 today; recheck when it moves
   # Anthropic
   claude-fable-5-1: { in: 10.0, out: 50.0, cached_in: 1.0 }
   claude-fable-5: { in: 10.0, out: 50.0, cached_in: 1.0 }
@@ -172,6 +174,20 @@ setup:
         - { id: gpt-5.6-terra, label: "gpt-5.6-terra" }
         - { id: gpt-5.6-luna, label: "gpt-5.6-luna — cheapest" }
         - { id: gpt-5.5, label: "gpt-5.5" }
+    # Jev answers each question as calibrated probabilities (no sampling, no
+    # voting) and takes a whole rubric in one request. No effort levels: it
+    # does not reason. Pinned rather than jev-latest, which moves.
+    - id: jev
+      label: TypeSafe Jev API key (built for typed judgments)
+      backend: jev
+      base_url: https://api.typesafe.ai
+      model: jev-1.13.0
+      key_env: TYPESAFE_API_KEY
+      key_url: https://typesafe.ai
+      billing: api
+      models:
+        - { id: jev-1.13.0, label: "jev-1.13.0", no_effort: true }
+        - { id: jev-latest, label: "jev-latest — moves with each release", no_effort: true }
     - id: anthropic
       label: Anthropic API key
       backend: structured

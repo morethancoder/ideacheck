@@ -13,7 +13,7 @@ setup: ## check tools and download dependencies
 	@bash scripts/setup.sh
 
 dev: build ## open the interactive app (first run walks you through setup)
-	@./bin/ideacheck $(ARGS)
+	@bash scripts/exec.sh $(ARGS)
 
 build: ## compile bin/ideacheck with version and git SHA injected
 	@bash scripts/build.sh
@@ -22,10 +22,10 @@ install: ## install ideacheck into GOBIN (users install with install.sh)
 	@bash scripts/build.sh install
 
 run: build ## check an idea: make run ARGS='"my idea" -b mock'
-	@./bin/ideacheck $(ARGS)
+	@bash scripts/exec.sh $(ARGS)
 
 serve: build ## run the local HTTP API
-	@./bin/ideacheck serve $(ARGS)
+	@bash scripts/exec.sh serve $(ARGS)
 
 test: ## run unit tests
 	@go test ./...
@@ -43,13 +43,13 @@ tidy: ## tidy go.mod and go.sum
 	@go mod tidy
 
 bench: build ## compare backends on the seed dataset
-	@./bin/ideacheck bench $(ARGS)
+	@bash scripts/exec.sh bench $(ARGS)
 
 dry: build ## exercise the bench harness with the mock backend
-	@./bin/ideacheck bench --dry-run $(ARGS)
+	@bash scripts/exec.sh bench --dry-run $(ARGS)
 
 dump: build ## print the effective config files (pass ARGS=DIR to write them)
-	@./bin/ideacheck config dump $(ARGS)
+	@bash scripts/exec.sh config dump $(ARGS)
 
 schema: ## regenerate schemas/check_result.schema.json from the Go types
 	@go run ./cmd/schemagen > schemas/check_result.schema.json && echo "wrote schemas/check_result.schema.json"

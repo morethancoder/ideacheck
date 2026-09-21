@@ -5,7 +5,12 @@ STATE:
 
 {{ .Question.Instructions }}
 {{ if eq (printf "%s" .Question.Kind) "noul" -}}
+{{ with .Question.Criteria -}}
+Y) yes: {{ .Yes }}
+N) no: {{ .No }}
+{{- else -}}
 Y) yes  N) no
+{{- end }}
 {{- else -}}
 {{ range .Labels }}{{ .Label }}) {{ .Text }}
 {{ end -}}

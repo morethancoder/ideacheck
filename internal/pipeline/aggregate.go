@@ -55,9 +55,15 @@ func clamp01(v float64) float64 {
 // Combine computes the weighted composite in ordinary code; the model is never
 // asked for a score. Unanswered questions are excluded and the weights of the
 // answered ones renormalize by construction (we divide by their sum).
+//
+// Confidence averages choice and score answers only. A noul is already a
+// probability: 0.25 is a clear "probably not", not a doubtful answer, and Jev
+// sends no confidence for one (docs.typesafe.ai/confidence). Counting an
+// entropy of it would call every calibrated middle value uncertain. A rubric
+// of nouls alone falls back to that entropy, since it has nothing else.
 func Combine(qs []judge.Question, answers []judge.Answer) Aggregate {
 	agg := Aggregate{Values: map[string]float64{}}
-	var sum, confSum float64
+	var sum, confSum, confWeight, noulConfSum float64
 	var all []Contribution
 	for i, q := range qs {
 		v, ok := Normalize(q, answers[i])
@@ -75,13 +81,21 @@ func Combine(qs []judge.Question, answers []judge.Answer) Aggregate {
 			v = 1 - v
 		}
 		sum += v * q.Weight
-		confSum += answers[i].Confidence * q.Weight
+		if q.Kind == judge.Noul {
+			noulConfSum += answers[i].Confidence * q.Weight
+		} else {
+			confSum += answers[i].Confidence * q.Weight
+			confWeight += q.Weight
+		}
 		agg.Answered += q.Weight
 		all = append(all, Contribution{ID: q.ID, Value: v, Weight: q.Weight})
 	}
 	if agg.Answered > 0 {
 		agg.Composite = sum / agg.Answered
-		agg.Confidence = confSum / agg.Answered
+		agg.Confidence = noulConfSum / agg.Answered
+		if confWeight > 0 {
+			agg.Confidence = confSum / confWeight
+		}
 	}
 	agg.Strengths, agg.Risks = split(all)
 	return agg

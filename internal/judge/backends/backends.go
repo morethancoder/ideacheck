@@ -78,7 +78,7 @@ func New(cfg config.Config, d Deps) (judge.Judge, error) {
 	case jev.Name:
 		key := d.Secret("TYPESAFE_API_KEY")
 		if key == "" {
-			return nil, fmt.Errorf("TYPESAFE_API_KEY is not set (Jev access is waitlisted at https://typesafe.ai; use -b structured, claude-cli or logprob meanwhile)")
+			return nil, fmt.Errorf("TYPESAFE_API_KEY is not set; get one at https://typesafe.ai and run `ideacheck setup` → TypeSafe Jev, or export it")
 		}
 		return &jev.Judge{BaseURL: b.BaseURL, APIKey: key, Model: b.Model, MaxConcurrent: b.MaxConcurrent}, nil
 	}

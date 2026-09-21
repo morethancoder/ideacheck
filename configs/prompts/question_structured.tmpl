@@ -34,6 +34,10 @@ Probabilities cover every level and sum to 1.
 {{- end }}
 {{- else }}
 This is a statement. Judge whether it is true of the STATE.
+{{- with .Criteria }}
+True means: {{ .Yes }}
+False means: {{ .No }}
+{{- end }}
 {{- if eq $.Mode "vote" }}
 Answer shape: {"yes": <true|false>}
 {{- else }}

@@ -130,7 +130,14 @@
           "type": "string"
         },
         "value": {
-          "type": "number"
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "weight": {
           "type": "number"

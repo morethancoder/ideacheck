@@ -72,8 +72,8 @@ func validateChoice(q judge.Question) []error {
 	if n := len(q.Options); n < 2 || n > maxOptions {
 		errs = append(errs, fmt.Errorf("choice has %d options, want 2-%d", n, maxOptions))
 	}
-	if len(q.Levels) > 0 {
-		errs = append(errs, errors.New("choice must not set levels"))
+	if len(q.Levels) > 0 || q.Criteria != nil {
+		errs = append(errs, errors.New("choice must not set levels or criteria"))
 	}
 	for key, v := range q.Values {
 		if _, ok := q.Options[key]; !ok {
@@ -96,17 +96,22 @@ func validateScore(q judge.Question) []error {
 			errs = append(errs, fmt.Errorf("level %d is empty", i))
 		}
 	}
-	if len(q.Options) > 0 || len(q.Values) > 0 {
-		errs = append(errs, errors.New("score must not set options or values"))
+	if len(q.Options) > 0 || len(q.Values) > 0 || q.Criteria != nil {
+		errs = append(errs, errors.New("score must not set options, values or criteria"))
 	}
 	return errs
 }
 
 func validateNoul(q judge.Question) []error {
+	var errs []error
 	if len(q.Options) > 0 || len(q.Levels) > 0 || len(q.Values) > 0 {
-		return []error{errors.New("noul must not set options, levels or values")}
+		errs = append(errs, errors.New("noul must not set options, levels or values"))
 	}
-	return nil
+	// Criteria that describe only one side leave the other to a guess.
+	if c := q.Criteria; c != nil && (c.Yes == "" || c.No == "") {
+		errs = append(errs, errors.New("criteria must describe both yes and no"))
+	}
+	return errs
 }
 
 // validateWeight: weights are never negative, and anything that counts toward
