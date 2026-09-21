@@ -11,6 +11,7 @@ require_cli git "needed to stamp the build with a commit SHA"
 step "Optional tools"
 want_cli golangci-lint "brew install golangci-lint — make lint falls back to go vet + gofmt"
 want_cli jq            "brew install jq — handy for -o json output"
+want_cli docker        "needed by make up (a local SearXNG for research), not by the tool itself"
 want_cli gh            "brew install gh — needed by make release, not by the tool itself"
 
 step "Providers (you need ONE; pick it with: ideacheck setup)"

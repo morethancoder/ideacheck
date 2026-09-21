@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help doctor setup dev build install run serve test race lint fmt tidy bench dry dump schema release clean
+.PHONY: help doctor setup dev build install run serve up down test race lint fmt tidy bench dry dump schema release clean
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "; printf "\n\033[1mUsage:\033[0m make \033[36m<target>\033[0m\n\n\033[1mTargets:\033[0m\n"} \
@@ -26,6 +26,12 @@ run: build ## check an idea: make run ARGS='"my idea" -b mock'
 
 serve: build ## run the local HTTP API
 	@bash scripts/exec.sh serve $(ARGS)
+
+up: ## start a local SearXNG in docker, so research can search the web
+	@bash scripts/searxng.sh up
+
+down: ## stop the local SearXNG
+	@bash scripts/searxng.sh down
 
 test: ## run unit tests
 	@go test ./...

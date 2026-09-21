@@ -114,6 +114,7 @@ configs/               EMBEDDED DEFAULTS (go:embed), user-overridable
   rubrics/             _gaps, _router, _evidence, business, side_project, content, research, creative
   prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
 schemas/               check_result.schema.json, generated from the Go types
+docker/searxng/        settings.yml for the SearXNG `make up` starts: the defaults + JSON output
 scripts/               bash for every non-trivial make target
 ```
 
@@ -205,6 +206,7 @@ make race lint  # what CI runs, plus gofmt and golangci-lint when installed
 make run ARGS='"an idea" -b mock'      # no model needed
 make dev        # build + open the TUI
 make schema     # regenerate schemas/check_result.schema.json from the Go types
+make up         # a local SearXNG in docker on 127.0.0.1:8080, so research searches for real; make down stops it
 ```
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list

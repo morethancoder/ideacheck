@@ -273,7 +273,7 @@ ideacheck does the searching itself, in Go, and no model drives a loop:
 | `research.search` | What searches | Needs |
 |---|---|---|
 | `auto` (default) | the first of the next three that is there, else `llm` | — |
-| `searxng` | your own [SearXNG](https://docs.searxng.org) at `research.endpoints.searxng` (`http://localhost:8080`) | free, no key. `docker run -p 8080:8080 searxng/searxng`, and add `json` under `search.formats` in its `settings.yml` — JSON output is off by default, and public instances refuse it |
+| `searxng` | your own [SearXNG](https://docs.searxng.org) at `research.endpoints.searxng` (`http://localhost:8080`) | free, no key. `docker run -p 8080:8080 searxng/searxng`, and add `json` under `search.formats` in its `settings.yml` — JSON output is off by default, and public instances refuse it. From a checkout, `make up` does both (and `make down` stops it) |
 | `tavily` | api.tavily.com | `TAVILY_API_KEY` (free monthly allowance) |
 | `brave` | api.search.brave.com | `BRAVE_API_KEY` |
 | `llm` | the writer's own web tool: `claude -p --tools WebSearch`, `codex --search exec`, Anthropic's `web_search` server tool, OpenRouter's `web` plugin | a writer that has one. Slow and token-hungry: an agent loop re-reads every earlier result on every turn |

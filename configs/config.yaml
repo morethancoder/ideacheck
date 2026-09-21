@@ -36,6 +36,7 @@ extract: true
 #                    else llm
 #           searxng  free, no key, self-hosted: `docker run -p 8080:8080 searxng/searxng`,
 #                    with `json` added under search.formats in its settings.yml
+#                    (`make up` in a checkout does both: docker/searxng/settings.yml)
 #           tavily | brave   hosted, a key each
 #           llm      the writer's own web tool (claude-cli, codex-cli, structured
 #                    with provider anthropic or openrouter). Thorough and slow: an
