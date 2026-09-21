@@ -29,7 +29,8 @@ type fakeHost struct {
 	providers []config.Provider
 	persists  []*pipeline.Result
 	profile   map[string]string
-	notReady  string // Engine fails with *NotReady until setup is saved
+	writer    [3]string // backend, model, effort of the writer in effect
+	notReady  string    // Engine fails with *NotReady until setup is saved
 	models    []config.ModelChoice
 	missing   string // MissingModel says true for this id
 	pullErr   error  // what Download ends with
@@ -97,7 +98,7 @@ func (h *fakeHost) SaveRoles(judge, writer config.Provider) error {
 	h.roles = judge.ID + "+" + writer.ID
 	return nil
 }
-func (h *fakeHost) Writer() string { return "" }
+func (h *fakeHost) Writer() (string, string, string) { return h.writer[0], h.writer[1], h.writer[2] }
 func (h *fakeHost) Engine() (*pipeline.Engine, error) {
 	if h.notReady != "" {
 		return nil, &NotReady{Reason: h.notReady}
@@ -143,6 +144,9 @@ func pump(t *testing.T, a *App, cmd tea.Cmd, fromPage page) {
 		}
 	}
 }
+
+// loadChosen lists the chosen provider's models, as its Model step does.
+func loadChosen(a *App) *pick { return a.loadModels(a.setup, a.setup.chosen(), a.setup.role()) }
 
 func newApp(h Host, start Start) *App {
 	return &App{host: h, start: start, ctx: context.Background(), intake: start.Intake, width: 100, height: 30}
@@ -239,7 +243,7 @@ func TestSetupOffersToKeepAKeyAlreadySet(t *testing.T) {
 	if _, total := a.wiz.position(); total != 3 {
 		t.Errorf("keeping the key: provider, key choice, model; total = %d", total)
 	}
-	a.setup.key, a.setup.custom = "typed-then-kept", "gpt-y"
+	a.setup.key, loadChosen(a).custom = "typed-then-kept", "gpt-y"
 	a.finishSetup()
 	if len(h.saved) != 1 || h.saved[0] != "openai/gpt-y//" {
 		t.Errorf("keeping the key must save none: %v", h.saved)
@@ -254,7 +258,7 @@ func TestSetupOffersToKeepAKeyAlreadySet(t *testing.T) {
 	if view := a.View(); !strings.Contains(view, "OPENAI_API_KEY") || !strings.Contains(view, "that one wins") {
 		t.Fatalf("replacing a key from the environment must ask for it and say the environment wins:\n%s", view)
 	}
-	a.setup.key, a.setup.custom = " sk-new ", "gpt-y"
+	a.setup.key, loadChosen(a).custom = " sk-new ", "gpt-y"
 	a.finishSetup()
 	if len(h.saved) != 1 || h.saved[0] != "openai/gpt-y//sk-new" {
 		t.Errorf("saved = %v", h.saved)
@@ -275,7 +279,7 @@ func TestFirstRunSetupThenContinuesToTheCheck(t *testing.T) {
 	if _, total := a.wiz.position(); total != 3 {
 		t.Errorf("a key provider adds the API key step: total = %d", total)
 	}
-	a.setup.key, a.setup.custom = " sk-test ", " gpt-y "
+	a.setup.key, loadChosen(a).custom = " sk-test ", " gpt-y "
 	a.finishSetup()
 	if len(h.saved) != 1 || h.saved[0] != "openai/gpt-y//sk-test" {
 		t.Errorf("saved = %v", h.saved)
@@ -293,7 +297,7 @@ func TestUnreachableModelOpensSettingsCalmlyThenRunsTheCheck(t *testing.T) {
 	if a.page != pageSetup || a.banner != "" || !strings.Contains(view, "qwen3:8b is not downloaded") || strings.Contains(view, "! ") {
 		t.Fatalf("want Settings with a calm note, not an error: page=%v banner=%q\n%s", a.page, a.banner, view)
 	}
-	a.setup.custom = "llama3.2:3b"
+	loadChosen(a).custom = "llama3.2:3b"
 	a.finishSetup()
 	if a.page != pageLive || a.note != "" || a.intake.Idea != "x" {
 		t.Errorf("after fixing settings the same check must run: page=%v note=%q idea=%q", a.page, a.note, a.intake.Idea)
@@ -305,14 +309,12 @@ func TestSetupNeverDefaultsToAModelThatIsNotInstalled(t *testing.T) {
 	h := &fakeHost{t: t, providers: []config.Provider{ollama}, models: []config.ModelChoice{{ID: "llama3.2:3b"}, {ID: "gemma3:4b"}}}
 	a := newApp(h, Start{Page: pageMenu})
 	a.open(pageSetup)
-	a.loadModels(a.setup)
-	if got := a.setup.modelID(); got != "llama3.2:3b" {
+	if got := loadChosen(a).modelID(); got != "llama3.2:3b" {
 		t.Errorf("default model = %q, want the first installed one (qwen3:8b is not pulled)", got)
 	}
 	h.models = []config.ModelChoice{{ID: "gemma3:4b"}, {ID: "qwen3:8b"}}
 	a.open(pageSetup)
-	a.loadModels(a.setup)
-	if got := a.setup.modelID(); got != "qwen3:8b" {
+	if got := loadChosen(a).modelID(); got != "qwen3:8b" {
 		t.Errorf("default model = %q, want the preset when it is installed", got)
 	}
 }
@@ -322,8 +324,7 @@ func TestSetupOffersModelsThenEffort(t *testing.T) {
 		Models: []config.ModelChoice{{ID: "sonnet", Label: "Sonnet"}, {ID: "haiku", Label: "Haiku", NoEffort: true}}}}}
 	a := newApp(h, Start{Page: pageMenu})
 	a.open(pageSetup)
-	d := a.setup
-	a.loadModels(d)
+	d := loadChosen(a)
 	if d.model != "sonnet" || d.effort != "low" {
 		t.Errorf("defaults: model=%q effort=%q, want the provider default at low effort", d.model, d.effort)
 	}
@@ -383,8 +384,8 @@ func TestSetupDownloadsAMissingLocalModelBeforeSavingIt(t *testing.T) {
 	h := &fakeHost{t: t, providers: []config.Provider{ollama}, models: []config.ModelChoice{{ID: "llama3.2:3b"}}, missing: "qwen3:8b"}
 	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
 	a.Init()
-	a.loadModels(a.setup)
-	a.setup.model, a.setup.custom = otherModel, " qwen3:8b "
+	k := loadChosen(a)
+	k.model, k.custom = otherModel, " qwen3:8b "
 
 	cmd := a.finishSetup()
 	if a.page != pageDownload || len(h.saved) != 0 {
@@ -406,15 +407,16 @@ func TestAFailedDownloadGoesBackToSetupWithoutSaving(t *testing.T) {
 	h := &fakeHost{t: t, providers: []config.Provider{ollama}, missing: "nope:1b", pullErr: errors.New("Ollama has no model called nope:1b")}
 	a := newApp(h, Start{Page: pageMenu})
 	a.open(pageSetup)
-	a.loadModels(a.setup)
-	a.setup.model, a.setup.custom = otherModel, "nope:1b"
+	k := loadChosen(a)
+	k.model, k.custom = otherModel, "nope:1b"
 	pump(t, a, a.finishSetup(), pageDownload)
 	if a.page != pageSetup || len(h.saved) != 0 || !strings.Contains(a.note, "no model called nope:1b") || a.banner != "" {
 		t.Errorf("page=%v saved=%v note=%q banner=%q", a.page, h.saved, a.note, a.banner)
 	}
 
 	h.missing, h.pullErr, h.hang = "big:70b", nil, true
-	a.setup.model, a.setup.custom = otherModel, "big:70b"
+	k = loadChosen(a) // going back opened a fresh setup
+	k.model, k.custom = otherModel, "big:70b"
 	cmd := a.finishSetup()
 	a.Update(tea.KeyMsg{Type: tea.KeyEsc}) // stop it
 	pump(t, a, cmd, pageDownload)
@@ -427,7 +429,7 @@ func TestAnInstalledModelIsSavedWithoutDownloading(t *testing.T) {
 	h := &fakeHost{t: t, missing: "other"}
 	a := newApp(h, Start{Page: pageMenu})
 	a.open(pageSetup)
-	a.loadModels(a.setup)
+	loadChosen(a)
 	a.finishSetup()
 	if len(h.pulled) != 0 || len(h.saved) != 1 {
 		t.Errorf("pulled=%v saved=%v", h.pulled, h.saved)
@@ -439,7 +441,7 @@ func TestAnInstalledModelIsSavedWithoutDownloading(t *testing.T) {
 // real width then pushed the input out of view — the step showed its title and
 // description, and typing did nothing.
 func TestAStepYouCanReadIsAStepYouCanTypeInto(t *testing.T) {
-	d := &setupDraft{custom: "typed-so-far"}
+	d := &pick{custom: "typed-so-far"}
 	long := "Any model from ollama.com/library, e.g. qwen3:8b. If it is not on this machine yet, it is downloaded when you finish."
 	w, _ := newWizard("t", 100, 30, []step{{title: "Model id", build: func() *huh.Form {
 		return huh.NewForm(huh.NewGroup(customModel(d, "Model id", long, true)))
@@ -455,7 +457,7 @@ func TestAStepYouCanReadIsAStepYouCanTypeInto(t *testing.T) {
 
 func TestABlankModelIDIsNotSaved(t *testing.T) {
 	submit := func(id string) []error {
-		d := &setupDraft{custom: id}
+		d := &pick{custom: id}
 		form := huh.NewForm(huh.NewGroup(customModel(d, "Model id", "", true))).WithWidth(60)
 		form.Init()
 		m, _ := form.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -501,6 +503,53 @@ func TestSetupPairsAClassifierWithAWriter(t *testing.T) {
 	a.saveSetup()
 	if h.roles != "claude-cli+" {
 		t.Errorf("roles = %q, want one model doing everything", h.roles)
+	}
+}
+
+// The writer is picked like the judge: how to reach it, then its model and its
+// effort. It was once a provider at its preset model, with no way to pick
+// another — and Settings opened on "none" whatever writer was configured.
+func TestSetupPicksTheWritersModel(t *testing.T) {
+	providers := []config.Provider{
+		{ID: "jev", Label: "Jev", Backend: "jev", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true, Model: "jev-1"},
+		{ID: "ollama", Label: "Ollama", Backend: "logprob", Model: "qwen3:8b"},
+		{ID: "claude-cli", Label: "Claude CLI", Backend: "claude-cli", Model: "sonnet", Efforts: []string{"low", "high"},
+			Models: []config.ModelChoice{{ID: "sonnet", Label: "Sonnet"}, {ID: "haiku", Label: "Haiku", NoEffort: true}}},
+	}
+	h := &fakeHost{t: t, providers: providers, keys: map[string]bool{"TYPESAFE_API_KEY": true}, writer: [3]string{"claude-cli", "haiku", ""}}
+	a := newApp(h, Start{Page: pageSetup, ExitAfter: true})
+	a.Init()
+	d := a.setup
+	d.id = "jev"
+	if view := a.View(); !strings.Contains(view, "writer claude-cli · haiku") {
+		t.Errorf("settings must open on the writer configured now:\n%s", view)
+	}
+	k := a.loadModels(d, d.writerChoice(), roleWriter)
+	if k.modelID() != "haiku" {
+		t.Errorf("the writer's model defaults to the one it runs now, got %q", k.modelID())
+	}
+	if _, total := a.wiz.position(); total != 5 {
+		t.Errorf("provider, key, model, writer, writer model (haiku takes no effort): total = %d", total)
+	}
+	k.model, k.effort = "sonnet", "high"
+	if _, total := a.wiz.position(); total != 6 {
+		t.Errorf("sonnet adds the writer's effort step: total = %d", total)
+	}
+	if view := a.View(); !strings.Contains(view, "writer claude-cli · sonnet") {
+		t.Errorf("the header follows the choice being made:\n%s", view)
+	}
+	a.saveSetup()
+	if len(h.saved) != 2 || h.saved[0] != "claude-cli/sonnet/high/" || !strings.HasPrefix(h.saved[1], "jev/") || h.roles != "jev+claude-cli" {
+		t.Errorf("saved = %v roles = %q, want the writer's model, then the judge", h.saved, h.roles)
+	}
+
+	d.writer = "ollama" // never listed: a writer new to this config starts at its own effort, not the judge's low
+	if k := a.loadModels(d, d.writerChoice(), roleWriter); k.modelID() != "qwen3:8b" || k.effort != "" {
+		t.Errorf("a new writer: model=%q effort=%q, want its preset at its own effort", k.modelID(), k.effort)
+	}
+	d.writer = noWriter
+	if _, total := a.wiz.position(); total != 4 {
+		t.Errorf("nobody writes, so there is no writer model to pick: total = %d", total)
 	}
 }
 

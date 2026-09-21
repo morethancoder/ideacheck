@@ -25,20 +25,27 @@ import (
 const otherModel = "\x00other"
 
 type setupDraft struct {
-	id, key       string
-	replaceKey    bool   // a key is already set and the user chose to replace it
+	id, key     string
+	replaceKey  bool   // a key is already set and the user chose to replace it
+	writer      string // provider id that writes next to a judge that cannot; noWriter = nobody
+	jevJudges   bool   // let Jev answer the typed questions next to the chosen model
+	judgeAsked  bool   // the Judge step was shown; until then jevJudges stays false
+	providers   []config.Provider
+	current     [2][3]string     // backend, model, effort of the judge and the writer when setup opened
+	picks       map[string]*pick // by provider id, once that provider's models were listed
+	fetched     map[string]bool  // models downloaded during this setup
+	search      *SearchState     // asked once: the wizard counts its steps on every draw
+	startSearch bool             // start the search engine once the choices are saved
+}
+
+// pick is the model and effort chosen for one provider. Every provider keeps
+// its own, so the judge and the writer are each picked the same way, and going
+// back to change a provider never carries a model across.
+type pick struct {
+	models        []config.ModelChoice
+	note          string // why the list is the preset one (discovery failed)
 	model, custom string // model is the list choice; custom the typed id (otherModel, or no list)
 	effort        string
-	writer        string // provider id that writes next to a judge that cannot; noWriter = nobody
-	jevJudges     bool   // let Jev answer the typed questions next to the chosen model
-	judgeAsked    bool   // the Judge step was shown; until then jevJudges stays false
-	providers     []config.Provider
-	current       [3]string // backend, model, effort in effect when setup opened
-	defaultsFor   string    // provider id the model/effort defaults were set for
-	lists         map[string][]config.ModelChoice
-	note          string       // why the list is the preset one (discovery failed)
-	search        *SearchState // asked once: the wizard counts its steps on every draw
-	startSearch   bool         // start the search engine once the choices are saved
 }
 
 // searching is what research has to search with, asked of the host once.
@@ -55,6 +62,15 @@ func (d *setupDraft) chosen() config.Provider { return providerByID(d.providers,
 // noWriter is the "scores only" choice in the writer list.
 const noWriter = "\x00none"
 
+// writerChoice is the provider picked in the Writer step, zero when that step
+// does not apply or the answer was nobody.
+func (d *setupDraft) writerChoice() config.Provider {
+	if !d.chosen().NeedsWriter || d.writer == noWriter {
+		return config.Provider{}
+	}
+	return providerByID(d.providers, d.writer)
+}
+
 // classifier is the provider that only classifies (Jev), if setup offers one.
 func (d *setupDraft) classifier() (config.Provider, bool) {
 	for _, p := range d.providers {
@@ -69,9 +85,9 @@ func (d *setupDraft) classifier() (config.Provider, bool) {
 func (d *setupDraft) roles() (judge, writer config.Provider) {
 	chosen := d.chosen()
 	switch jev, ok := d.classifier(); {
-	case chosen.NeedsWriter && d.writer != noWriter:
-		return chosen, providerByID(d.providers, d.writer)
-	case !chosen.NeedsWriter && ok && d.jevJudges:
+	case chosen.NeedsWriter:
+		return chosen, d.writerChoice()
+	case ok && d.jevJudges:
 		return jev, chosen
 	}
 	return chosen, config.Provider{}
@@ -95,30 +111,53 @@ func (a *App) writers(d *setupDraft) []huh.Option[string] {
 	var opts []huh.Option[string]
 	for _, p := range d.providers {
 		if !p.NeedsWriter && a.usable(p) {
-			label := p.Label
-			if p.Model != "" {
-				label += " · " + p.Model
-			}
-			opts = append(opts, huh.NewOption(label, p.ID))
+			opts = append(opts, huh.NewOption(p.Label, p.ID))
 		}
 	}
 	return append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
 }
 
-// models is the list for the chosen provider, once loaded.
-func (d *setupDraft) models() []config.ModelChoice { return d.lists[d.id] }
-
-func (d *setupDraft) modelID() string {
-	if len(d.models()) == 0 || d.model == otherModel {
-		return strings.TrimSpace(d.custom)
+// pickOf is what was chosen for p; before its models were listed, nothing.
+func (d *setupDraft) pickOf(p config.Provider) *pick {
+	if k, ok := d.picks[p.ID]; ok {
+		return k
 	}
-	return d.model
+	return &pick{}
 }
 
-// efforts offered for the chosen model: its own list, none, or the provider's.
-func (d *setupDraft) efforts() []string {
-	for _, m := range d.models() {
-		if m.ID == d.model && d.model != otherModel {
+// was is the model and effort p's backend had when setup opened.
+func (d *setupDraft) was(p config.Provider) (model, effort string, ok bool) {
+	for _, cur := range d.current {
+		if cur[0] != "" && cur[0] == p.Backend {
+			return cur[1], cur[2], true
+		}
+	}
+	return "", "", false
+}
+
+// modelOf is the model p would run: the one picked, else the one it runs now,
+// else its preset — what saving would leave in config.yaml.
+func (d *setupDraft) modelOf(p config.Provider) string {
+	if k, ok := d.picks[p.ID]; ok {
+		return k.modelID()
+	}
+	if model, _, ok := d.was(p); ok {
+		return model
+	}
+	return p.Model
+}
+
+func (k *pick) modelID() string {
+	if len(k.models) == 0 || k.model == otherModel {
+		return strings.TrimSpace(k.custom)
+	}
+	return k.model
+}
+
+// efforts offered for the picked model: its own list, none, or the provider's.
+func (k *pick) efforts(p config.Provider) []string {
+	for _, m := range k.models {
+		if m.ID == k.model && k.model != otherModel {
 			if m.NoEffort {
 				return nil
 			}
@@ -127,62 +166,77 @@ func (d *setupDraft) efforts() []string {
 			}
 		}
 	}
-	return d.chosen().Efforts
+	return p.Efforts
 }
 
-// loadModels fetches the chosen provider's list once and sets the model and
-// effort defaults: what is configured now when it is the same provider, else
-// the provider's default model at low effort.
-func (a *App) loadModels(d *setupDraft) {
-	p := d.chosen()
+// saved is the effort to save: none for a model that takes none.
+func (k *pick) saved(p config.Provider) string {
+	if len(k.efforts(p)) == 0 {
+		return ""
+	}
+	return k.effort
+}
+
+// loadModels fetches p's list once and sets the model and effort defaults:
+// what is configured now when it is the same backend, else the provider's
+// default model — at low effort for a judge, whose questions are narrow, and
+// at the model's own for a writer.
+func (a *App) loadModels(d *setupDraft, p config.Provider, role string) *pick {
+	if k, ok := d.picks[p.ID]; ok {
+		return k
+	}
+	k := &pick{}
+	d.picks[p.ID] = k
+	key := ""
+	if p.ID == d.id {
+		key = strings.TrimSpace(d.key)
+	}
+	ms, err := a.host.Models(p, key)
 	discovered := false
-	if _, ok := d.lists[d.id]; !ok {
-		ms, err := a.host.Models(p, strings.TrimSpace(d.key))
-		d.note = ""
-		switch {
-		case err != nil:
-			d.note = "Could not list models (" + err.Error() + "); showing the usual ones."
-		case len(ms) == 0 && p.Discover == "ollama":
-			d.note = "No models are downloaded yet. Type the one to use (any name from ollama.com/library) and ideacheck downloads it."
-		case p.Discover != "":
-			discovered = len(ms) > 0
-		}
-		if len(ms) == 0 { // the host sends the priced preset list with a discovery error
-			ms = p.Models
-		}
-		if p.Model == "" {
-			ms = append([]config.ModelChoice{{ID: "", Label: "Default — the provider's own choice"}}, ms...)
-		}
-		d.lists[d.id] = ms
+	switch {
+	case err != nil:
+		k.note = "Could not list models (" + err.Error() + "); showing the usual ones."
+	case len(ms) == 0 && p.Discover == "ollama":
+		k.note = "No models are downloaded yet. Type the one to use (any name from ollama.com/library) and ideacheck downloads it."
+	case p.Discover != "":
+		discovered = len(ms) > 0
 	}
-	if d.defaultsFor == d.id {
-		return
+	if len(ms) == 0 { // the host sends the priced preset list with a discovery error
+		ms = p.Models
 	}
-	d.defaultsFor = d.id
+	if p.Model == "" {
+		ms = append([]config.ModelChoice{{ID: "", Label: "Default — the provider's own choice"}}, ms...)
+	}
+	k.models = ms
+
 	want, effort := p.Model, "low"
-	if d.current[0] == p.Backend {
-		want, effort = d.current[1], d.current[2]
+	if role == roleWriter {
+		effort = ""
 	}
-	d.model, d.custom, d.effort = otherModel, want, effort
-	for _, m := range d.models() {
+	if model, e, ok := d.was(p); ok {
+		want, effort = model, e
+	}
+	k.model, k.custom, k.effort = otherModel, want, effort
+	for _, m := range k.models {
 		if m.ID == want {
-			d.model, d.custom = want, ""
+			k.model, k.custom = want, ""
 		}
 	}
 	// A discovered list is what is actually installed: never default to a model
 	// that is not in it (enter-enter-enter would save one that cannot run).
-	if discovered && d.model == otherModel {
-		d.model, d.custom = d.models()[0].ID, ""
+	if discovered && k.model == otherModel {
+		k.model, k.custom = k.models[0].ID, ""
 	}
-	if !slices.Contains(d.efforts(), d.effort) {
-		d.effort = ""
+	if !slices.Contains(k.efforts(p), k.effort) {
+		k.effort = ""
 	}
+	return k
 }
 
 func (a *App) openSetup() tea.Cmd {
-	d := &setupDraft{providers: a.host.Providers(), lists: map[string][]config.ModelChoice{}}
-	backend, model, effort := a.host.Current()
-	d.current = [3]string{backend, model, effort}
+	d := &setupDraft{providers: a.host.Providers(), picks: map[string]*pick{}, fetched: map[string]bool{}}
+	d.current[0][0], d.current[0][1], d.current[0][2] = a.host.Current()
+	d.current[1][0], d.current[1][1], d.current[1][2] = a.host.Writer()
 	var options []huh.Option[string]
 	for _, p := range d.providers {
 		label := p.Label
@@ -190,15 +244,20 @@ func (a *App) openSetup() tea.Cmd {
 			label += "  (" + p.NeedsCLI + " not installed)"
 		}
 		options = append(options, huh.NewOption(label, p.ID))
-		if d.id == "" && p.Backend == backend {
+		if d.id == "" && p.Backend == d.current[0][0] {
 			d.id = p.ID
+		}
+		// Settings opens on what is configured, the writer included. It only
+		// counts next to a judge that cannot write, and that step is always asked.
+		if d.writer == "" && p.Backend == d.current[1][0] && !p.NeedsWriter && a.usable(p) {
+			d.writer = p.ID
 		}
 	}
 	a.setup = d
 	steps := []step{
 		{title: "Provider", build: func() *huh.Form {
 			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach a model?",
-				"You pick the model next. You can change this any time from Settings or `ideacheck setup`.", options, &d.id).
+				"You pick the model next. Change this any time from Settings or `ideacheck setup`.", options, &d.id).
 				Validate(func(id string) error {
 					if cli := providerByID(d.providers, id).NeedsCLI; cli != "" && !a.host.HasCLI(cli) {
 						return fmt.Errorf("the %s command is not installed; pick another provider", cli)
@@ -236,61 +295,22 @@ func (a *App) openSetup() tea.Cmd {
 				})))
 		}},
 		a.judgeStep(d),
-		{title: "Model", build: func() *huh.Form {
-			a.loadModels(d)
-			p := d.chosen()
-			if len(d.models()) == 0 {
-				// Blank is a real answer only for a provider that has its own default.
-				desc := "The model id this provider should use.\n" + customHint(p)
-				if p.Model == "" {
-					desc = "The model id this provider should use. Leave blank for the provider's own default.\n" + d.note
-				}
-				return huh.NewForm(huh.NewGroup(customModel(d, d.modelQuestion(), strings.TrimSpace(d.roleNote()+"\n"+desc), p.Model != "")))
-			}
-			var opts []huh.Option[string]
-			for _, m := range d.models() {
-				opts = append(opts, huh.NewOption(m.Label, m.ID))
-			}
-			other := "Other… (type a model id)"
-			if d.chosen().Billing == "local" {
-				other = "Other… (type any model id — downloaded for you if it is not here yet)"
-			}
-			opts = append(opts, huh.NewOption(other, otherModel))
-			return huh.NewForm(huh.NewGroup(choose(d.modelQuestion(),
-				strings.TrimSpace(d.roleNote()+"\n"+priceNote(d.chosen().Billing)+" "+d.note), opts, &d.model)))
-		}},
-		{title: "Model id", skip: func() bool { return len(d.models()) == 0 || d.model != otherModel }, build: func() *huh.Form {
-			return huh.NewForm(huh.NewGroup(customModel(d, "Model id", customHint(d.chosen()), true)))
-		}},
-		{title: "Effort", skip: func() bool { return len(d.efforts()) == 0 }, build: func() *huh.Form {
-			// The CLI backends read "no effort" as thinking off; an API model keeps its own default.
-			cli := backends.HumanOnly(d.chosen().Backend)
-			opts := []huh.Option[string]{huh.NewOption("Default — the model decides", "")}
-			if cli {
-				opts[0] = huh.NewOption("Off — no thinking. Recommended: fastest, and each question is one narrow judgment", "")
-			}
-			for _, e := range d.efforts() {
-				label := e
-				if e == "low" && !cli {
-					label += " — recommended: each question is one short, narrow judgment"
-				}
-				opts = append(opts, huh.NewOption(label, e))
-			}
-			return huh.NewForm(huh.NewGroup(choose("How hard should "+cmp.Or(d.modelID(), "the model")+" think?",
-				"Higher effort spends more tokens (and time) per question.", opts, &d.effort)))
-		}},
 	}
+	steps = append(steps, a.modelSteps(d, [3]string{"Model", "Model id", "Effort"}, d.chosen, d.role, nil)...)
 	steps = append(steps,
 		step{title: "Writer", skip: func() bool { return !d.chosen().NeedsWriter }, build: func() *huh.Form {
 			opts := a.writers(d)
-			if d.writer == "" {
+			if !slices.ContainsFunc(opts, func(o huh.Option[string]) bool { return o.Value == d.writer }) {
 				d.writer = opts[0].Value
 			}
-			return huh.NewForm(huh.NewGroup(choose("Which model should be the writer?",
-				d.chosen().Label+" is the judge: it answers every scoring question and nothing else. The writer reads your text, looks the idea up on the web and writes the summary; it never changes a score.\nOnly providers ready to use are listed, each with its usual model; set that provider up first to pick another.",
+			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach the writer?",
+				d.chosen().ID+" only judges. "+roleNotes[roleWriter]+"\nOnly providers ready to use are listed; you pick its model next.",
 				opts, &d.writer)))
 		}},
 	)
+	// The writer is picked like the judge was: its model, then how hard it thinks.
+	steps = append(steps, a.modelSteps(d, [3]string{"Writer model", "Writer model id", "Writer effort"}, d.writerChoice,
+		func() string { return roleWriter }, func() bool { return d.writerChoice().ID == "" })...)
 	// Last, and only when research would otherwise have nothing to search with:
 	// a writer's own web tool still works without it, slowly and at a price.
 	steps = append(steps, step{title: "Research", skip: func() bool {
@@ -312,9 +332,78 @@ func (a *App) openSetup() tea.Cmd {
 	}})
 	var cmd tea.Cmd
 	a.wiz, cmd = newWizard("setup", a.width, a.height, steps)
-	a.wiz.aside = func() string { return a.rolesView(d) }
+	a.wiz.over = func() int { return lipgloss.Height(a.rolesLine(d)) - 1 }
 	a.wiz.form = a.wiz.fit(a.wiz.form)
 	return cmd
+}
+
+// modelSteps are the steps that pick one provider's model: the list, the typed
+// id when the list does not have it, and the effort. who is the provider being
+// picked for and role what its model will do; both can change as the user goes
+// back and forth, so they are asked again whenever a step is built or counted.
+func (a *App) modelSteps(d *setupDraft, titles [3]string, who func() config.Provider, role func() string, skip func() bool) []step {
+	skipped := func() bool { return skip != nil && skip() }
+	return []step{
+		{title: titles[0], skip: skipped, build: func() *huh.Form {
+			p := who()
+			k := a.loadModels(d, p, role())
+			if len(k.models) == 0 {
+				// Blank is a real answer only for a provider that has its own default.
+				desc := "The model id this provider should use.\n" + customHint(p)
+				if p.Model == "" {
+					desc = "The model id this provider should use. Leave blank for the provider's own default.\n" + k.note
+				}
+				return huh.NewForm(huh.NewGroup(customModel(k, modelQuestions[role()], strings.TrimSpace(roleNotes[role()]+"\n"+desc), p.Model != "")))
+			}
+			var opts []huh.Option[string]
+			for _, m := range k.models {
+				opts = append(opts, huh.NewOption(m.Label, m.ID))
+			}
+			other := "Other… (type a model id)"
+			if p.Billing == "local" {
+				other = "Other… (type any model id — downloaded for you if it is not here yet)"
+			}
+			opts = append(opts, huh.NewOption(other, otherModel))
+			return huh.NewForm(huh.NewGroup(choose(modelQuestions[role()],
+				strings.TrimSpace(roleNotes[role()]+"\n"+priceNote(p.Billing)+" "+k.note), opts, &k.model)))
+		}},
+		{title: titles[1], skip: func() bool {
+			k := d.pickOf(who())
+			return skipped() || len(k.models) == 0 || k.model != otherModel
+		}, build: func() *huh.Form {
+			return huh.NewForm(huh.NewGroup(customModel(d.pickOf(who()), "Model id", customHint(who()), true)))
+		}},
+		{title: titles[2], skip: func() bool {
+			p := who()
+			if k, ok := d.picks[p.ID]; ok {
+				return skipped() || len(k.efforts(p)) == 0
+			}
+			return skipped() || len(p.Efforts) == 0
+		}, build: func() *huh.Form {
+			p := who()
+			k := d.pickOf(p)
+			// The CLI backends read "no effort" as thinking off; an API model keeps its own default.
+			// Low is the advice for a judge only: each of its questions is one narrow
+			// judgment, where a writer reads pages and writes paragraphs.
+			cli, judges := backends.HumanOnly(p.Backend), role() != roleWriter
+			opts := []huh.Option[string]{huh.NewOption("Default — the model decides", "")}
+			switch {
+			case cli && judges:
+				opts[0] = huh.NewOption("Off — no thinking. Recommended: fastest, and each question is one narrow judgment", "")
+			case cli:
+				opts[0] = huh.NewOption("Off — no thinking: fastest", "")
+			}
+			for _, e := range k.efforts(p) {
+				label := e
+				if e == "low" && !cli && judges {
+					label += " — recommended: each question is one short, narrow judgment"
+				}
+				opts = append(opts, huh.NewOption(label, e))
+			}
+			return huh.NewForm(huh.NewGroup(choose("How hard should "+cmp.Or(k.modelID(), "the model")+" think?",
+				"Higher effort spends more tokens and more time.", opts, &k.effort)))
+		}},
+	}
 }
 
 // judgeStep offers Jev as the judge beside a model that can do everything.
@@ -338,57 +427,46 @@ func (a *App) judgeStep(d *setupDraft) step {
 	}}
 }
 
-// role is what the model being picked will do, given the choices so far.
+// What a model being picked will do.
+const (
+	roleJudge  = "judge"
+	roleWriter = "writer"
+	roleBoth   = "judge and writer"
+)
+
+// role is what the provider chosen first will do, given the choices so far.
 func (d *setupDraft) role() string {
 	switch judge, writer := d.roles(); {
 	case judge.ID == d.id && writer.ID == "" && !d.chosen().NeedsWriter:
-		return "judge and writer"
+		return roleBoth
 	case judge.ID == d.id:
-		return "judge"
+		return roleJudge
 	}
-	return "writer"
+	return roleWriter
 }
 
-func (d *setupDraft) modelQuestion() string {
-	switch d.role() {
-	case "judge":
-		return "Which model should be the judge?"
-	case "writer":
-		return "Which model should be the writer?"
-	}
-	return "Which model should judge and write?"
+var modelQuestions = map[string]string{
+	roleJudge:  "Which model should be the judge?",
+	roleWriter: "Which model should be the writer?",
+	roleBoth:   "Which model should judge and write?",
 }
 
-// roleNote says what the role means, in the words the roles view uses.
-func (d *setupDraft) roleNote() string {
-	switch d.role() {
-	case "judge":
-		return "The judge answers every scoring question."
-	case "writer":
-		return "The writer reads your text, looks the idea up on the web and writes the summary. It never scores."
-	}
-	return "This model answers every scoring question, and also reads your text, looks the idea up on the web and writes the summary."
+// roleNotes say what each role means, in the same words wherever it comes up.
+var roleNotes = map[string]string{
+	roleJudge:  "The judge answers every scoring question.",
+	roleWriter: "The writer reads your text, looks the idea up on the web and writes the summary. It never scores.",
+	roleBoth:   "This model answers every scoring question, and also reads your text, looks the idea up on the web and writes the summary.",
 }
 
-// rolesView is who does what with the choices made so far: the judge, the
-// writer and what research searches with. With room, one row each and what
-// the role does; in a short window, one line, so the form keeps its space.
-func (a *App) rolesView(d *setupDraft) string {
-	model := func(p config.Provider) string {
-		m := p.Model
-		if p.ID == d.id {
-			m = d.modelID()
-		}
-		if m == "" {
-			return accent.Render(p.ID)
-		}
-		return accent.Render(p.ID) + dim.Render(" · ") + bold.Render(m)
-	}
+// rolesLine is the header's model line for the choices made so far, where
+// every other page shows the saved ones — plus what research searches with,
+// which this wizard can change too.
+func (a *App) rolesLine(d *setupDraft) string {
 	judge, writer := d.roles()
-	w := dim.Render("same model")
+	w := ""
 	switch {
 	case writer.ID != "":
-		w = model(writer)
+		w = who(writer.ID, d.modelOf(writer), "")
 	case d.chosen().NeedsWriter:
 		w = warnSty.Render("none") + dim.Render(" (scores only)")
 	}
@@ -401,31 +479,7 @@ func (a *App) rolesView(d *setupDraft) string {
 	case s.Enabled:
 		search = dim.Render("the writer's own web tool")
 	}
-	rows := [][3]string{
-		{"Judge", model(judge), "answers every scoring question"},
-		{"Writer", w, "reads, researches the web, writes the summary"},
-		{"Search", search, "what research looks the idea up with"},
-	}
-	if a.height < 30 {
-		parts := make([]string, len(rows))
-		for i, r := range rows {
-			parts[i] = bold.Render(r[0]) + " " + r[1]
-		}
-		return flow(formWidth(a.width), "   ", parts)
-	}
-	width := 0
-	for _, r := range rows {
-		width = max(width, lipgloss.Width(r[1]))
-	}
-	var lines []string
-	for _, r := range rows {
-		line := bold.Width(8).Render(r[0]) + lipgloss.NewStyle().Width(width).Render(r[1])
-		if withWhat := line + "   " + dim.Render(r[2]); lipgloss.Width(withWhat) <= formWidth(a.width) {
-			line = withWhat
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
+	return modelLine(formWidth(a.width), who(judge.ID, d.modelOf(judge), ""), w, search)
 }
 
 // priceNote explains the price on each model: what it costs through this
@@ -449,8 +503,8 @@ func customHint(p config.Provider) string {
 
 // customModel is the "type a model id" field. required rejects a blank id:
 // choosing "Other…" and pressing enter must not save a model that is no model.
-func customModel(d *setupDraft, title, desc string, required bool) huh.Field {
-	return huh.NewInput().Title(title).Description(desc).Value(&d.custom).Validate(func(s string) error {
+func customModel(k *pick, title, desc string, required bool) huh.Field {
+	return huh.NewInput().Title(title).Description(desc).Value(&k.custom).Validate(func(s string) error {
 		if required && strings.TrimSpace(s) == "" {
 			return errors.New("type a model id, or press esc to pick one from the list")
 		}
@@ -467,11 +521,15 @@ func providerByID(ps []config.Provider, id string) config.Provider {
 	return config.Provider{}
 }
 
-// finishSetup downloads the chosen model first when this machine runs it and
-// does not have it yet, then saves, then starts the search engine if asked to.
+// finishSetup downloads first whatever was picked that this machine runs and
+// does not have yet — the chosen model, then the writer's — then saves, then
+// starts the search engine if asked to.
 func (a *App) finishSetup() tea.Cmd {
-	if p, model := a.setup.chosen(), a.setup.modelID(); a.host.MissingModel(p, model) {
-		return a.openDownload(p, model)
+	d := a.setup
+	for _, p := range []config.Provider{d.chosen(), d.writerChoice()} {
+		if model := d.pickOf(p).modelID(); p.ID != "" && !d.fetched[model] && a.host.MissingModel(p, model) {
+			return a.openDownload(p, model)
+		}
 	}
 	return a.afterModel()
 }
@@ -500,14 +558,21 @@ func (a *App) afterModel() tea.Cmd {
 
 func (a *App) saveSetup() error {
 	d := a.setup
-	effort, key := d.effort, strings.TrimSpace(d.key)
-	if len(d.efforts()) == 0 {
-		effort = ""
-	}
+	key := strings.TrimSpace(d.key)
 	if a.key(d).Found() && !d.replaceKey {
 		key = "" // typed, then gone back and chose to keep the one there
 	}
-	if err := a.host.SaveSetup(d.chosen(), d.modelID(), effort, key); err != nil {
+	// The writer first: each save names its provider as the backend, and the
+	// chosen one must be the name left standing should the roles not be saved.
+	if w := d.writerChoice(); w.ID != "" {
+		if k, picked := d.picks[w.ID]; picked {
+			if err := a.host.SaveSetup(w, k.modelID(), k.saved(w), ""); err != nil {
+				return err
+			}
+		}
+	}
+	p := d.chosen()
+	if err := a.host.SaveSetup(p, d.pickOf(p).modelID(), d.pickOf(p).saved(p), key); err != nil {
 		return err
 	}
 	return a.host.SaveRoles(d.roles())
@@ -826,7 +891,7 @@ func (a *App) openHistory() tea.Cmd {
 		}
 		trows[i] = table.Row{fmt.Sprint(r.Seq), strings.Replace(strings.TrimSuffix(r.CreatedAt, "Z"), "T", " ", 1), verdict, fmt.Sprintf("%.2f", r.Composite), r.Rubric, r.Idea}
 	}
-	a.history = table.New(table.WithFocused(true), table.WithHeight(max(a.height-8, 5)), table.WithRows(trows), table.WithColumns([]table.Column{
+	a.history = table.New(table.WithFocused(true), table.WithStyles(tableStyles()), table.WithHeight(max(a.height-8, 5)), table.WithRows(trows), table.WithColumns([]table.Column{
 		{Title: "#", Width: 4}, {Title: "When", Width: 19}, {Title: "Verdict", Width: 11}, {Title: "Score", Width: 5}, {Title: "Rubric", Width: 12}, {Title: "Idea", Width: max(a.width-70, 20)},
 	}))
 	return nil
