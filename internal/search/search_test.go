@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -168,5 +169,23 @@ func TestReadClipsAndRefusesWhatIsNotAPublicWebPage(t *testing.T) {
 		if _, err := guarded.Read(context.Background(), bad, 80); err == nil {
 			t.Errorf("%q is not a web page and must be refused", bad)
 		}
+	}
+}
+
+// Engines that turn SearXNG away are not "no results": that would be scored,
+// and cached, as "searched, found none".
+func TestSearXNGSaysWhenItsEnginesTurnedItAway(t *testing.T) {
+	var req *http.Request
+	var sent string
+	srv := serve(t, 200, `{"results":[],"unresponsive_engines":[["brave","Suspended: too many requests"],["duckduckgo","CAPTCHA"]]}`, &req, &sent)
+	_, err := (&SearX{BaseURL: srv.URL, Client: srv.Client()}).Search(context.Background(), "q", 5)
+	var engines *EnginesError
+	if !errors.As(err, &engines) || len(engines.Engines) != 2 || !strings.Contains(err.Error(), "brave: Suspended: too many requests") {
+		t.Fatalf("err = %v", err)
+	}
+	// Results from the engines that did answer are results.
+	srv = serve(t, 200, `{"results":[{"title":"A","url":"https://a.example"}],"unresponsive_engines":[["brave","timeout"]]}`, &req, &sent)
+	if got, err := (&SearX{BaseURL: srv.URL, Client: srv.Client()}).Search(context.Background(), "q", 5); err != nil || len(got) != 1 {
+		t.Errorf("got %v, %v", got, err)
 	}
 }

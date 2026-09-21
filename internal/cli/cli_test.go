@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -470,5 +471,23 @@ func TestProfileCanBeSetWithoutATerminal(t *testing.T) {
 	saved, err := os.ReadFile(filepath.Join(home, ".config", "ideacheck", "profile.yaml"))
 	if err != nil || !strings.Contains(string(saved), "background: ten years in payroll") {
 		t.Errorf("profile.yaml = %q err=%v", saved, err)
+	}
+}
+
+// `search up` on a machine without Docker: the failure is the install guide.
+func TestSearchUpWithoutDockerSaysHowToInstallIt(t *testing.T) {
+	var out, errb bytes.Buffer
+	a := &app{
+		stdout: &out, stderr: &errb,
+		environ: func() []string { return nil },
+		getenv:  func(string) string { return "" },
+		home:    t.TempDir(),
+		docker: func(context.Context, []string, io.Reader, ...string) (string, error) {
+			return "", &exec.Error{Name: "docker", Err: exec.ErrNotFound}
+		},
+	}
+	code := a.run(context.Background(), []string{"search", "up"})
+	if said := errb.String(); code != 1 || !strings.Contains(said, "Docker is not installed") || !strings.Contains(said, "docs.docker.com") {
+		t.Errorf("code %d, stderr:\n%s", code, said)
 	}
 }

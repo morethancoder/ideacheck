@@ -60,6 +60,7 @@ type Research struct {
 	// a SearXNG that answers, else a service whose key is set, else llm.
 	Search          string            `koanf:"search" json:"search"`
 	Endpoints       map[string]string `koanf:"endpoints" json:"endpoints"`
+	SearXNG         LocalSearXNG      `koanf:"searxng" json:"-"` // how `search up` runs one: not part of a result's config hash
 	QueriesPerTopic int               `koanf:"queries_per_topic" json:"queries_per_topic"`
 	ResultsPerQuery int               `koanf:"results_per_query" json:"results_per_query"`
 	ReadPages       int               `koanf:"read_pages" json:"read_pages"` // per topic; 0 = snippets only
@@ -70,6 +71,13 @@ type Research struct {
 	MaxTokens   int           `koanf:"max_tokens" json:"max_tokens"`
 	Timeout     time.Duration `koanf:"timeout" json:"timeout"`
 	CacheTTL    time.Duration `koanf:"cache_ttl" json:"cache_ttl"` // 0 = never reuse findings
+}
+
+// LocalSearXNG is the SearXNG `ideacheck search up` runs in Docker. It answers
+// at Endpoints["searxng"], which must then be a port on this machine.
+type LocalSearXNG struct {
+	Image     string `koanf:"image"`
+	Container string `koanf:"container"`
 }
 
 // SearchLLM leaves the searching to the writer's own web tool; SearchAuto picks.

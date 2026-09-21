@@ -595,7 +595,7 @@ func ScoresView(res *pipeline.Result) string {
 
 func evidenceTab(res *pipeline.Result) string {
 	if res.Research == nil {
-		return dim.Render("This check scored the description alone: nothing was looked up.\nResearch needs something to search with: a SearXNG on localhost:8080, a TAVILY_API_KEY or BRAVE_API_KEY,\nor a writer with its own web tool (Claude CLI, Codex CLI, Anthropic, OpenRouter). See `research:` in config.yaml.")
+		return dim.Render("This check scored the description alone: nothing was looked up.\nResearch needs something to search with. The free way: `ideacheck search up` starts a search engine in Docker.\nOr set a TAVILY_API_KEY or BRAVE_API_KEY, or use a writer with its own web tool (Claude CLI, Codex CLI,\nAnthropic, OpenRouter). See `research:` in config.yaml.")
 	}
 	return EvidenceView(res.Research)
 }

@@ -96,6 +96,7 @@ func (s *SearX) Search(ctx context.Context, query string, n int) ([]Result, erro
 			URL     string `json:"url"`
 			Content string `json:"content"`
 		} `json:"results"`
+		Unresponsive [][]string `json:"unresponsive_engines"` // [engine, reason] pairs
 	}
 	if err := getJSON(s.Client, req, &reply); err != nil {
 		if strings.HasPrefix(err.Error(), "403") {
@@ -103,11 +104,31 @@ func (s *SearX) Search(ctx context.Context, query string, n int) ([]Result, erro
 		}
 		return nil, fmt.Errorf("searxng: %w", err)
 	}
+	// Nothing found because nothing was asked: the engines behind it turned the
+	// instance away. Passing that on as "no results" would be scored, and cached,
+	// as "searched, found none".
+	if len(reply.Results) == 0 && len(reply.Unresponsive) > 0 {
+		var engines []string
+		for _, e := range reply.Unresponsive {
+			engines = append(engines, strings.Join(e, ": "))
+		}
+		return nil, &EnginesError{Engines: engines}
+	}
 	out := make([]Result, 0, len(reply.Results))
 	for _, r := range reply.Results {
 		out = append(out, Result{Title: r.Title, URL: r.URL, Snippet: r.Content})
 	}
 	return first(out, n), nil
+}
+
+// EnginesError is a SearXNG that works while the search engines behind it do
+// not answer it: they rate-limit an address that asks a lot, for minutes to hours.
+type EnginesError struct {
+	Engines []string // "brave: too many requests"
+}
+
+func (e *EnginesError) Error() string {
+	return "searxng found nothing because its search engines turned it away (" + strings.Join(e.Engines, ", ") + "); they rate-limit, so try again in a while"
 }
 
 // Reachable reports whether a SearXNG answers at BaseURL, without spending a

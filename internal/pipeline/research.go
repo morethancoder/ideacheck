@@ -122,6 +122,8 @@ type ResearchReport struct {
 	Model    string        `json:"model,omitempty"`
 	Cached   bool          `json:"cached,omitempty"` // reused from an earlier check of the same idea
 	Findings []Evidence    `json:"findings"`
+
+	partial string // some searches failed: a warning, not a failure
 }
 
 // researchPlan is what a check will look up; nil means it will not research.
@@ -185,6 +187,9 @@ func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, st
 		res.Warnings = append(res.Warnings, "not researched, scoring the description alone: "+err.Error())
 		emit(o.Events, Event{Type: judge.EventFailed, Stage: StageResearch, Question: researchQuestion, Answer: &a})
 		return state, []judge.Answer{a}
+	}
+	if report.partial != "" {
+		res.Warnings = append(res.Warnings, report.partial)
 	}
 	a.Choice = fmt.Sprintf("%d found", len(found))
 	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: researchQuestion, Answer: &a})

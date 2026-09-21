@@ -157,6 +157,7 @@ ideacheck "..." -o json | jq .verdict
 cat idea.json | ideacheck --agent         # agent mode: never asks, JSON out, logs on stderr
 ideacheck -- "serve"               # `--` forces the next arg to be idea text
 ideacheck serve -p 9000            # local HTTP API, same JSON contract
+ideacheck search up                # a free search engine in Docker, for research
 ideacheck fields | rubrics | setup | history | last | show 12 | profile | config path
 ideacheck bench -b structured,logprob -n 3
 ```
@@ -273,7 +274,7 @@ ideacheck does the searching itself, in Go, and no model drives a loop:
 | `research.search` | What searches | Needs |
 |---|---|---|
 | `auto` (default) | the first of the next three that is there, else `llm` | — |
-| `searxng` | your own [SearXNG](https://docs.searxng.org) at `research.endpoints.searxng` (`http://localhost:8080`) | free, no key. `docker run -p 8080:8080 searxng/searxng`, and add `json` under `search.formats` in its `settings.yml` — JSON output is off by default, and public instances refuse it. From a checkout, `make up` does both (and `make down` stops it) |
+| `searxng` | your own [SearXNG](https://docs.searxng.org) at `research.endpoints.searxng` (`http://localhost:8080`) | free, no key. `ideacheck search up` starts one in Docker (below). Running your own another way: add `json` under `search.formats` in its `settings.yml` — JSON output is off by default, and public instances refuse it |
 | `tavily` | api.tavily.com | `TAVILY_API_KEY` (free monthly allowance) |
 | `brave` | api.search.brave.com | `BRAVE_API_KEY` |
 | `llm` | the writer's own web tool: `claude -p --tools WebSearch`, `codex --search exec`, Anthropic's `web_search` server tool, OpenRouter's `web` plugin | a writer that has one. Slow and token-hungry: an agent loop re-reads every earlier result on every turn |
@@ -283,6 +284,32 @@ local Ollama model and with Jev alone. Measured on one idea through the Claude C
 (Haiku): the writer's own web tool spent ~146k input tokens and ~70 s on research;
 plan + digest over Go-fetched results spent ~5k tokens and a few seconds. With
 nothing to search with, the check scores the description, as before.
+
+**A free search engine, in one command.** SearXNG is a service, so it cannot ride
+inside the binary — but the binary knows how to run it:
+
+```sh
+ideacheck search up      # start a SearXNG in Docker at research.endpoints.searxng
+ideacheck search         # is Docker there, is the container up, does a search answer
+ideacheck search down    # stop and remove it
+```
+
+`up` downloads `searxng/searxng` the first time, copies in a `settings.yml` with
+JSON output on, publishes it on `127.0.0.1` only, and does not say it worked
+until a real search answers. It comes back after a reboot. If Docker is not
+installed, or is installed but not running, the command says how to install or
+start it on your system. The image and container name are `research.searxng` in
+`config.yaml`; the settings file is `searxng/settings.yml` among the config files,
+overridable like any other. Port taken? `ideacheck config set
+research.endpoints.searxng http://localhost:8888`, then `up` again. From a
+checkout, `make up` and `make down` are the same two commands.
+
+The engines behind a SearXNG (DuckDuckGo, Brave, Startpage …) rate-limit an address
+that asks a lot. The shipped settings add Yandex so one usually still answers; when
+none does, that is not reported as "found nothing" — the check says `not
+researched` with the engines' reasons in `warnings[]`, caches nothing, and a later
+run searches again. When only some searches fail, the findings stand and a warning
+says the evidence is thinner.
 
 `research.yaml` lists the topics (competitors, prior attempts, market, recent
 changes) and `prompts/research_system.md` + `prompts/research.tmpl` what the researcher is told. The findings become

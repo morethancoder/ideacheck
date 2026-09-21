@@ -18,6 +18,7 @@ type fakeSearch struct {
 	mu      sync.Mutex
 	queries []string
 	fail    bool
+	failOn  string // fail only the queries that contain this
 }
 
 func (f *fakeSearch) Name() string { return "fakesearch" }
@@ -26,7 +27,7 @@ func (f *fakeSearch) Search(_ context.Context, q string, n int) ([]search.Result
 	f.mu.Lock()
 	f.queries = append(f.queries, q)
 	f.mu.Unlock()
-	if f.fail {
+	if f.fail || (f.failOn != "" && strings.Contains(q, f.failOn)) {
 		return nil, errors.New("search service is down")
 	}
 	slug := strings.ReplaceAll(q, " ", "-")
@@ -159,6 +160,25 @@ func TestLookupFailureScoresTheDescription(t *testing.T) {
 		t.Fatalf("status=%q research=%+v verdict=%q err=%v", res.Status, res.Research, res.Verdict, err)
 	}
 	if !containsSub(strings.Join(res.Warnings, "\n"), "search service is down") {
+		t.Errorf("warnings = %v", res.Warnings)
+	}
+}
+
+// Some searches failing still researches — and says the evidence is thinner.
+func TestLookupWarnsWhenSomeSearchesFail(t *testing.T) {
+	e := engine(t, &mock.Judge{Seed: 1})
+	fs := &fakeSearch{}
+	e.Search, e.Pages = fs, &fakePages{}
+	if _, err := e.Check(context.Background(), idea, Options{Proceed: true}); err != nil || len(fs.queries) < 2 {
+		t.Fatalf("err=%v queries=%v", err, fs.queries)
+	}
+	e = engine(t, &mock.Judge{Seed: 1})
+	e.Search, e.Pages = &fakeSearch{failOn: fs.queries[0]}, &fakePages{}
+	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	if err != nil || res.Research == nil || len(res.Research.Findings) == 0 {
+		t.Fatalf("research=%+v err=%v", res.Research, err)
+	}
+	if !containsSub(strings.Join(res.Warnings, "\n"), "searches failed") {
 		t.Errorf("warnings = %v", res.Warnings)
 	}
 }

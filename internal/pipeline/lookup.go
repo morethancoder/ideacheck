@@ -57,9 +57,12 @@ func (e *Engine) lookup(ctx context.Context, p *researchPlan, in Intake, about j
 	queries := e.queries(ctx, p, in, about, &spent, o)
 	report.Queries = queries
 
-	hits, err := e.searches(ctx, p, queries, o)
-	if err != nil {
+	hits, failed, err := e.searches(ctx, p, queries, o)
+	if failed == len(queries) && err != nil {
 		return nil, spent, err
+	}
+	if failed > 0 {
+		report.partial = fmt.Sprintf("%d of %d searches failed, so the evidence is thinner than it should be: %v", failed, len(queries), err)
 	}
 	e.readPages(ctx, p, hits, o)
 
@@ -150,8 +153,9 @@ func subject(in Intake) string {
 }
 
 // searches runs every query at once (a few at a time) and keeps each page once,
-// under the first topic that found it. It fails only when every search failed.
-func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.Query, o Options) ([]hit, error) {
+// under the first topic that found it. It reports how many searches failed and
+// the last reason; the step itself fails only when every one of them did.
+func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.Query, o Options) ([]hit, int, error) {
 	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: searchStep})
 	results := make([][]search.Result, len(queries))
 	errs := make([]error, len(queries))
@@ -187,10 +191,10 @@ func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.
 	if failed == len(queries) && failed > 0 {
 		a.Err = lastErr.Error()
 		emit(o.Events, Event{Type: judge.EventFailed, Stage: StageResearch, Question: searchStep, Answer: &a})
-		return nil, lastErr
+		return nil, failed, lastErr
 	}
 	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: searchStep, Answer: &a})
-	return hits, nil
+	return hits, failed, lastErr
 }
 
 // pageKey names a page regardless of scheme, "www.", a trailing slash or a fragment.

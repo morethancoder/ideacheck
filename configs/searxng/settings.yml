@@ -1,0 +1,20 @@
+# settings.yml of the SearXNG `ideacheck search up` starts in Docker: the
+# defaults, plus the few things ideacheck needs. It is copied into the container
+# when that is created; the secret key comes from the environment, a fresh one
+# per container. Change it, then `ideacheck search down` and `up` again.
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json        # off by default; without it /search?format=json is a 403
+
+server:
+  limiter: false  # a private instance on 127.0.0.1: no bot detection, no Valkey needed
+
+# One more engine than the defaults (duckduckgo, brave, startpage …). Those
+# rate-limit an address that asks a lot, and a check asks eight things at once;
+# an engine that still answers is the difference between findings and none.
+engines:
+  - name: yandex
+    disabled: false

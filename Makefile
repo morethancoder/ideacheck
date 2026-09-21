@@ -27,11 +27,11 @@ run: build ## check an idea: make run ARGS='"my idea" -b mock'
 serve: build ## run the local HTTP API
 	@bash scripts/exec.sh serve $(ARGS)
 
-up: ## start a local SearXNG in docker, so research can search the web
-	@bash scripts/searxng.sh up
+up: build ## start a local SearXNG in docker, so research can search the web
+	@bash scripts/exec.sh search up
 
-down: ## stop the local SearXNG
-	@bash scripts/searxng.sh down
+down: build ## stop the local SearXNG
+	@bash scripts/exec.sh search down
 
 test: ## run unit tests
 	@go test ./...

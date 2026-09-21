@@ -73,6 +73,10 @@ Invariants worth keeping:
   `evidence` lists it in `uses`; one that cannot be judged without it also sets
   `requires: [evidence]` and is skipped when nothing was searched — so a run
   without research scores exactly the questions it always did.
+- A search that could not be run is never "searched, found none": an empty
+  list is evidence (and is cached for a week), so a SearXNG whose engines turned
+  it away is an error (`search.EnginesError`). All searches failing = not
+  researched; some failing = a warning beside the findings.
 - A gap whose field a research topic `covers:` is never asked about while research
   will run, and leaves `missing[]` once findings come back. The TUI asks at most
   `ask_limit` follow-ups (`Engine.FollowUps`).
@@ -98,7 +102,8 @@ internal/
   prompt/              text/template loading of configs/prompts/*
   config/              koanf: flags > env IDEACHECK_* > user dir > embedded
   search/              the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
-                       page reader (public addresses only) that boils HTML down to text
+                       page reader (public addresses only) that boils HTML down to text.
+                       local.go drives Docker for `ideacheck search up|down|status`
   store/               SQLite history (modernc.org/sqlite, pure Go)
   tui/                 bubbletea app: menu, idea form, live check, result, setup
   ui/                  the shared step column — install.sh in Go: rows, pending
@@ -111,10 +116,10 @@ configs/               EMBEDDED DEFAULTS (go:embed), user-overridable
   config.yaml          backends, pricing, setup wizard choices
   fields.yaml          what a caller can send about an idea, and what each field means
   research.yaml        what the writer looks up on the web, and which gap each topic covers
+  searxng/settings.yml the SearXNG `ideacheck search up` runs in Docker: the defaults + JSON output
   rubrics/             _gaps, _router, _evidence, business, side_project, content, research, creative
   prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
 schemas/               check_result.schema.json, generated from the Go types
-docker/searxng/        settings.yml for the SearXNG `make up` starts: the defaults + JSON output
 scripts/               bash for every non-trivial make target
 ```
 
@@ -206,11 +211,14 @@ make race lint  # what CI runs, plus gofmt and golangci-lint when installed
 make run ARGS='"an idea" -b mock'      # no model needed
 make dev        # build + open the TUI
 make schema     # regenerate schemas/check_result.schema.json from the Go types
-make up         # a local SearXNG in docker on 127.0.0.1:8080, so research searches for real; make down stops it
+make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so research searches for real; make down removes it
 ```
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list
   of findings), so offline runs and old tests are unchanged; `bench` never researches.
+- `search.Local` talks to Docker through the `search.Docker` func (`app.docker` in
+  the CLI), so its tests fake the docker CLI and no test needs Docker. Its errors
+  are the product: `DockerError` is problem + what to do, per OS.
 - Pipeline tests replace `Engine.Search` / `Engine.Pages` with fakes; `internal/search`
   tests use `httptest` per provider. No test touches the network.
 - An agent loop is the expensive way to do anything here: each turn re-sends all

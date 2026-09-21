@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/internal/search"
 	"github.com/morethancoder/ideacheck/internal/ui"
 )
 
@@ -42,6 +43,7 @@ Examples:
   ideacheck --help-agent             (the whole contract for scripts and agents)
   cat ideas.txt | ideacheck -A -o json
   ideacheck setup                    (choose provider / API key / model)
+  ideacheck search up                (a free search engine in Docker, for research)
   ideacheck serve -p 9000
   ideacheck bench -b structured,logprob -n 3
 
@@ -59,6 +61,7 @@ type app struct {
 	executable     func() (string, error) // nil means os.Executable; the upgrade target
 	width          int                    // terminal columns; 0 means ask the environment
 	releasesURL    string                 // GitHub release endpoint; empty means the real one
+	docker         search.Docker          // nil means the docker on PATH; `search up` drives it
 
 	global globalFlags
 }
@@ -141,7 +144,7 @@ func (a *app) rootCmd() *cobra.Command {
 	}
 	a.addGlobalFlags(root)
 	check.register(root)
-	root.AddCommand(a.fieldsCmd(), a.rubricsCmd(), a.configCmd(), a.profileCmd(), a.setupCmd(), a.historyCmd(), a.lastCmd(), a.showCmd(), a.serveCmd(), a.benchCmd(), a.upgradeCmd())
+	root.AddCommand(a.fieldsCmd(), a.rubricsCmd(), a.configCmd(), a.profileCmd(), a.setupCmd(), a.historyCmd(), a.lastCmd(), a.showCmd(), a.serveCmd(), a.benchCmd(), a.searchCmd(), a.upgradeCmd())
 	return root
 }
 
@@ -211,9 +214,10 @@ What comes back
 Research and the two roles
   Before scoring, the idea is looked up on the web (existing products, earlier
   attempts, market signals, recent changes) and the rubric reads what was found.
-  ideacheck searches itself — a SearXNG at research.endpoints.searxng, or Tavily
-  / Brave when TAVILY_API_KEY / BRAVE_API_KEY is set — reads the best pages down
-  to text, and the writer turns that into findings. With none of those, a writer
+  ideacheck searches itself — a SearXNG at research.endpoints.searxng (free:
+  ` + "`ideacheck search up`" + ` starts one in Docker), or Tavily / Brave when
+  TAVILY_API_KEY / BRAVE_API_KEY is set — reads the best pages down to text, and
+  the writer turns that into findings. With none of those, a writer
   with its own web tool searches (claude-cli, codex-cli, structured with provider
   anthropic or openrouter); with nothing, the description alone is scored.
   research.queries[] are the searches run; research.findings[] lists every

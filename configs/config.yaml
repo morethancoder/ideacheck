@@ -34,9 +34,9 @@ extract: true
 #   search: auto     a SearXNG answering at endpoints.searxng, else tavily or
 #                    brave when its key is set (TAVILY_API_KEY, BRAVE_API_KEY),
 #                    else llm
-#           searxng  free, no key, self-hosted: `docker run -p 8080:8080 searxng/searxng`,
-#                    with `json` added under search.formats in its settings.yml
-#                    (`make up` in a checkout does both: docker/searxng/settings.yml)
+#           searxng  free, no key, self-hosted. `ideacheck search up` runs one in
+#                    Docker at endpoints.searxng, with searxng/settings.yml (JSON
+#                    output on, which it needs); `ideacheck search down` stops it
 #           tavily | brave   hosted, a key each
 #           llm      the writer's own web tool (claude-cli, codex-cli, structured
 #                    with provider anthropic or openrouter). Thorough and slow: an
@@ -49,6 +49,9 @@ research:
     searxng: http://localhost:8080
     tavily: https://api.tavily.com
     brave: https://api.search.brave.com
+  searxng:                   # what `ideacheck search up` runs; the port is endpoints.searxng's
+    image: searxng/searxng:latest
+    container: ideacheck-searxng
   queries_per_topic: 2
   results_per_query: 5
   read_pages: 2              # per topic: pages fetched and boiled down to text; 0 = snippets only
