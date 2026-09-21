@@ -407,7 +407,7 @@ func TestFirstRunDetectionAndSettingsTakeEffectImmediately(t *testing.T) {
 	if err := h.SaveSetup(openai, "gpt-y", "", "sk-test"); err != nil {
 		t.Fatal(err)
 	}
-	if a.needsSetup(flags) || !h.HasKey("OPENAI_API_KEY") {
+	if a.needsSetup(flags) || !h.Key("OPENAI_API_KEY").Found() {
 		t.Error("setup must be remembered and the key retrievable")
 	}
 	if backend, model, _ := h.Current(); backend != "structured" || model != "gpt-y" {

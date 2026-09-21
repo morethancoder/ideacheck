@@ -39,7 +39,7 @@ type liveModel struct {
 func newLive(header string, events <-chan pipeline.Event) liveModel {
 	return liveModel{
 		header: header, index: map[string]int{}, events: events,
-		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(dim)),
+		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(accent)),
 	}
 }
 
@@ -100,7 +100,7 @@ func (m liveModel) body() string {
 	for _, r := range m.rows {
 		if r.stage != stage {
 			stage = r.stage
-			b.WriteString("\n" + dim.Render(stageTitle(stage)) + "\n")
+			b.WriteString("\n" + heading.Render(stageTitle(stage)) + "\n")
 		}
 		b.WriteString(m.renderRow(r) + "\n")
 	}
@@ -135,9 +135,10 @@ func (m liveModel) renderRow(r row) string {
 	case r.value == nil && r.answer.Confidence == 0: // a step of the web lookup: a count, not a judgment
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render(r.answer.Choice))
 	case r.value == nil:
-		return fmt.Sprintf("  %s %s %s  %s", good.Render("✓"), name, r.answer.Choice, dim.Render(pct(r.answer.Confidence)))
+		return fmt.Sprintf("  %s %s %s  %s", good.Render("✓"), name, accent.Render(r.answer.Choice), dim.Render(pct(r.answer.Confidence)))
 	}
-	return fmt.Sprintf("  %s %s %s %.2f  %s  %s", good.Render("✓"), name, Bar(*r.value), *r.value, dim.Render(pct(r.answer.Confidence)), Arrow(r.q.Polarity))
+	return fmt.Sprintf("  %s %s %s %s  %s  %s", good.Render("✓"), name, ColorBar(*r.value, r.q.Polarity),
+		scoreStyle(*r.value, r.q.Polarity).Render(fmt.Sprintf("%.2f", *r.value)), dim.Render(pct(r.answer.Confidence)), dim.Render(Arrow(r.q.Polarity)))
 }
 
 // clip shortens a row name to the column: findings are named by their title.

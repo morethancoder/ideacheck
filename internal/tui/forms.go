@@ -3,8 +3,17 @@ package tui
 import (
 	"strings"
 
+	"github.com/charmbracelet/huh"
+
 	"github.com/morethancoder/ideacheck/internal/pipeline"
 )
+
+// choose is the one way settings builds a select. The order is load-bearing:
+// huh scrolls the list to the chosen option when options arrive after the
+// value, hiding every option above it.
+func choose[T comparable](title, desc string, opts []huh.Option[T], value *T) *huh.Select[T] {
+	return huh.NewSelect[T]().Title(title).Description(desc).Options(opts...).Value(value)
+}
 
 var fieldTitles = map[string]string{
 	"title": "Title", "problem": "Problem", "audience": "Audience", "solution": "Solution",

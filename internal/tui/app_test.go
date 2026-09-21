@@ -34,7 +34,11 @@ type fakeHost struct {
 	missing   string // MissingModel says true for this id
 	pullErr   error  // what Download ends with
 	hang      bool   // Download runs until it is stopped
-	pulled    []string
+
+	search       *SearchState // nil: research already has something to search with
+	searchStarts int
+	searchErr    error
+	pulled       []string
 }
 
 func (h *fakeHost) Providers() []config.Provider {
@@ -66,8 +70,24 @@ func (h *fakeHost) Download(ctx context.Context, _ config.Provider, model string
 	progress(Progress{Status: "success", Done: 2e9, Total: 2e9})
 	return ctx.Err()
 }
-func (h *fakeHost) HasKey(env string) bool { return h.keys[env] }
-func (h *fakeHost) HasCLI(string) bool     { return true }
+func (h *fakeHost) Search() SearchState {
+	if h.search == nil {
+		return SearchState{Enabled: true, With: "searxng"} // something to search with: no step
+	}
+	return *h.search
+}
+func (h *fakeHost) StartSearch(_ context.Context, progress func(Progress)) error {
+	h.searchStarts++
+	progress(Progress{Status: "starting ideacheck-searxng"})
+	return h.searchErr
+}
+func (h *fakeHost) Key(env string) Key {
+	if h.keys[env] {
+		return Key{From: "your environment", Tail: "abcd"}
+	}
+	return Key{}
+}
+func (h *fakeHost) HasCLI(string) bool { return true }
 func (h *fakeHost) SaveSetup(p config.Provider, model, effort, key string) error {
 	h.saved = append(h.saved, p.ID+"/"+model+"/"+effort+"/"+key)
 	h.notReady = ""
@@ -202,6 +222,42 @@ func TestNoAskReportsGapsWithoutAsking(t *testing.T) {
 	pump(t, a, a.Init(), pageLive)
 	if a.page != pageResult || a.result.Status != pipeline.StatusNeedsInput {
 		t.Errorf("-A: page=%v status=%q", a.page, a.result.Status)
+	}
+}
+
+// A key that is already set is offered to keep, not an empty field to fill:
+// keeping saves no key, replacing asks for the new one and saves it.
+func TestSetupOffersToKeepAKeyAlreadySet(t *testing.T) {
+	h := &fakeHost{t: t, keys: map[string]bool{"OPENAI_API_KEY": true}}
+	a := newApp(h, Start{Page: pageSetup})
+	a.Init()
+	a.setup.id = "openai"
+	a.wiz.move(1)
+	if view := a.View(); !strings.Contains(view, "already set") || !strings.Contains(view, "ending in …abcd") || !strings.Contains(view, "Replace it") {
+		t.Fatalf("want the keep-or-replace choice, got:\n%s", view)
+	}
+	if _, total := a.wiz.position(); total != 3 {
+		t.Errorf("keeping the key: provider, key choice, model; total = %d", total)
+	}
+	a.setup.key, a.setup.custom = "typed-then-kept", "gpt-y"
+	a.finishSetup()
+	if len(h.saved) != 1 || h.saved[0] != "openai/gpt-y//" {
+		t.Errorf("keeping the key must save none: %v", h.saved)
+	}
+
+	h.saved = nil
+	a = newApp(h, Start{Page: pageSetup})
+	a.Init()
+	a.setup.id, a.setup.replaceKey = "openai", true
+	a.wiz.move(1)
+	a.wiz.move(1)
+	if view := a.View(); !strings.Contains(view, "OPENAI_API_KEY") || !strings.Contains(view, "that one wins") {
+		t.Fatalf("replacing a key from the environment must ask for it and say the environment wins:\n%s", view)
+	}
+	a.setup.key, a.setup.custom = " sk-new ", "gpt-y"
+	a.finishSetup()
+	if len(h.saved) != 1 || h.saved[0] != "openai/gpt-y//sk-new" {
+		t.Errorf("saved = %v", h.saved)
 	}
 }
 
@@ -445,5 +501,149 @@ func TestSetupPairsAClassifierWithAWriter(t *testing.T) {
 	a.saveSetup()
 	if h.roles != "claude-cli+" {
 		t.Errorf("roles = %q, want one model doing everything", h.roles)
+	}
+}
+
+// researchStep opens setup and walks the wizard straight to its Research step;
+// ok is false when the wizard does not show one.
+func researchStep(t *testing.T, a *App) (view string, ok bool) {
+	t.Helper()
+	a.Init()
+	for i, s := range a.wiz.steps {
+		if s.title == "Research" {
+			if !a.wiz.shown(i) {
+				return "", false
+			}
+			a.wiz.at = i - 1
+			a.wiz.move(1)
+			return a.wiz.view(), true
+		}
+	}
+	t.Fatal("setup has no Research step")
+	return "", false
+}
+
+func TestSetupOffersASearchEngineOnlyWhenResearchHasNone(t *testing.T) {
+	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
+	for name, state := range map[string]*SearchState{"something already searches": nil, "research is off": {Enabled: false}} {
+		h := &fakeHost{t: t, providers: []config.Provider{ollama}, search: state}
+		if _, ok := researchStep(t, newApp(h, Start{Page: pageSetup, NeedSetup: true})); ok {
+			t.Errorf("%s: the step has nothing to offer", name)
+		}
+	}
+	h := &fakeHost{t: t, providers: []config.Provider{ollama}, search: &SearchState{Enabled: true}}
+	view, ok := researchStep(t, newApp(h, Start{Page: pageSetup, NeedSetup: true}))
+	if !ok || !strings.Contains(view, "Start a free search engine") || !strings.Contains(view, "Yes, start it") {
+		t.Errorf("with Docker ready and nothing to search with:\n%s", view)
+	}
+	if !strings.Contains(view, "removes it") {
+		t.Errorf("the explanation must wrap, not be cut off at the edge:\n%s", view)
+	}
+}
+
+// Without Docker the step cannot offer anything, so it says how to get there.
+func TestSetupSaysHowToGetDockerWhenItCannotStartASearchEngine(t *testing.T) {
+	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
+	h := &fakeHost{t: t, providers: []config.Provider{ollama},
+		search: &SearchState{Enabled: true, DockerErr: errors.New("Docker is installed but not running\nStart it: open -a Docker")}}
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	view, ok := researchStep(t, a)
+	if !ok || !strings.Contains(view, "open -a Docker") || !strings.Contains(view, "ideacheck search up") || !strings.Contains(view, "own web tool") {
+		t.Fatalf("the step must carry the way out:\n%s", view)
+	}
+	a.finishSetup()
+	if h.searchStarts != 0 || len(h.saved) != 1 {
+		t.Errorf("nothing to start, settings saved: starts=%d saved=%v", h.searchStarts, h.saved)
+	}
+}
+
+func TestSetupStartsTheSearchEngineAfterSaving(t *testing.T) {
+	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
+	h := &fakeHost{t: t, providers: []config.Provider{ollama}, search: &SearchState{Enabled: true}}
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a.Init()
+	a.setup.startSearch = true
+	cmd := a.finishSetup()
+	if a.page != pageDownload || len(h.saved) != 1 || !strings.Contains(a.View(), "Starting your search engine") {
+		t.Fatalf("saved first, then the progress page: page=%v saved=%v\n%s", a.page, h.saved, a.View())
+	}
+	pump(t, a, cmd, pageDownload)
+	if h.searchStarts != 1 || a.page != pageLive || a.note != "" {
+		t.Errorf("starts=%d page=%v note=%q", h.searchStarts, a.page, a.note)
+	}
+}
+
+// A search engine that will not start costs research, never the setup.
+func TestAFailedSearchEngineStartKeepsTheSetup(t *testing.T) {
+	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
+	h := &fakeHost{t: t, providers: []config.Provider{ollama}, search: &SearchState{Enabled: true}, searchErr: errors.New("port 8080 is taken")}
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a.Init()
+	a.setup.startSearch = true
+	pump(t, a, a.finishSetup(), pageDownload)
+	if len(h.saved) != 1 || a.page != pageLive || !strings.Contains(a.note, "port 8080 is taken") || !strings.Contains(a.note, "ideacheck search up") {
+		t.Errorf("saved=%v page=%v note=%q", h.saved, a.page, a.note)
+	}
+}
+
+// The Judge step is skipped when Jev has no key; its "yes" default must not
+// apply to a question that was never asked, or a first run saves a judge that
+// cannot answer.
+func TestSetupWithoutAJevKeyKeepsTheChosenModelAsJudge(t *testing.T) {
+	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
+	jev := config.Provider{ID: "jev", Backend: "jev", Model: "jev-1", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true}
+	h := &fakeHost{t: t, providers: []config.Provider{ollama, jev}}
+	a := newApp(h, Start{Page: pageSetup, NeedSetup: true})
+	a.Init()
+	a.setup.id = "ollama"
+	if judge, writer := a.setup.roles(); judge.ID != "ollama" || writer.ID != "" {
+		t.Errorf("judge=%q writer=%q, want ollama alone", judge.ID, writer.ID)
+	}
+}
+
+// A list shows every option whatever is chosen, before and after a key. It
+// once lost them on the first key: the form had been measured before huh
+// wrapped the description at the window's width, came out too short, and huh
+// squeezed the list into a window that starts at the cursor — with the last
+// option chosen, the only one left on screen.
+func TestAListShowsEveryOptionWhateverIsChosen(t *testing.T) {
+	desc := "Keep the key you have, or replace it with another one that is long enough to wrap onto a second line."
+	value := "e"
+	w, _ := newWizard("t", 80, 24, []step{{title: "Pick", build: func() *huh.Form {
+		opts := []huh.Option[string]{huh.NewOption("Alpha", "a"), huh.NewOption("Bravo", "b"), huh.NewOption("Charlie", "c"), huh.NewOption("Delta", "d"), huh.NewOption("Echo", "e")}
+		return huh.NewForm(huh.NewGroup(choose("Which one?", desc, opts, &value)))
+	}}})
+	for _, key := range []tea.KeyType{tea.KeyUp, tea.KeyDown} {
+		w.update(tea.KeyMsg{Type: key})
+		view := w.view()
+		for _, want := range []string{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "second line."} {
+			if !strings.Contains(view, want) {
+				t.Errorf("lost %q:\n%s", want, view)
+			}
+		}
+	}
+}
+
+// Every settings step wraps to the window: nothing is cut off at the edge.
+func TestSettingsWrapToTheWindow(t *testing.T) {
+	providers := []config.Provider{
+		{ID: "claude-cli", Label: "Claude CLI — use my Claude login (no API key)", Backend: "claude-cli", Model: "sonnet"},
+		{ID: "jev", Label: "Jev", Backend: "jev", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true, Model: "jev-1"},
+	}
+	h := &fakeHost{t: t, providers: providers, keys: map[string]bool{"TYPESAFE_API_KEY": true}, search: &SearchState{Enabled: true}}
+	a := newApp(h, Start{Page: pageMenu})
+	a.width, a.height = 60, 24
+	a.open(pageSetup)
+	for state := wizardRunning; state == wizardRunning; state, _ = a.wiz.move(1) {
+		view := a.View()
+		for _, line := range strings.Split(view, "\n") {
+			if w := lipgloss.Width(strings.TrimRight(line, " ")); w > a.width {
+				t.Errorf("%s: a line of %d cells in a %d-cell window:\n%s", a.wiz.steps[a.wiz.at].title, w, a.width, view)
+				break
+			}
+		}
+		if h := lipgloss.Height(view); h > a.height {
+			t.Errorf("%s: %d lines in a %d-line window:\n%s", a.wiz.steps[a.wiz.at].title, h, a.height, view)
+		}
 	}
 }

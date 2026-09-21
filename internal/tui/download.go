@@ -22,23 +22,47 @@ type (
 	downloadedMsg struct{ err error }
 )
 
-// download is a model being fetched before setup saves it: a model that is
-// not on this machine could never answer, so it is downloaded first.
+// download is something setup waits for before it moves on: a model being
+// fetched (one that is not on this machine could never answer), or the search
+// engine being started. The page is the same; what runs and what follows differ.
 type download struct {
-	model  string
-	last   Progress
-	events chan Progress
-	done   chan error
-	ctx    context.Context
-	cancel context.CancelFunc
+	title, about string // the heading, and the dim half of it
+	then         func(err error, stopped bool) tea.Cmd
+	last         Progress
+	events       chan Progress
+	done         chan error
+	ctx          context.Context
+	cancel       context.CancelFunc
 }
 
+// openDownload fetches a model, then carries on with setup; a failure goes back
+// to the wizard, because a model that is not here cannot be saved as the choice.
 func (a *App) openDownload(p config.Provider, model string) tea.Cmd {
+	return a.await("Downloading "+model, "once; it stays on this machine and runs free",
+		func(ctx context.Context, progress func(Progress)) error {
+			return a.host.Download(ctx, p, model, progress)
+		},
+		func(err error, stopped bool) tea.Cmd {
+			if err == nil {
+				return a.afterModel()
+			}
+			note := fmt.Sprintf("Could not download %s: %v", model, err)
+			if stopped {
+				note = "Download stopped. Choose " + model + " again to pick up where it left off, or pick another model."
+			}
+			cmd := a.open(pageSetup)
+			a.note = note
+			return cmd
+		})
+}
+
+// await opens the progress page over run, and hands its outcome to then.
+func (a *App) await(title, about string, run func(context.Context, func(Progress)) error, then func(error, bool) tea.Cmd) tea.Cmd {
 	ctx, cancel := context.WithCancel(a.ctx)
-	d := &download{model: model, events: make(chan Progress, 16), done: make(chan error, 1), ctx: ctx, cancel: cancel}
+	d := &download{title: title, about: about, then: then, events: make(chan Progress, 16), done: make(chan error, 1), ctx: ctx, cancel: cancel}
 	a.page, a.dl, a.banner, a.note = pageDownload, d, "", ""
 	go func() {
-		err := a.host.Download(ctx, p, model, func(p Progress) {
+		err := run(ctx, func(p Progress) {
 			select {
 			case d.events <- p:
 			case <-ctx.Done():
@@ -70,16 +94,7 @@ func (a *App) updateDownload(msg tea.Msg) tea.Cmd {
 		stopped := d.ctx.Err() != nil // esc, checked before the cleanup below cancels it anyway
 		d.cancel()
 		a.dl = nil
-		if msg.err == nil {
-			return a.saveSetup()
-		}
-		note := fmt.Sprintf("Could not download %s: %v", d.model, msg.err)
-		if stopped {
-			note = "Download stopped. Choose " + d.model + " again to pick up where it left off, or pick another model."
-		}
-		cmd := a.open(pageSetup)
-		a.note = note
-		return cmd
+		return d.then(msg.err, stopped)
 	case tea.KeyMsg:
 		if msg.String() == "esc" {
 			a.dl.cancel() // the download returns, and downloadedMsg goes back to setup
@@ -91,14 +106,14 @@ func (a *App) updateDownload(msg tea.Msg) tea.Cmd {
 // view draws the download the way the installer draws its own: the same bar,
 // the same percentage, the same "so far / in total" on the right.
 func (d *download) view(width int) string {
-	head := bold.Render("Downloading "+d.model) + dim.Render(" — once; it stays on this machine and runs free") + "\n\n"
+	head := heading.Render(d.title) + dim.Render(" — "+d.about) + "\n\n"
 	p := d.last
 	status := p.Status
 	if strings.HasPrefix(status, "pulling ") && status != "pulling manifest" {
 		status = "" // "pulling <digest>" is what the bar already shows
 	}
 	if p.Total == 0 {
-		return head + dim.Render(orStarting(status))
+		return head + "  " + accent.Render("◌ ") + dim.Render(orStarting(status))
 	}
 	frac := float64(p.Done) / float64(p.Total)
 	filled, rest := ui.Bar(frac, min(max(width-34, 10), 40))

@@ -182,7 +182,10 @@ same tool:
   stderr (`bench` writes its table to stdout and its steps to stderr).
 - The app (`internal/tui`) uses the same palette: faint rather than a grey that
   guesses at the theme, and the terminal's own green/red/yellow, so the window
-  matches the installer that put it there.
+  matches the installer that put it there. On top, the app adds the terminal's
+  own cyan as its accent (`accent`, `heading`, `pill` in `styles.go`): where you
+  are, what has focus, which key does what. Scores are colored by good news
+  (`scoreStyle`: polarity-aware green/yellow/red), never by raw height.
 
 ## Flags
 
@@ -216,6 +219,14 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list
   of findings), so offline runs and old tests are unchanged; `bench` never researches.
+- Setup's last step (`Research`, `internal/tui/pages.go`) offers `search up` through
+  `Host.Search` / `Host.StartSearch`. A wizard default belongs in the step's
+  `build`, never in the draft's constructor: a skipped step must not answer yes
+  (that is how a first run once saved Jev as judge without a key). `wizard.fit`
+  re-lays a form out after sizing it: huh draws what it laid out last, so text
+  kept the old width (cut off at the edge) and the form measured too short —
+  huh then squeezed the list into a window starting at the cursor, often just
+  the chosen option. Settings builds selects with `choose` (options before value).
 - `search.Local` talks to Docker through the `search.Docker` func (`app.docker` in
   the CLI), so its tests fake the docker CLI and no test needs Docker. Its errors
   are the product: `DockerError` is problem + what to do, per OS.

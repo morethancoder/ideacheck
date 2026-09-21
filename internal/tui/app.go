@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
@@ -28,8 +27,14 @@ type Host interface {
 	// downloaded yet; Download then fetches it, reporting progress as it goes.
 	MissingModel(p config.Provider, model string) bool
 	Download(ctx context.Context, p config.Provider, model string, progress func(Progress)) error
-	HasKey(env string) bool
+	// Key says whether an API key is already set, and where: setup offers to
+	// keep it rather than asking for it again.
+	Key(env string) Key
 	HasCLI(name string) bool
+	// Search says what research would search with; StartSearch starts the
+	// SearXNG `ideacheck search up` runs, reporting each step in Progress.Status.
+	Search() SearchState
+	StartSearch(ctx context.Context, progress func(Progress)) error
 	SaveSetup(p config.Provider, model, effort, key string) error
 	// SaveRoles records who judges and who writes; a zero writer means the judge
 	// does both. Writer names the current writer, "" when there is none.
@@ -42,6 +47,21 @@ type Host interface {
 	Stored(ref string) (*pipeline.Result, error)
 	Persist(in pipeline.Intake, res *pipeline.Result)
 }
+
+// SearchState is whether research has something to search with, and whether
+// ideacheck could start a search engine here when it has not.
+type SearchState struct {
+	Enabled   bool   // research.enabled
+	With      string // the service a check would query now; "" when there is none
+	DockerErr error  // why a search engine cannot be started here; nil when it can
+}
+
+// Key is an API key setup found: where it comes from ("your environment",
+// "credentials.yaml"; "" = none) and its last characters, enough to recognize
+// it by. The key itself never reaches the app.
+type Key struct{ From, Tail string }
+
+func (k Key) Found() bool { return k.From != "" }
 
 type page int
 
@@ -284,56 +304,70 @@ func (a *App) View() string {
 	}
 	title := map[page]string{pageMenu: "Home", pageSetup: "Settings", pageDownload: "Downloading", pageIdea: "New check", pageLive: "Checking", pageAsk: "A few questions", pageResult: "Result", pageHistory: "History", pageProfile: "Profile"}[a.page]
 	writer := a.host.Writer()
-	if writer != "" {
-		writer = "written by " + writer
-	}
-	header := bold.Render("ideacheck") + dim.Render("  ›  "+title) + "\n" + dim.Render(joinNonEmpty(" · ", backend, model, effort, writer)) + "\n"
-	body, help := a.body()
+	header := pill.Render("ideacheck") + accent.Render("  ›  ") + bold.Render(title) + "\n" + modelLine(backend, model, effort, writer) + "\n"
+	body, keys := a.body()
 	if a.note != "" {
-		body = warnSty.Width(max(a.width-6, 20)).Render(a.note) + "\n\n" + body
+		body = callout.BorderForeground(lipgloss.Color("3")).Render(warnSty.Width(max(a.width-9, 20)).Render(a.note)) + "\n\n" + body
 	}
 	if a.banner != "" {
-		body = bad.Render("! "+a.banner) + "\n\n" + body
+		body = callout.BorderForeground(lipgloss.Color("1")).Render(bad.Bold(true).Render("✗ ")+bad.Width(max(a.width-11, 20)).Render(a.banner)) + "\n\n" + body
 	}
-	return lipgloss.NewStyle().Padding(1, 2).Render(header + "\n" + body + "\n\n" + dim.Render(help))
+	return lipgloss.NewStyle().Padding(1, 2).Render(header + "\n" + body + "\n\n" + help(max(a.width-4, 20), keys...))
 }
 
-func (a *App) body() (string, string) {
+// modelLine is who does what: the judge (and the writer, when another model
+// writes), the backend in the accent and the model in bold, so the one thing
+// that decides cost and quality stands out of the line.
+func modelLine(backend, model, effort, writer string) string {
+	if model == "" && backend == "not set up" {
+		return warnSty.Render(backend)
+	}
+	parts := []string{accent.Render(backend)}
+	if model != "" {
+		parts = append(parts, bold.Render(model))
+	}
+	if effort != "" {
+		parts = append(parts, dim.Render(effort))
+	}
+	line := strings.Join(parts, dim.Render(" · "))
+	if writer == "" {
+		return dim.Render("judge + writer ") + line
+	}
+	return dim.Render("judge ") + line + dim.Render("   writer ") + accent.Render(writer)
+}
+
+// body is the page and its key bindings, as key/what pairs for help.
+func (a *App) body() (string, []string) {
 	switch a.page {
 	case pageMenu:
-		return a.menuView(), "↑/↓ move · enter select · q quit"
-	case pageSetup, pageIdea, pageAsk, pageProfile:
-		return a.wiz.view(), "enter next · shift+tab previous field · esc back · ctrl+c quit"
+		return a.menuView(), []string{"↑/↓", "move", "enter", "select", "q", "quit"}
+	case pageSetup, pageAsk: // one field per step: nothing for shift+tab to go back to
+		return a.wiz.view(), []string{"enter", "next", "esc", "back", "ctrl+c", "quit"}
+	case pageIdea, pageProfile:
+		return a.wiz.view(), []string{"enter", "next", "shift+tab", "previous field", "esc", "back", "ctrl+c", "quit"}
 	case pageDownload:
-		return a.dl.view(a.width), "esc stop and go back · ctrl+c quit"
+		return a.dl.view(a.width), []string{"esc", "stop and go back", "ctrl+c", "quit"}
 	case pageLive:
-		return a.live.body(), "answers land as they complete · ctrl+c cancel"
+		return a.live.body(), []string{"ctrl+c", "cancel — answers land as they complete"}
 	case pageResult:
-		return a.resultView(), "←/→ or tab switch view · n new check · h history · m menu · q quit"
+		return a.resultView(), []string{"←/→", "switch view", "n", "new check", "h", "history", "m", "menu", "q", "quit"}
 	case pageHistory:
-		return a.historyView(), "↑/↓ move · enter open · esc back"
+		return a.historyView(), []string{"↑/↓", "move", "enter", "open", "esc", "back"}
 	}
-	return "", ""
+	return "", nil
 }
 
+// menuView highlights the line under the cursor as a bar and lets its hint
+// read at full strength; the others stay quiet.
 func (a *App) menuView() string {
 	var b strings.Builder
+	label := lipgloss.NewStyle().Width(21) // lines up with the text inside the bar
 	for i, item := range menuItems {
-		line := "  " + item.label
 		if i == a.cursor {
-			line = bold.Render("› " + item.label)
+			b.WriteString(pill.Width(24).Render("› "+item.label) + "  " + item.hint + "\n")
+			continue
 		}
-		b.WriteString(fmt.Sprintf("%-28s %s\n", line, dim.Render(item.hint)))
+		b.WriteString("   " + label.Render(item.label) + "  " + dim.Render(item.hint) + "\n")
 	}
 	return b.String()
-}
-
-func joinNonEmpty(sep string, parts ...string) string {
-	var kept []string
-	for _, p := range parts {
-		if p != "" {
-			kept = append(kept, p)
-		}
-	}
-	return strings.Join(kept, sep)
 }

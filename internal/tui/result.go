@@ -49,15 +49,15 @@ func result(res *pipeline.Result) string {
 		b.WriteString("\n" + summaryView(res.Summary, 90) + "\n")
 	}
 	if len(res.Missing) > 0 {
-		b.WriteString(panel.Render(missingPanel(res.Missing)) + "\n")
+		b.WriteString(panel.BorderForeground(lipgloss.Color("3")).Render(missingPanel(res.Missing)) + "\n")
 	}
-	b.WriteString(contributions("Top strengths", good.Render("▲"), res.TopStrengths))
-	b.WriteString(contributions("Top risks", bad.Render("▼"), res.TopRisks))
+	b.WriteString(contributions("Top strengths", good, "▲", res.TopStrengths))
+	b.WriteString(contributions("Top risks", bad, "▼", res.TopRisks))
 	if res.Research != nil {
 		b.WriteString("\n" + EvidenceView(res.Research))
 	}
 	for _, w := range res.Warnings {
-		b.WriteString(warnSty.Render("! "+w) + "\n")
+		b.WriteString(warnSty.Bold(true).Render("! ") + warnSty.Render(w) + "\n")
 	}
 	if line := costLine(res.Cost); line != "" {
 		b.WriteString("\n" + line + "\n")
@@ -74,7 +74,7 @@ func summaryView(text string, width int) string {
 // costLine is the one-line cost summary; costDetails shows the working. Both
 // are empty for results saved before costs were recorded.
 func costLine(c pipeline.Cost) string {
-	head := bold.Render("Cost") + "  "
+	head := heading.Render("Cost") + "  "
 	switch c.Basis {
 	case "":
 		return ""
@@ -119,9 +119,9 @@ func costDetails(c pipeline.Cost) string {
 		rows = append(rows, [2]string{"Note", c.Note})
 	}
 	var b strings.Builder
-	b.WriteString(bold.Render("Cost of this check") + "\n")
+	b.WriteString(heading.Render("Cost of this check") + "\n")
 	for _, r := range rows {
-		fmt.Fprintf(&b, "  %-7s %s\n", r[0], r[1])
+		fmt.Fprintf(&b, "  %s %s\n", dim.Render(fmt.Sprintf("%-7s", r[0])), r[1])
 	}
 	return b.String()
 }
@@ -159,18 +159,20 @@ func count(n int) string {
 func headline(res *pipeline.Result) string {
 	switch res.Status {
 	case pipeline.StatusNeedsInput:
-		return warnSty.Render("NEEDS INPUT") + "  more information is needed before this idea can be judged"
+		return warnSty.Bold(true).Render("NEEDS INPUT") + "  more information is needed before this idea can be judged"
 	case pipeline.StatusError:
-		return bad.Render("ERROR") + "  " + res.Error
+		return bad.Bold(true).Render("ERROR") + "  " + res.Error
 	}
-	return fmt.Sprintf("%s  composite %s  confidence %s\n%s",
-		badge(res.Verdict), bold.Render(fmt.Sprintf("%.2f", res.Composite)), pct(res.CompositeConfidence), res.VerdictReason)
+	color := lipgloss.NewStyle().Bold(true).Foreground(verdictColors[res.Verdict])
+	return fmt.Sprintf("%s  %s %s  %s %s\n%s",
+		badge(res.Verdict), dim.Render("composite"), color.Render(fmt.Sprintf("%.2f", res.Composite)),
+		dim.Render("confidence"), bold.Render(strings.TrimSpace(pct(res.CompositeConfidence))), res.VerdictReason)
 }
 
 func missingPanel(missing []pipeline.Missing) string {
-	lines := []string{bold.Render("Missing information")}
+	lines := []string{warnSty.Bold(true).Render("Missing information")}
 	for _, m := range missing {
-		lines = append(lines, fmt.Sprintf("? %s %s", m.Ask, dim.Render(fmt.Sprintf("(p=%.2f)", m.Probability))))
+		lines = append(lines, fmt.Sprintf("%s %s %s", warnSty.Bold(true).Render("?"), m.Ask, dim.Render(fmt.Sprintf("(p=%.2f)", m.Probability))))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -179,7 +181,7 @@ func missingPanel(missing []pipeline.Missing) string {
 // that leans on a search has to show the search. A finding the judge typed as
 // unrelated is shown struck from the evidence rather than hidden.
 func EvidenceView(r *pipeline.ResearchReport) string {
-	head := bold.Render("Found on the web") + dim.Render("  by "+r.By)
+	head := heading.Render("Found on the web") + dim.Render("  by "+r.By)
 	if n := len(r.Queries); n > 0 {
 		head += dim.Render(fmt.Sprintf(" · %d searches", n))
 	}
@@ -195,9 +197,9 @@ func EvidenceView(r *pipeline.ResearchReport) string {
 	for _, f := range r.Findings {
 		if f.Topic != topic {
 			topic = f.Topic
-			b.WriteString("  " + dim.Render(strings.ReplaceAll(topic, "_", " ")) + "\n")
+			b.WriteString("  " + accent.Render(strings.ReplaceAll(topic, "_", " ")) + "\n")
 		}
-		mark, title := good.Render("•"), f.Title
+		mark, title := good.Render("•"), bold.Render(f.Title)
 		if !f.Used {
 			mark, title = dim.Render("×"), dim.Render(f.Title+" — left out")
 		}
@@ -210,20 +212,25 @@ func EvidenceView(r *pipeline.ResearchReport) string {
 			b.WriteString("      " + f.Summary + "\n")
 		}
 		if f.URL != "" {
-			b.WriteString("      " + dim.Render(f.URL) + "\n")
+			b.WriteString("      " + accent.Faint(true).Underline(true).Render(f.URL) + "\n")
 		}
 	}
 	return b.String()
 }
 
-func contributions(title, mark string, cs []pipeline.Contribution) string {
+// contributions lists the dimensions that moved the score most, their title,
+// mark and bar in the one color that says which way they moved it.
+func contributions(title string, color lipgloss.Style, mark string, cs []pipeline.Contribution) string {
 	if len(cs) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n" + bold.Render(title) + "\n")
+	b.WriteString("\n" + color.Bold(true).Render(title) + "\n")
 	for _, c := range cs {
-		fmt.Fprintf(&b, "  %s %-28s %s %.2f  %s\n", mark, c.ID, Bar(c.Value), c.Value, dim.Render(fmt.Sprintf("weight %.1f", c.Weight)))
+		bar := Bar(c.Value)
+		filled := strings.TrimRight(bar, "░")
+		fmt.Fprintf(&b, "  %s %-28s %s %s  %s\n", color.Render(mark), c.ID, color.Render(filled)+dim.Render(bar[len(filled):]),
+			bold.Render(fmt.Sprintf("%.2f", c.Value)), dim.Render(fmt.Sprintf("weight %.1f", c.Weight)))
 	}
 	return b.String()
 }
@@ -233,11 +240,11 @@ func footer(res *pipeline.Result) string {
 	if res.Rubric != nil {
 		parts = append(parts, "rubric "+res.Rubric.Name)
 	}
+	parts = append(parts, fmt.Sprintf("judge %s/%s", res.Backend, res.Model))
 	if res.Writer != "" {
-		parts = append(parts, "written by "+res.Writer)
+		parts = append(parts, "writer "+res.Writer)
 	}
 	parts = append(parts,
-		fmt.Sprintf("%s/%s", res.Backend, res.Model),
 		fmt.Sprintf("%s: %s", res.Method, CalibrationNote(res.Method)),
 		fmt.Sprintf("%d ms", res.Timing.TotalMS),
 		res.ID,

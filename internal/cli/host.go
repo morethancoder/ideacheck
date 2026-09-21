@@ -8,6 +8,7 @@ import (
 
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/internal/search"
 	"github.com/morethancoder/ideacheck/internal/store"
 	"github.com/morethancoder/ideacheck/internal/tui"
 )
@@ -88,7 +89,53 @@ func (h *host) Download(ctx context.Context, p config.Provider, model string, pr
 	return pullModel(ctx, p.BaseURL, model, progress)
 }
 
-func (h *host) HasKey(env string) bool { return h.app.secrets().Get(env) != "" }
+// Search is what a check would search with now, and whether Docker is there
+// to start a search engine with when the answer is "nothing".
+func (h *host) Search() tui.SearchState {
+	local, cfg, err := h.app.localSearch()
+	if err != nil {
+		return tui.SearchState{}
+	}
+	s := tui.SearchState{Enabled: cfg.Research.Enabled}
+	if provider, err := search.New(h.ctx, cfg.Research, h.app.secrets().Get); err == nil && provider != nil {
+		s.With = provider.Name()
+		return s
+	}
+	_, s.DockerErr = local.Ready(h.ctx)
+	return s
+}
+
+func (h *host) StartSearch(ctx context.Context, progress func(tui.Progress)) error {
+	local, _, err := h.app.localSearch()
+	if err != nil {
+		return err
+	}
+	return local.Up(ctx, func(s search.Step) {
+		if !s.Done && !s.Warn {
+			progress(tui.Progress{Status: s.Text})
+		}
+	})
+}
+
+func (h *host) Key(env string) tui.Key {
+	s := h.app.secrets()
+	if v := s.Getenv(env); v != "" { // the shell, or a .env it loaded: this one wins
+		return tui.Key{From: "your environment", Tail: keyTail(v)}
+	}
+	if v := s.Get(env); v != "" {
+		return tui.Key{From: "credentials.yaml", Tail: keyTail(v)}
+	}
+	return tui.Key{}
+}
+
+// keyTail is the last four characters of a key, and only of one long enough
+// that four characters give nothing away.
+func keyTail(v string) string {
+	if r := []rune(v); len(r) >= 16 {
+		return string(r[len(r)-4:])
+	}
+	return ""
+}
 
 func (h *host) HasCLI(name string) bool {
 	_, err := exec.LookPath(name)

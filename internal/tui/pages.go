@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/internal/judge/backends"
@@ -24,15 +26,28 @@ const otherModel = "\x00other"
 
 type setupDraft struct {
 	id, key       string
+	replaceKey    bool   // a key is already set and the user chose to replace it
 	model, custom string // model is the list choice; custom the typed id (otherModel, or no list)
 	effort        string
 	writer        string // provider id that writes next to a judge that cannot; noWriter = nobody
 	jevJudges     bool   // let Jev answer the typed questions next to the chosen model
+	judgeAsked    bool   // the Judge step was shown; until then jevJudges stays false
 	providers     []config.Provider
 	current       [3]string // backend, model, effort in effect when setup opened
 	defaultsFor   string    // provider id the model/effort defaults were set for
 	lists         map[string][]config.ModelChoice
-	note          string // why the list is the preset one (discovery failed)
+	note          string       // why the list is the preset one (discovery failed)
+	search        *SearchState // asked once: the wizard counts its steps on every draw
+	startSearch   bool         // start the search engine once the choices are saved
+}
+
+// searching is what research has to search with, asked of the host once.
+func (a *App) searching(d *setupDraft) SearchState {
+	if d.search == nil {
+		s := a.host.Search()
+		d.search = &s
+	}
+	return *d.search
 }
 
 func (d *setupDraft) chosen() config.Provider { return providerByID(d.providers, d.id) }
@@ -62,9 +77,17 @@ func (d *setupDraft) roles() (judge, writer config.Provider) {
 	return chosen, config.Provider{}
 }
 
+// key is the API key already set for the chosen provider, if any.
+func (a *App) key(d *setupDraft) Key {
+	if env := d.chosen().KeyEnv; env != "" {
+		return a.host.Key(env)
+	}
+	return Key{}
+}
+
 // usable reports whether a provider can run right now without more setup.
 func (a *App) usable(p config.Provider) bool {
-	return (p.NeedsCLI == "" || a.host.HasCLI(p.NeedsCLI)) && (p.KeyEnv == "" || a.host.HasKey(p.KeyEnv))
+	return (p.NeedsCLI == "" || a.host.HasCLI(p.NeedsCLI)) && (p.KeyEnv == "" || a.host.Key(p.KeyEnv).Found())
 }
 
 // writers are the providers that can write next to a classifier, ready ones only.
@@ -72,7 +95,11 @@ func (a *App) writers(d *setupDraft) []huh.Option[string] {
 	var opts []huh.Option[string]
 	for _, p := range d.providers {
 		if !p.NeedsWriter && a.usable(p) {
-			opts = append(opts, huh.NewOption(p.Label, p.ID))
+			label := p.Label
+			if p.Model != "" {
+				label += " · " + p.Model
+			}
+			opts = append(opts, huh.NewOption(label, p.ID))
 		}
 	}
 	return append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
@@ -153,7 +180,7 @@ func (a *App) loadModels(d *setupDraft) {
 }
 
 func (a *App) openSetup() tea.Cmd {
-	d := &setupDraft{providers: a.host.Providers(), lists: map[string][]config.ModelChoice{}, jevJudges: true}
+	d := &setupDraft{providers: a.host.Providers(), lists: map[string][]config.ModelChoice{}}
 	backend, model, effort := a.host.Current()
 	d.current = [3]string{backend, model, effort}
 	var options []huh.Option[string]
@@ -170,8 +197,8 @@ func (a *App) openSetup() tea.Cmd {
 	a.setup = d
 	steps := []step{
 		{title: "Provider", build: func() *huh.Form {
-			return huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("How should ideacheck reach a model?").
-				Description("You can change this any time from Settings or `ideacheck setup`.").Options(options...).Value(&d.id).
+			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach a model?",
+				"You pick the model next. You can change this any time from Settings or `ideacheck setup`.", options, &d.id).
 				Validate(func(id string) error {
 					if cli := providerByID(d.providers, id).NeedsCLI; cli != "" && !a.host.HasCLI(cli) {
 						return fmt.Errorf("the %s command is not installed; pick another provider", cli)
@@ -179,20 +206,36 @@ func (a *App) openSetup() tea.Cmd {
 					return nil
 				})))
 		}},
-		{title: "API key", skip: func() bool { return d.chosen().KeyEnv == "" }, build: func() *huh.Form {
+		{title: "API key", skip: func() bool { return !a.key(d).Found() }, build: func() *huh.Form {
+			p, k := d.chosen(), a.key(d)
+			keep := "Keep it — $" + p.KeyEnv + " from " + k.From
+			if k.Tail != "" {
+				keep += ", ending in …" + k.Tail
+			}
+			return huh.NewForm(huh.NewGroup(choose("An API key for "+p.Label+" is already set",
+				"Keep the key you have, or replace it with another one.",
+				[]huh.Option[bool]{huh.NewOption(keep, false), huh.NewOption("Replace it with a new key", true)}, &d.replaceKey)))
+		}},
+		{title: "API key", skip: func() bool {
+			return d.chosen().KeyEnv == "" || (a.key(d).Found() && !d.replaceKey)
+		}, build: func() *huh.Form {
 			p := d.chosen()
-			desc := "Get one at " + p.KeyURL + "\nStored in credentials.yaml (readable only by you). $" + p.KeyEnv + " in your environment wins if set."
-			if a.host.HasKey(p.KeyEnv) {
-				desc = "A key is already available. Leave blank to keep it.\n" + desc
+			desc := "Get one at " + p.KeyURL + "\nStored in credentials.yaml (readable only by you)."
+			if a.key(d).From == "your environment" {
+				// Saving would change nothing on the next run: say so before the user types.
+				desc += "\n$" + p.KeyEnv + " is also set in your environment (your shell, or a .env it loads) and that one wins: remove it there for this key to take effect."
+			} else {
+				desc += " $" + p.KeyEnv + " in your environment wins if set."
 			}
 			return huh.NewForm(huh.NewGroup(huh.NewInput().Title(p.KeyEnv).Description(desc).EchoMode(huh.EchoModePassword).Value(&d.key).
 				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" && !a.host.HasKey(p.KeyEnv) {
-						return errors.New("an API key is required for this provider")
+					if strings.TrimSpace(s) == "" {
+						return errors.New("paste the API key, or press esc to go back")
 					}
 					return nil
 				})))
 		}},
+		a.judgeStep(d),
 		{title: "Model", build: func() *huh.Form {
 			a.loadModels(d)
 			p := d.chosen()
@@ -202,7 +245,7 @@ func (a *App) openSetup() tea.Cmd {
 				if p.Model == "" {
 					desc = "The model id this provider should use. Leave blank for the provider's own default.\n" + d.note
 				}
-				return huh.NewForm(huh.NewGroup(customModel(d, "Model", strings.TrimSpace(desc), p.Model != "")))
+				return huh.NewForm(huh.NewGroup(customModel(d, d.modelQuestion(), strings.TrimSpace(d.roleNote()+"\n"+desc), p.Model != "")))
 			}
 			var opts []huh.Option[string]
 			for _, m := range d.models() {
@@ -213,8 +256,8 @@ func (a *App) openSetup() tea.Cmd {
 				other = "Other… (type any model id — downloaded for you if it is not here yet)"
 			}
 			opts = append(opts, huh.NewOption(other, otherModel))
-			return huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Which model should judge your ideas?").
-				Description(strings.TrimSpace(priceNote(d.chosen().Billing) + " " + d.note)).Options(opts...).Value(&d.model)))
+			return huh.NewForm(huh.NewGroup(choose(d.modelQuestion(),
+				strings.TrimSpace(d.roleNote()+"\n"+priceNote(d.chosen().Billing)+" "+d.note), opts, &d.model)))
 		}},
 		{title: "Model id", skip: func() bool { return len(d.models()) == 0 || d.model != otherModel }, build: func() *huh.Form {
 			return huh.NewForm(huh.NewGroup(customModel(d, "Model id", customHint(d.chosen()), true)))
@@ -233,8 +276,8 @@ func (a *App) openSetup() tea.Cmd {
 				}
 				opts = append(opts, huh.NewOption(label, e))
 			}
-			return huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("How hard should the model think?").
-				Description("Higher effort spends more tokens (and time) per question.").Options(opts...).Value(&d.effort)))
+			return huh.NewForm(huh.NewGroup(choose("How hard should "+cmp.Or(d.modelID(), "the model")+" think?",
+				"Higher effort spends more tokens (and time) per question.", opts, &d.effort)))
 		}},
 	}
 	steps = append(steps,
@@ -243,23 +286,146 @@ func (a *App) openSetup() tea.Cmd {
 			if d.writer == "" {
 				d.writer = opts[0].Value
 			}
-			return huh.NewForm(huh.NewGroup(huh.NewSelect[string]().Title("Who reads, researches and writes?").
-				Description(d.chosen().Label + " answers typed questions and nothing else. A second model reads your text, looks the idea up on the web and writes the summary; every score still comes from the classifier.\nOnly providers that are ready to use are listed. It runs with its usual model; set up that provider first to pick another.").
-				Options(opts...).Value(&d.writer)))
-		}},
-		step{title: "Judge", skip: func() bool {
-			jev, ok := d.classifier()
-			return d.chosen().NeedsWriter || !ok || !a.usable(jev)
-		}, build: func() *huh.Form {
-			jev, _ := d.classifier()
-			return huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Let " + jev.Label + " answer the typed questions?").
-				Description("You have a key for it. It returns calibrated probabilities for every yes/no, level and option question, while the model you just chose reads your text, researches the web and writes the summary.").
-				Affirmative("Yes, use both").Negative("No, one model does everything").Value(&d.jevJudges)))
+			return huh.NewForm(huh.NewGroup(choose("Which model should be the writer?",
+				d.chosen().Label+" is the judge: it answers every scoring question and nothing else. The writer reads your text, looks the idea up on the web and writes the summary; it never changes a score.\nOnly providers ready to use are listed, each with its usual model; set that provider up first to pick another.",
+				opts, &d.writer)))
 		}},
 	)
+	// Last, and only when research would otherwise have nothing to search with:
+	// a writer's own web tool still works without it, slowly and at a price.
+	steps = append(steps, step{title: "Research", skip: func() bool {
+		s := a.searching(d)
+		return !s.Enabled || s.With != ""
+	}, build: func() *huh.Form {
+		const why = "Before scoring, ideacheck looks the idea up on the web — who does this already, who tried and stopped, how big the market is — and needs something to search with. "
+		if err := a.searching(d).DockerErr; err != nil {
+			return huh.NewForm(huh.NewGroup(huh.NewNote().Title("Research has nothing to search with yet").
+				// A note reads backticks as markup and cuts long lines off: plain, and folded here.
+				Description(why + "The free way is a search engine of your own, which ideacheck runs in Docker.\n\n" + err.Error() +
+					"\n\nAfter that, run: ideacheck search up\nUntil then, checks score the description alone, or use the writer's own web tool.").
+				Next(true).NextLabel("Continue")))
+		}
+		d.startSearch = true
+		return huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Start a free search engine for research?").
+			Description(why + "Docker is running, so it can start its own SearXNG: free, no key, reachable from this machine only, about 250 MB once. `ideacheck search down` removes it.").
+			Affirmative("Yes, start it").Negative("Not now").Value(&d.startSearch)))
+	}})
 	var cmd tea.Cmd
 	a.wiz, cmd = newWizard("setup", a.width, a.height, steps)
+	a.wiz.aside = func() string { return a.rolesView(d) }
+	a.wiz.form = a.wiz.fit(a.wiz.form)
 	return cmd
+}
+
+// judgeStep offers Jev as the judge beside a model that can do everything.
+// It comes before the model is picked, so that step can say which role the
+// model it offers will play.
+func (a *App) judgeStep(d *setupDraft) step {
+	return step{title: "Judge", skip: func() bool {
+		jev, ok := d.classifier()
+		return d.chosen().NeedsWriter || !ok || !a.usable(jev)
+	}, build: func() *huh.Form {
+		jev, _ := d.classifier()
+		// Yes by default — but only once the question is really asked: a step
+		// skipped for want of a key must not make Jev the judge anyway.
+		if !d.judgeAsked {
+			d.judgeAsked, d.jevJudges = true, true
+		}
+		return huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Let " + jev.ID + " be the judge?").
+			Description("You have a key for it. The judge answers every scoring question; " + jev.ID + " returns calibrated probabilities for each yes/no, level and option. " +
+				d.chosen().ID + " is then the writer: it reads your text, looks the idea up on the web and writes the summary.").
+			Affirmative("Yes, " + jev.ID + " judges").Negative("No, " + d.chosen().ID + " does both").Value(&d.jevJudges)))
+	}}
+}
+
+// role is what the model being picked will do, given the choices so far.
+func (d *setupDraft) role() string {
+	switch judge, writer := d.roles(); {
+	case judge.ID == d.id && writer.ID == "" && !d.chosen().NeedsWriter:
+		return "judge and writer"
+	case judge.ID == d.id:
+		return "judge"
+	}
+	return "writer"
+}
+
+func (d *setupDraft) modelQuestion() string {
+	switch d.role() {
+	case "judge":
+		return "Which model should be the judge?"
+	case "writer":
+		return "Which model should be the writer?"
+	}
+	return "Which model should judge and write?"
+}
+
+// roleNote says what the role means, in the words the roles view uses.
+func (d *setupDraft) roleNote() string {
+	switch d.role() {
+	case "judge":
+		return "The judge answers every scoring question."
+	case "writer":
+		return "The writer reads your text, looks the idea up on the web and writes the summary. It never scores."
+	}
+	return "This model answers every scoring question, and also reads your text, looks the idea up on the web and writes the summary."
+}
+
+// rolesView is who does what with the choices made so far: the judge, the
+// writer and what research searches with. With room, one row each and what
+// the role does; in a short window, one line, so the form keeps its space.
+func (a *App) rolesView(d *setupDraft) string {
+	model := func(p config.Provider) string {
+		m := p.Model
+		if p.ID == d.id {
+			m = d.modelID()
+		}
+		if m == "" {
+			return accent.Render(p.ID)
+		}
+		return accent.Render(p.ID) + dim.Render(" · ") + bold.Render(m)
+	}
+	judge, writer := d.roles()
+	w := dim.Render("same model")
+	switch {
+	case writer.ID != "":
+		w = model(writer)
+	case d.chosen().NeedsWriter:
+		w = warnSty.Render("none") + dim.Render(" (scores only)")
+	}
+	search := dim.Render("off")
+	switch s := a.searching(d); {
+	case s.With != "":
+		search = accent.Render(s.With)
+	case s.Enabled && d.startSearch && s.DockerErr == nil:
+		search = accent.Render("searxng") + dim.Render(" (starts when you finish)")
+	case s.Enabled:
+		search = dim.Render("the writer's own web tool")
+	}
+	rows := [][3]string{
+		{"Judge", model(judge), "answers every scoring question"},
+		{"Writer", w, "reads, researches the web, writes the summary"},
+		{"Search", search, "what research looks the idea up with"},
+	}
+	if a.height < 30 {
+		parts := make([]string, len(rows))
+		for i, r := range rows {
+			parts[i] = bold.Render(r[0]) + " " + r[1]
+		}
+		return flow(formWidth(a.width), "   ", parts)
+	}
+	width := 0
+	for _, r := range rows {
+		width = max(width, lipgloss.Width(r[1]))
+	}
+	var lines []string
+	for _, r := range rows {
+		line := bold.Width(8).Render(r[0]) + lipgloss.NewStyle().Width(width).Render(r[1])
+		if withWhat := line + "   " + dim.Render(r[2]); lipgloss.Width(withWhat) <= formWidth(a.width) {
+			line = withWhat
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // priceNote explains the price on each model: what it costs through this
@@ -302,26 +468,53 @@ func providerByID(ps []config.Provider, id string) config.Provider {
 }
 
 // finishSetup downloads the chosen model first when this machine runs it and
-// does not have it yet, then saves.
+// does not have it yet, then saves, then starts the search engine if asked to.
 func (a *App) finishSetup() tea.Cmd {
 	if p, model := a.setup.chosen(), a.setup.modelID(); a.host.MissingModel(p, model) {
 		return a.openDownload(p, model)
 	}
-	return a.saveSetup()
+	return a.afterModel()
 }
 
-func (a *App) saveSetup() tea.Cmd {
+// afterModel saves the choices before anything else can go wrong: a search
+// engine that does not start costs research, never the setup just made.
+func (a *App) afterModel() tea.Cmd {
+	if err := a.saveSetup(); err != nil {
+		return a.fail(err)
+	}
+	if !a.setup.startSearch {
+		return a.proceed()
+	}
+	return a.await("Starting your search engine", "a SearXNG in Docker; the first time downloads it", a.host.StartSearch,
+		func(err error, stopped bool) tea.Cmd {
+			cmd := a.proceed()
+			switch {
+			case stopped:
+				a.note = "The search engine was not started. `ideacheck search up` starts it whenever you like."
+			case err != nil:
+				a.note = "Your settings are saved, but the search engine did not start.\n" + err.Error() + "\nTry again with `ideacheck search up`."
+			}
+			return cmd
+		})
+}
+
+func (a *App) saveSetup() error {
 	d := a.setup
-	effort := d.effort
+	effort, key := d.effort, strings.TrimSpace(d.key)
 	if len(d.efforts()) == 0 {
 		effort = ""
 	}
-	if err := a.host.SaveSetup(d.chosen(), d.modelID(), effort, strings.TrimSpace(d.key)); err != nil {
-		return a.fail(err)
+	if a.key(d).Found() && !d.replaceKey {
+		key = "" // typed, then gone back and chose to keep the one there
 	}
-	if err := a.host.SaveRoles(d.roles()); err != nil {
-		return a.fail(err)
+	if err := a.host.SaveSetup(d.chosen(), d.modelID(), effort, key); err != nil {
+		return err
 	}
+	return a.host.SaveRoles(d.roles())
+}
+
+// proceed leaves setup for wherever the user was headed.
+func (a *App) proceed() tea.Cmd {
 	if a.start.NeedSetup { // first run: carry on to what the user came for
 		a.start.NeedSetup = false
 		return a.open(a.start.Page)
@@ -545,9 +738,9 @@ func (a *App) resultView() string {
 	var tabs []string
 	for i, name := range resultTabs {
 		if i == a.tab {
-			tabs = append(tabs, bold.Underline(true).Render(name))
+			tabs = append(tabs, pill.Render(name))
 		} else {
-			tabs = append(tabs, dim.Render(name))
+			tabs = append(tabs, dim.Padding(0, 1).Render(name))
 		}
 	}
 	res := a.result
@@ -558,7 +751,7 @@ func (a *App) resultView() string {
 		if res.Summary != "" {
 			body += "\n" + summaryView(res.Summary, a.width-6) + "\n"
 		}
-		body += contributions("Top strengths", good.Render("▲"), res.TopStrengths) + contributions("Top risks", bad.Render("▼"), res.TopRisks)
+		body += contributions("Top strengths", good, "▲", res.TopStrengths) + contributions("Top risks", bad, "▼", res.TopRisks)
 		if line := costLine(res.Cost); line != "" {
 			body += "\n" + line
 		}
@@ -571,7 +764,7 @@ func (a *App) resultView() string {
 	case 4:
 		body = detailsView(res)
 	}
-	return strings.Join(tabs, "   ") + "\n\n" + body
+	return strings.Join(tabs, " ") + "\n\n" + body
 }
 
 // ScoresView lists every rubric dimension: the scores are the explanation.
@@ -587,10 +780,12 @@ func ScoresView(res *pipeline.Result) string {
 		case d.Value == nil:
 			fmt.Fprintf(&b, "  %-28s %s\n", d.ID, dim.Render("not valued"))
 		default:
-			fmt.Fprintf(&b, "%s %-28s %s %.2f  %s  %s\n", Arrow(d.Polarity), d.ID, Bar(*d.Value), *d.Value, dim.Render(pct(d.Confidence)), dim.Render(fmt.Sprintf("weight %.1f", d.Weight)))
+			fmt.Fprintf(&b, "%s %-28s %s %s  %s  %s\n", dim.Render(Arrow(d.Polarity)), d.ID, ColorBar(*d.Value, d.Polarity),
+				scoreStyle(*d.Value, d.Polarity).Bold(true).Render(fmt.Sprintf("%.2f", *d.Value)), dim.Render(pct(d.Confidence)), dim.Render(fmt.Sprintf("weight %.1f", d.Weight)))
 		}
 	}
-	return b.String() + dim.Render("\n↑ higher is better · ↓ higher is worse · · informational (weight 0)")
+	return b.String() + "\n" + dim.Render("↑ higher is better · ↓ higher is worse · · informational (weight 0) · ") +
+		good.Render("■") + dim.Render(" good news  ") + warnSty.Render("■") + dim.Render(" middling  ") + bad.Render("■") + dim.Render(" bad news")
 }
 
 func evidenceTab(res *pipeline.Result) string {
@@ -610,7 +805,7 @@ func gapsView(res *pipeline.Result) string {
 func detailsView(res *pipeline.Result) string {
 	var b strings.Builder
 	for _, w := range res.Warnings {
-		b.WriteString(warnSty.Render("! "+w) + "\n")
+		b.WriteString(warnSty.Bold(true).Render("! ") + warnSty.Render(w) + "\n")
 	}
 	return b.String() + costDetails(res.Cost) + footer(res)
 }

@@ -29,6 +29,9 @@ type wizard struct {
 	at            int
 	form          *huh.Form
 	width, height int
+	// aside, when set, is drawn under the step line on every step: settings
+	// uses it to keep who does what (judge, writer, search) in view.
+	aside func() string
 }
 
 type wizardState int
@@ -94,13 +97,33 @@ func (w *wizard) update(msg tea.Msg) (wizardState, tea.Cmd) {
 // field itself out of view — a step you can read but not type into. The form
 // is then shrunk to its content, which the first sizing padded out to the
 // full height; a form taller than the space left keeps it and scrolls.
+//
+// Each resize is followed by an update that carries nothing: huh draws what
+// it laid out on its last update, so without one the text keeps the old
+// width — a description on one long line, cut off at the window's edge.
 func (w *wizard) fit(form *huh.Form) *huh.Form {
-	room := max(w.height-chromeHeight, 6)
-	form = form.WithWidth(min(max(w.width-4, 40), 90)).WithHeight(room)
+	room := max(w.height-chromeHeight-w.asideHeight(), 6)
+	form = form.WithWidth(formWidth(w.width)).WithHeight(room)
+	form.Update(relayout{})
 	if h := lipgloss.Height(strings.TrimRight(form.View(), " \n")); h < room {
 		form = form.WithHeight(h)
+		form.Update(relayout{})
 	}
 	return form
+}
+
+// relayout is a message no field acts on; it only makes a form lay itself out.
+type relayout struct{}
+
+// formWidth is the width forms and the text beside them wrap to: the window
+// less the app's padding, never wider than reads comfortably.
+func formWidth(window int) int { return min(max(window-4, 20), 90) }
+
+func (w *wizard) asideHeight() int {
+	if w.aside == nil {
+		return 0
+	}
+	return lipgloss.Height(w.aside()) + 1
 }
 
 // position is "2 of 4" counting only the steps that are shown.
@@ -117,16 +140,24 @@ func (w *wizard) position() (int, int) {
 	return at, total
 }
 
+// view heads the form with where the user is: done steps green, this one in
+// the accent, the rest faint.
 func (w *wizard) view() string {
 	at, total := w.position()
 	marks := make([]string, total)
 	for i := range marks {
-		marks[i] = "○"
-		if i < at {
-			marks[i] = "●"
+		switch {
+		case i+1 < at:
+			marks[i] = good.Render("●")
+		case i+1 == at:
+			marks[i] = accent.Render("●")
+		default:
+			marks[i] = dim.Render("○")
 		}
 	}
-	dots := strings.Join(marks, " ")
-	head := fmt.Sprintf("%s  %s", bold.Render(fmt.Sprintf("Step %d of %d · %s", at, total, w.steps[w.at].title)), dim.Render(dots))
+	head := heading.Render(fmt.Sprintf("Step %d of %d", at, total)) + dim.Render(" · ") + bold.Render(w.steps[w.at].title) + "  " + strings.Join(marks, " ")
+	if w.aside != nil {
+		head += "\n\n" + w.aside()
+	}
 	return head + "\n\n" + w.form.View()
 }

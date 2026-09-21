@@ -304,6 +304,11 @@ overridable like any other. Port taken? `ideacheck config set
 research.endpoints.searxng http://localhost:8888`, then `up` again. From a
 checkout, `make up` and `make down` are the same two commands.
 
+`ideacheck setup` offers the same thing as its last step, whenever research would
+otherwise have nothing to search with: with Docker running it asks whether to start
+the search engine and does so after saving your choices; without Docker it shows how
+to install or start it. A search engine that fails to start never costs the setup.
+
 The engines behind a SearXNG (DuckDuckGo, Brave, Startpage …) rate-limit an address
 that asks a lot. The shipped settings add Yandex so one usually still answers; when
 none does, that is not reported as "found nothing" — the check says `not
