@@ -295,6 +295,23 @@ func (p *Printer) Line(format string, args ...any) {
 	fmt.Fprintf(p.w, "  %s\n", fmt.Sprintf(format, args...))
 }
 
+// Item is one entry of a list inside the column, marked with the dot install.sh
+// puts before a step that has not run yet. Text longer than the terminal folds
+// under itself, so a list of long lines still reads as a list.
+func (p *Printer) Item(text string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopSpin()
+	p.clear()
+	lead := "  " + p.sty(dim, p.g.wait) + " "
+	for i, line := range fold(text, max(p.width-5, 20)) {
+		if i > 0 {
+			lead = "    "
+		}
+		fmt.Fprintf(p.w, "%s%s\n", lead, line)
+	}
+}
+
 // Wrap prints dim text folded to the terminal's width and indented under
 // whatever it explains, so a long rubric instruction never wraps ragged into
 // the left margin.

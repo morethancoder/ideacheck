@@ -35,9 +35,10 @@ const (
 
 // Release is the part of a GitHub release this tool acts on.
 type Release struct {
-	Version string  // the tag without its leading "v", e.g. "0.2.0"
-	Page    string  // the release page, shown so the user can read the notes
-	Assets  []Asset // published files, in the order GitHub lists them
+	Version string   // the tag without its leading "v", e.g. "0.2.0"
+	Page    string   // the release page, shown so the user can read the notes
+	Notes   []string // the headline of each change, one line each; see Notes
+	Assets  []Asset  // published files, in the order GitHub lists them
 }
 
 // Asset is one published file of a release.
@@ -74,6 +75,7 @@ func Latest(ctx context.Context, client *http.Client, url string) (Release, erro
 	var body struct {
 		TagName string  `json:"tag_name"`
 		HTMLURL string  `json:"html_url"`
+		Body    string  `json:"body"`
 		Assets  []Asset `json:"assets"`
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, maxJSON)).Decode(&body); err != nil {
@@ -82,7 +84,79 @@ func Latest(ctx context.Context, client *http.Client, url string) (Release, erro
 	if body.TagName == "" {
 		return Release{}, fmt.Errorf("the latest release of %s has no tag", Repo)
 	}
-	return Release{Version: Clean(body.TagName), Page: body.HTMLURL, Assets: body.Assets}, nil
+	return Release{Version: Clean(body.TagName), Page: body.HTMLURL, Notes: Notes(body.Body), Assets: body.Assets}, nil
+}
+
+// Notes pulls the headline of each change out of a release's Markdown body, so
+// an upgrade can say what it brought without sending the user to a web page.
+//
+// goreleaser writes the body as a "## Changelog" section of bullets, one commit
+// subject each, prefixed with the commit hash, followed by the footer from
+// .goreleaser.yaml (the install snippet). Only that section's bullets count when
+// it exists; a hand-written body with no such heading contributes every bullet
+// it has. The hash and a trailing PR number are dropped — they are for git, not
+// for someone deciding whether to read on. Anything inside a code fence is
+// skipped, so a "* " in a shell example is not a change.
+func Notes(body string) []string {
+	var notes []string
+	inChangelog, sawChangelog, fenced := false, false, false
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "```"):
+			fenced = !fenced
+			continue
+		case fenced:
+			continue
+		case strings.HasPrefix(line, "#"):
+			title := strings.ToLower(strings.TrimLeft(line, "# "))
+			inChangelog = strings.Contains(title, "changelog") || strings.Contains(title, "what's changed")
+			if inChangelog {
+				sawChangelog = true
+				notes = notes[:0] // bullets before the heading were preamble
+			}
+			continue
+		}
+		if sawChangelog && !inChangelog {
+			continue
+		}
+		if note, ok := bullet(line); ok {
+			notes = append(notes, note)
+		}
+	}
+	return notes
+}
+
+// bullet reads one Markdown list item as a note, minus the commit hash and PR
+// reference goreleaser and GitHub decorate it with.
+func bullet(line string) (string, bool) {
+	rest, ok := strings.CutPrefix(line, "* ")
+	if !ok {
+		if rest, ok = strings.CutPrefix(line, "- "); !ok {
+			return "", false
+		}
+	}
+	if head, tail, _ := strings.Cut(rest, " "); isHash(head) {
+		rest = tail
+	}
+	if i := strings.LastIndex(rest, " (#"); i > 0 && strings.HasSuffix(rest, ")") {
+		rest = rest[:i]
+	}
+	rest = strings.TrimSpace(rest)
+	return rest, rest != ""
+}
+
+// isHash reports whether s looks like an abbreviated or full git commit hash.
+func isHash(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // asset finds the archive built for one machine. Release files are named

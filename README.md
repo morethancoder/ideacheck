@@ -63,12 +63,21 @@ steps, the same live download bar:
   ✓ install    ~/.local/bin/ideacheck
 
   ideacheck 0.2.0 is ready
+
+  What changed
+  · research: look the idea up before scoring it
+  · tui: one highlight and one model line
+
+  ideacheck           check an idea, or open the app
+  release notes       https://github.com/morethancoder/ideacheck/releases/tag/v0.2.0
 ```
 
 It downloads the release build for your machine, checks it against the published
 checksums, and swaps it in with an atomic rename — an interrupted upgrade leaves
 the working binary in place. An ideacheck installed by Homebrew or `go install` is
-left alone, and the command prints the right way to upgrade it instead.
+left alone, and the command prints the right way to upgrade it instead. Both
+`upgrade` and `--check` list what the release changed — the headline of each
+commit, up to ten — before the link to the full notes.
 
 Piped or in CI there is no spinner and no bar: one plain line per finished step, in
 the same order, so the output stays greppable.

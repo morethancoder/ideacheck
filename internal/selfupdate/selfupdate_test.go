@@ -44,6 +44,40 @@ func TestNewer(t *testing.T) {
 	}
 }
 
+// TestNotes: the headlines come out of the body goreleaser writes — the
+// changelog bullets, minus the hash and PR number, and nothing from the install
+// footer or a code fence.
+func TestNotes(t *testing.T) {
+	goreleaser := "## Changelog\n" +
+		"* 4ed4e23d925e7cae5ba88b6d40594a9a72c3f956 agent: score around missing facts\n" +
+		"* 2ef0f88e1903a427979d72be642866f2ad8c17fd tui: one highlight and one model line (#2)\n" +
+		"\n## Install\n\n```sh\n* not a change\ncurl -fsSL https://example.test | sh\n```\n\n" +
+		"Already have it? `ideacheck upgrade`.\n"
+	cases := []struct {
+		name, body string
+		want       []string
+	}{
+		{"goreleaser", goreleaser, []string{
+			"agent: score around missing facts",
+			"tui: one highlight and one model line",
+		}},
+		{"hand-written, no heading", "Small fixes.\n\n- research: cache findings\n- ui: a bar\n", []string{
+			"research: cache findings", "ui: a bar",
+		}},
+		{"preamble bullets are not the changelog", "- see below\n\n## What's Changed\n- fix: it\n\n## Other\n- not this\n", []string{"fix: it"}},
+		{"short hash", "* ab12cd3 fix: it\n", []string{"fix: it"}},
+		{"a hex-looking word is not a hash", "* cafe: brew it\n* bad idea\n", []string{"cafe: brew it", "bad idea"}},
+		{"empty", "", nil},
+		{"only a hash", "* 4ed4e23d925e7cae5ba88b6d40594a9a72c3f956\n", nil},
+	}
+	for _, c := range cases {
+		got := Notes(c.body)
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("%s: Notes = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestLatest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/none" {
@@ -51,6 +85,7 @@ func TestLatest(t *testing.T) {
 			return
 		}
 		fmt.Fprint(w, `{"tag_name":"v0.3.0","html_url":"https://example.test/r/0.3.0",
+			"body":"## Changelog\n* 4ed4e23d925e7cae5ba88b6d40594a9a72c3f956 agent: score around missing facts\n",
 			"assets":[{"name":"ideacheck_0.3.0_darwin_arm64.tar.gz","browser_download_url":"https://example.test/a"}]}`)
 	}))
 	defer srv.Close()
@@ -61,6 +96,9 @@ func TestLatest(t *testing.T) {
 	}
 	if rel.Version != "0.3.0" || rel.Page != "https://example.test/r/0.3.0" || len(rel.Assets) != 1 {
 		t.Fatalf("got %+v", rel)
+	}
+	if len(rel.Notes) != 1 || rel.Notes[0] != "agent: score around missing facts" {
+		t.Fatalf("notes = %q; want the changelog headline without its hash", rel.Notes)
 	}
 
 	// A repository with no releases must read as an error, never as "you are

@@ -21,7 +21,8 @@ import (
 func releaseServer(t *testing.T, tag string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `{"tag_name":%q,"html_url":"https://example.test/notes"}`, tag)
+		fmt.Fprintf(w, `{"tag_name":%q,"html_url":"https://example.test/notes",
+			"body":"## Changelog\n* 4ed4e23d925e7cae5ba88b6d40594a9a72c3f956 research: look the idea up first\n## Install\n"}`, tag)
 	}))
 	t.Cleanup(srv.Close)
 	return srv
@@ -50,10 +51,15 @@ func TestUpgradeCheckReportsANewerRelease(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("exit %d: %s", got.code, got.stderr)
 	}
-	for _, want := range []string{"9.9.9 is available", "ideacheck upgrade", "https://example.test/notes"} {
+	// What the release brings is listed before the link, so the user can decide
+	// whether to upgrade without opening a browser — the headline, not the hash.
+	for _, want := range []string{"9.9.9 is available", "What changed", "research: look the idea up first", "ideacheck upgrade", "https://example.test/notes"} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("stdout %q does not mention %q", got.stdout, want)
 		}
+	}
+	if strings.Contains(got.stdout, "4ed4e23") {
+		t.Errorf("stdout %q shows a commit hash", got.stdout)
 	}
 }
 
@@ -130,7 +136,8 @@ func TestUpgradeInstallsAndPrintsEveryStep(t *testing.T) {
 		case "/" + name:
 			w.Write(archive)
 		default:
-			fmt.Fprintf(w, `{"tag_name":"v9.9.9","html_url":"https://example.test/notes","assets":[
+			fmt.Fprintf(w, `{"tag_name":"v9.9.9","html_url":"https://example.test/notes",
+				"body":"## Changelog\n* 4ed4e23d925e7cae5ba88b6d40594a9a72c3f956 research: look the idea up first\n","assets":[
 				{"name":%q,"browser_download_url":%q},
 				{"name":"checksums.txt","browser_download_url":%q}]}`,
 				name, base+"/"+name, base+"/checksums.txt")
@@ -166,7 +173,9 @@ func TestUpgradeInstallsAndPrintsEveryStep(t *testing.T) {
 		t.Errorf("escape codes in piped output at %d:\n%q", i, out.String())
 	}
 	var at int
-	for _, want := range []string{"current", "latest     9.9.9", "download", "verify", "sha256 matches", "install", "ideacheck 9.9.9 is ready"} {
+	// After "ready" comes what the release changed, then where to read more.
+	for _, want := range []string{"current", "latest     9.9.9", "download", "verify", "sha256 matches", "install", "ideacheck 9.9.9 is ready",
+		"What changed", ". research: look the idea up first", "https://example.test/notes"} {
 		i := strings.Index(out.String()[at:], want)
 		if i < 0 {
 			t.Fatalf("step %q missing or out of order in:\n%s", want, out.String())

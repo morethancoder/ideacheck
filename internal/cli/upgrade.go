@@ -71,6 +71,7 @@ func (a *app) runUpgrade(ctx context.Context, checkOnly bool) error {
 		return nil
 	case checkOnly:
 		p.Done("ideacheck %s is available — you have %s", rel.Version, current)
+		whatChanged(p, rel)
 		p.Hint("ideacheck upgrade", "install it")
 		p.Hint("release notes", rel.Page)
 		p.Blank()
@@ -96,10 +97,37 @@ func (a *app) runUpgrade(ctx context.Context, checkOnly bool) error {
 		return err
 	}
 	p.Done("ideacheck %s is ready", rel.Version)
+	whatChanged(p, rel)
 	p.Hint("ideacheck", "check an idea, or open the app")
 	p.Hint("release notes", rel.Page)
 	p.Blank()
 	return nil
+}
+
+// maxNotes is how many changes an upgrade lists before pointing at the release
+// page for the rest. A release is a screenful of commits at most; the page is
+// for reading, the column is for knowing whether to.
+const maxNotes = 10
+
+// whatChanged lists the headlines of a release under the done line, so the
+// user learns what they just got (or would get) without leaving the terminal.
+// A release with no notes prints nothing here; the link below still applies.
+func whatChanged(p *ui.Printer, rel selfupdate.Release) {
+	if len(rel.Notes) == 0 {
+		return
+	}
+	p.Head("What changed")
+	shown := rel.Notes
+	if len(shown) > maxNotes {
+		shown = shown[:maxNotes]
+	}
+	for _, note := range shown {
+		p.Item(note)
+	}
+	if more := len(rel.Notes) - len(shown); more > 0 {
+		p.Note("and %d more — see the release notes", more)
+	}
+	p.Blank()
 }
 
 // upgradeStep draws one install step in the installer's own vocabulary: a
