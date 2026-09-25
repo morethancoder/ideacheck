@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/configs"
 )
 
 type memFiles map[string]string
@@ -25,7 +25,7 @@ func (*notFound) Error() string { return "not found" }
 
 // Every rubric we ship must pass our own rules.
 func TestEmbeddedRubricsAreValid(t *testing.T) {
-	files := config.NewFiles("")
+	files := configs.Defaults()
 	names, err := Names(files, "rubrics")
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestRoleSpecificRules(t *testing.T) {
 }
 
 func TestGateFiresOnlyWithAllInputsPresent(t *testing.T) {
-	rb, err := Load(config.NewFiles(""), "rubrics", "business")
+	rb, err := Load(configs.Defaults(), "rubrics", "business")
 	if err != nil {
 		t.Fatal(err)
 	}

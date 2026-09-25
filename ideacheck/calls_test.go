@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/mock"
 )
@@ -47,7 +46,7 @@ func TestJudgeCallsPerCheck(t *testing.T) {
 
 	j := &counting{Judge: &mock.Judge{Seed: 1, FixturesDir: dir}}
 	e := engine(t, j)
-	e.Config.Research.Sift = config.SiftAlways
+	e.Settings.Research.Sift = SiftAlways
 	e.Cache = &memCache{m: map[string][]byte{}}
 	routed := Intake{Idea: "A to-do app for dentists", Fields: map[string]string{"problem": "front desks lose track of recalls", "audience": "small dental practices"}}
 	// Another idea, so its research is not the first one's cached.

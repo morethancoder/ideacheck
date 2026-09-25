@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/ideacheck"
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/mock"
 )
 
 func catalog(t *testing.T) map[string]judge.Question {
 	t.Helper()
-	c, err := Catalog(config.NewFiles(""), "rubrics")
+	c, err := Catalog(configs.Defaults(), "rubrics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func TestMeasureScoresAgainstLabels(t *testing.T) {
 }
 
 func TestDryRunEndToEnd(t *testing.T) {
-	files := config.NewFiles("")
-	cfg, err := config.Load(files, config.LoadOptions{Environ: func() []string { return nil }, Overrides: map[string]any{"backend": "mock"}})
+	files := configs.Defaults()
+	settings, err := ideacheck.DefaultSettings("mock", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestDryRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := func(seed int64) Checker {
-		return &ideacheck.Engine{Config: cfg, Files: files, Judge: &mock.Judge{Seed: seed}}
+		return &ideacheck.Engine{Settings: settings, Files: files, Judge: &mock.Judge{Seed: seed}}
 	}
 	r := Runner{Engines: map[string]Checker{"a": engine(1), "b": engine(1), "c": engine(2)}, Order: []string{"a", "b", "c"}, Repeats: 2, Parallel: 4}
 	rep := r.Execute(context.Background(), "bench/ideas.jsonl", ideas, catalog(t), time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))

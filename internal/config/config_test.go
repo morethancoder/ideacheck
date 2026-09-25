@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,8 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/morethancoder/ideacheck/ideacheck"
 )
 
 func noEnv() []string { return nil }
@@ -327,5 +330,28 @@ func TestHashIsPinned(t *testing.T) {
 	}
 	if got, want := c.Hash(), "sha256:0f2ab4b4fce957bc6830712c23221f1699a4c598f01a648ea224089b037045d9"; got != want {
 		t.Errorf("Hash() = %q, want %q", got, want)
+	}
+}
+
+// A host without internal/config starts from ideacheck.DefaultSettings; they
+// must be what the CLI runs with before anyone changes a thing.
+func TestSettingsMatchTheCoreDefaults(t *testing.T) {
+	for _, roles := range [][2]string{{"", ""}, {"jev", "structured"}, {"mock", ""}} {
+		c, err := Load(NewFiles(""), LoadOptions{Environ: noEnv, Overrides: map[string]any{"backend": cmp.Or(roles[0], "logprob"), "writer": roles[1]}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := c.Settings()
+		if got.Hash != c.Hash() {
+			t.Errorf("%v: settings hash %q, want the config's %q", roles, got.Hash, c.Hash())
+		}
+		want, err := ideacheck.DefaultSettings(roles[0], roles[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Hash = ""
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%v:\nconfig    %+v\ndefaults  %+v", roles, got, want)
+		}
 	}
 }

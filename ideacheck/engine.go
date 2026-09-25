@@ -8,16 +8,15 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/rubric"
 )
 
 // Engine runs checks. It is safe for concurrent use.
 type Engine struct {
-	Config config.Config
-	Files  rubric.Reader
-	Judge  judge.Judge
+	Settings Settings
+	Files    rubric.Reader
+	Judge    judge.Judge
 	// Writer reads, researches and writes (extract, research, explain) when that
 	// is not the judge's job too; nil = the judge does it all. Every typed
 	// question — including how a research finding relates to the idea — goes to
@@ -108,7 +107,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 
 	// The rubric is known before research, so only what it reads is looked up.
 	name, warnings := e.pickRubric(o.Rubric, router.Fallback, routeAnswer)
-	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, name)
+	rb, err := rubric.Load(e.Files, e.Settings.RubricsDir, name)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +165,7 @@ func (e *Engine) writer() judge.Judge {
 func (e *Engine) FollowUps(res *Result, in Intake, answered []string) []Missing {
 	plan, _ := e.plan(in, nil, e.chosen(res))
 	open := Unanswered(res.Missing, in, append(plan.covers(), answered...))
-	gaps, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.GapsName)
+	gaps, err := rubric.Load(e.Files, e.Settings.RubricsDir, rubric.GapsName)
 	if err == nil && gaps.AskLimit > 0 && len(open) > gaps.AskLimit {
 		open = open[:gaps.AskLimit]
 	}
@@ -177,15 +176,15 @@ func (e *Engine) FollowUps(res *Result, in Intake, answered []string) []Missing 
 // own, else the router's fallback; nil when neither loads.
 func (e *Engine) chosen(res *Result) *rubric.Rubric {
 	if res.IdeaType != nil {
-		if rb, err := rubric.Load(e.Files, e.Config.RubricsDir, res.IdeaType.Choice); err == nil {
+		if rb, err := rubric.Load(e.Files, e.Settings.RubricsDir, res.IdeaType.Choice); err == nil {
 			return rb
 		}
 	}
-	router, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.RouterName)
+	router, err := rubric.Load(e.Files, e.Settings.RubricsDir, rubric.RouterName)
 	if err != nil {
 		return nil
 	}
-	rb, _ := rubric.Load(e.Files, e.Config.RubricsDir, router.Fallback)
+	rb, _ := rubric.Load(e.Files, e.Settings.RubricsDir, router.Fallback)
 	return rb
 }
 
@@ -213,7 +212,7 @@ func (e *Engine) newResult(start time.Time) *Result {
 		Status:       StatusOK,
 		Backend:      e.Judge.Name(),
 		Writer:       writer,
-		ConfigHash:   e.Config.Hash(),
+		ConfigHash:   e.Settings.hash(),
 		CreatedAt:    start.UTC().Format(time.RFC3339),
 		Missing:      []Missing{},
 		Dimensions:   []Dimension{},
@@ -224,7 +223,7 @@ func (e *Engine) newResult(start time.Time) *Result {
 
 // loadPreflight loads the two always-run rubrics and checks every gap can be filled.
 func (e *Engine) loadPreflight() (gaps, router *rubric.Rubric, err error) {
-	if gaps, err = rubric.Load(e.Files, e.Config.RubricsDir, rubric.GapsName); err != nil {
+	if gaps, err = rubric.Load(e.Files, e.Settings.RubricsDir, rubric.GapsName); err != nil {
 		return nil, nil, err
 	}
 	for _, q := range gaps.Questions {
@@ -235,7 +234,7 @@ func (e *Engine) loadPreflight() (gaps, router *rubric.Rubric, err error) {
 	if err := e.derivable(gaps, gaps); err != nil {
 		return nil, nil, err
 	}
-	router, err = rubric.Load(e.Files, e.Config.RubricsDir, rubric.RouterName)
+	router, err = rubric.Load(e.Files, e.Settings.RubricsDir, rubric.RouterName)
 	return gaps, router, err
 }
 
@@ -251,14 +250,14 @@ func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Quest
 	if len(qs) == 0 {
 		return nil
 	}
-	c := e.Config
+	s := e.Settings
 	opts := judge.Options{
-		MaxConcurrent:   c.MaxConcurrent(),
-		QuestionTimeout: c.Timeouts.Question,
-		BatchTimeout:    c.Timeouts.Batch,
+		MaxConcurrent:   s.MaxConcurrent,
+		QuestionTimeout: s.Timeouts.Question,
+		BatchTimeout:    s.Timeouts.Batch,
 		Sequential:      o.Sequential,
-		Batch:           c.Active().Batch,
-		Retry:           judge.RetryPolicy{MaxAttempts: c.Retries.MaxAttempts, Base: c.Retries.BaseBackoff, Max: c.Retries.MaxBackoff},
+		Batch:           s.Batch,
+		Retry:           s.Retry,
 	}
 	if o.Events == nil {
 		return judge.Run(ctx, e.Judge, state, qs, opts)
@@ -396,7 +395,7 @@ func (e *Engine) pickRubric(forced, fallback string, route judge.Answer) (string
 	if route.Failed() {
 		return fallback, []string{fmt.Sprintf("could not classify the idea (%s); using the %s rubric", route.Err, fallback)}
 	}
-	names, _ := rubric.Names(e.Files, e.Config.RubricsDir)
+	names, _ := rubric.Names(e.Files, e.Settings.RubricsDir)
 	if route.Choice == rubric.Other || !contains(names, route.Choice) {
 		return fallback, []string{fmt.Sprintf("idea type %q has no rubric; using the %s rubric", route.Choice, fallback)}
 	}
@@ -469,8 +468,8 @@ func (e *Engine) cost(judged, written []judge.Answer) Cost {
 		answers []judge.Answer
 		billing string
 	}{
-		{judged, e.Config.Active().Billing},
-		{written, e.Config.Backends[e.Config.WriterName()].Billing},
+		{judged, e.Settings.Judge.Billing},
+		{written, e.Settings.Writer.Billing},
 	}
 	unpriced, paid, subscription, named := "", false, false, false
 	for _, g := range groups {
@@ -486,7 +485,7 @@ func (e *Engine) cost(judged, written []judge.Answer) Cost {
 			}
 			paid = paid || (used && g.billing != BillingLocal)
 			subscription = subscription || (used && g.billing == BillingSubscription)
-			switch p, ok := e.Config.PriceFor(a.Model); {
+			switch p, ok := e.Settings.Pricing.Find(a.Model); {
 			case a.CostUSD > 0:
 				c.USD += a.CostUSD
 				c.Basis = CostReported
@@ -504,7 +503,7 @@ func (e *Engine) cost(judged, written []judge.Answer) Cost {
 		c.Basis, c.Note = CostFree, "local model: no per-token charge"
 	case c.TokensIn+c.TokensOut == 0 && c.USD == 0:
 		c.Basis, c.Note = CostUnpriced, "the backend reported no token usage"
-		if e.Config.Active().Billing == BillingLocal {
+		if e.Settings.Judge.Billing == BillingLocal {
 			c.Basis, c.Note = CostFree, "local model: no per-token charge"
 		}
 	case unpriced != "" && c.Basis != CostReported:
@@ -523,7 +522,7 @@ const (
 	BillingLocal        = "local"
 )
 
-func cost(p config.Price, a judge.Answer) float64 {
+func cost(p Price, a judge.Answer) float64 {
 	cached := min(a.TokensCached, a.TokensIn)
 	rate := p.CachedIn
 	if rate == 0 {

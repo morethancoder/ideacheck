@@ -1,6 +1,6 @@
-// Package configs holds the embedded default configuration, rubrics and prompts.
-// Users override any file by placing one with the same relative path in their
-// config directory; see internal/config.
+// Package configs holds the embedded default configuration, rubrics and prompts,
+// and Files, which reads them. Users override any file by placing one with the
+// same relative path in their config directory (Over).
 package configs
 
 import "embed"

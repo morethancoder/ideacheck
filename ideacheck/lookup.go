@@ -68,7 +68,7 @@ func (e *Engine) lookup(ctx context.Context, p *researchPlan, in Intake, about j
 	if !ok || len(hits) == 0 {
 		return asFindings(hits, p.topics.SnippetChars), spent, nil
 	}
-	system, user, err := prompt.ResearchDigest(e.Files, e.Config.PromptsDir, about, topicsWith(p.topics, hits), p.topics.MaxFindings)
+	system, user, err := prompt.ResearchDigest(e.Files, e.Settings.PromptsDir, about, topicsWith(p.topics, hits), p.topics.MaxFindings)
 	if err != nil {
 		return nil, spent, err
 	}
@@ -91,14 +91,14 @@ func add(to *judge.Research, model string, in, out, cached int, usd float64) {
 // nothing usable for a topic, that topic's own queries from research.yaml run.
 func (e *Engine) queries(ctx context.Context, p *researchPlan, in Intake, about judge.State, spent *judge.Research, o Options) []judge.Query {
 	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: planStep})
-	per := e.Config.Research.QueriesPerTopic
+	per := e.Settings.Research.QueriesPerTopic
 	byTopic := map[string][]string{}
 	if planner, ok := e.writer().(judge.Planner); ok {
 		topics := make([]prompt.Topic, len(p.topics.Topics))
 		for i, t := range p.topics.Topics {
 			topics[i] = prompt.Topic{ID: t.ID, LookFor: t.LookFor}
 		}
-		if system, user, err := prompt.ResearchPlan(e.Files, e.Config.PromptsDir, about, topics, per); err == nil {
+		if system, user, err := prompt.ResearchPlan(e.Files, e.Settings.PromptsDir, about, topics, per); err == nil {
 			plan, err := planner.Plan(ctx, system, user, p.topics.ids())
 			add(spent, plan.Model, plan.TokensIn, plan.TokensOut, plan.TokensCached, plan.CostUSD)
 			for _, q := range plan.Queries {
@@ -165,7 +165,7 @@ func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			results[i], errs[i] = p.search.Search(ctx, q.Query, e.Config.Research.ResultsPerQuery)
+			results[i], errs[i] = p.search.Search(ctx, q.Query, e.Settings.Research.ResultsPerQuery)
 		}()
 	}
 	wg.Wait()
@@ -207,7 +207,7 @@ func pageKey(raw string) string {
 // readPages fetches the first read_pages results of each topic and boils them
 // down. A page that cannot be read keeps its snippet; that is never an error.
 func (e *Engine) readPages(ctx context.Context, p *researchPlan, hits []hit, o Options) {
-	n := e.Config.Research.ReadPages
+	n := e.Settings.Research.ReadPages
 	if n == 0 || e.Pages == nil {
 		return
 	}
@@ -224,9 +224,9 @@ func (e *Engine) readPages(ctx context.Context, p *researchPlan, hits []hit, o O
 			defer wg.Done()
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			ctx, cancel := context.WithTimeout(ctx, e.Config.Research.PageTimeout)
+			ctx, cancel := context.WithTimeout(ctx, e.Settings.Research.PageTimeout)
 			defer cancel()
-			hits[i].text, _ = e.Pages.Read(ctx, hits[i].URL, e.Config.Research.PageChars)
+			hits[i].text, _ = e.Pages.Read(ctx, hits[i].URL, e.Settings.Research.PageChars)
 		}()
 	}
 	wg.Wait()

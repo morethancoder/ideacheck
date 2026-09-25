@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/mock"
 	"github.com/morethancoder/ideacheck/rubric"
@@ -29,15 +29,12 @@ func containsSub(s, sub string) bool { return strings.Contains(s, sub) }
 
 func engine(t *testing.T, j judge.Judge) *Engine {
 	t.Helper()
-	files := config.NewFiles("")
-	cfg, err := config.Load(files, config.LoadOptions{
-		Environ:   func() []string { return nil },
-		Overrides: map[string]any{"backend": "mock", "retries.max_attempts": 1},
-	})
+	s, err := DefaultSettings("mock", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Engine{Config: cfg, Files: files, Judge: j}
+	s.Retry.MaxAttempts = 1
+	return &Engine{Settings: s, Files: configs.Defaults(), Judge: j}
 }
 
 func fixture(t *testing.T, dir, id string, a judge.Answer) {
@@ -207,18 +204,18 @@ func TestBackendDownYieldsErrorStatusNotAVerdict(t *testing.T) {
 
 func TestCostEstimate(t *testing.T) {
 	a := judge.Answer{TokensIn: 2_000_000, TokensOut: 500_000}
-	if got := cost(config.Price{In: 3, Out: 15}, a); !near(got, 13.5) {
+	if got := cost(Price{In: 3, Out: 15}, a); !near(got, 13.5) {
 		t.Errorf("cost = %v, want 13.5", got)
 	}
 	a.TokensCached = 1_000_000 // half the input read from cache at a tenth of the price
-	if got := cost(config.Price{In: 3, Out: 15, CachedIn: 0.3}, a); !near(got, 3+0.3+7.5) {
+	if got := cost(Price{In: 3, Out: 15, CachedIn: 0.3}, a); !near(got, 3+0.3+7.5) {
 		t.Errorf("cached cost = %v, want 10.8", got)
 	}
 }
 
 func TestCostSummary(t *testing.T) {
 	e := engine(t, &mock.Judge{})
-	e.Config.Pricing = map[string]config.Price{"claude-haiku-4-5": {In: 1, Out: 5}}
+	e.Settings.Pricing = map[string]Price{"claude-haiku-4-5": {In: 1, Out: 5}}
 	priced := []judge.Answer{{Model: "claude-haiku-4-5-20251001", TokensIn: 1_000_000, TokensOut: 100_000}}
 	if c := e.cost(priced, nil); c.Basis != CostPriced || !near(c.USD, 1.5) || c.Price == nil || c.Model != "claude-haiku-4-5-20251001" {
 		t.Errorf("priced = %+v", c)
@@ -230,14 +227,12 @@ func TestCostSummary(t *testing.T) {
 	if c := e.cost([]judge.Answer{{Model: "mystery", TokensIn: 5}}, nil); c.Basis != CostUnpriced || c.USD != 0 || !strings.Contains(c.Note, "mystery") {
 		t.Errorf("unpriced = %+v", c)
 	}
-	b := e.Config.Backends[e.Config.Backend]
-	b.Billing = BillingLocal
-	e.Config.Backends[e.Config.Backend] = b
+	e.Settings.Judge.Billing, e.Settings.Writer.Billing = BillingLocal, BillingLocal
 	if c := e.cost(priced, nil); c.Basis != CostFree || c.USD != 0 || c.TokensIn != 1_000_000 {
 		t.Errorf("local = %+v", c)
 	}
 	// A free local judge next to a paid writer: only the writer's calls cost.
-	e.Config.Writer = "structured"
+	e.Settings.Writer = Role{Model: "claude-sonnet-5"}
 	if c := e.cost(priced, priced); c.Basis != CostPriced || !near(c.USD, 1.5) || c.TokensIn != 2_000_000 {
 		t.Errorf("local judge + paid writer = %+v, want the writer's 1.5 only", c)
 	}
@@ -305,7 +300,7 @@ func TestEventsCarryQuestionStageAndValue(t *testing.T) {
 
 func TestSummaryIsWrittenAfterScoring(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1})
-	e.Config.Explain = true
+	e.Settings.Explain = true
 	ch := make(chan Event, 128)
 	res, err := e.Check(context.Background(), idea, Options{Events: ch})
 	if err != nil {
@@ -324,7 +319,7 @@ func TestSummaryIsWrittenAfterScoring(t *testing.T) {
 	if explained != 2 {
 		t.Errorf("explain events = %d, want started + answered", explained)
 	}
-	e.Config.Explain = false
+	e.Settings.Explain = false
 	if res, _ := e.Check(context.Background(), idea, Options{}); res.Summary != "" {
 		t.Error("explain: false must skip the summary")
 	}
@@ -395,7 +390,7 @@ func TestPartialResultDiscountsConfidence(t *testing.T) {
 	}
 	// Every gap the run reports is open here, and _gaps.yaml asks for the
 	// confidence to be halved when all of them are.
-	gaps, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.GapsName)
+	gaps, err := rubric.Load(e.Files, e.Settings.RubricsDir, rubric.GapsName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +450,7 @@ func TestExtractFillsOnlyEmptyFields(t *testing.T) {
 	j := &extractingJudge{Judge: &mock.Judge{Seed: 1, FixturesDir: dir},
 		values: map[string]string{"why_now": "the models got cheap", "problem": "  ", "audience": "solo founders"}}
 	e := engine(t, j)
-	e.Config.Extract = true
+	e.Settings.Extract = true
 
 	in := idea.With("problem", "nobody can tell a good idea from a bad one")
 	res, err := e.Check(context.Background(), in, Options{Proceed: true})
@@ -474,7 +469,7 @@ func TestExtractFillsOnlyEmptyFields(t *testing.T) {
 		}
 	}
 
-	e.Config.Extract = false
+	e.Settings.Extract = false
 	res, err = e.Check(context.Background(), in, Options{Proceed: true})
 	if err != nil {
 		t.Fatal(err)

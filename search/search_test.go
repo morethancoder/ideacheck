@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morethancoder/ideacheck/internal/config"
 )
 
 func serve(t *testing.T, status int, body string, seen **http.Request, sent *string) *httptest.Server {
@@ -85,7 +84,7 @@ func TestNewPicksWhatIsThere(t *testing.T) {
 	defer up.Close()
 	none := func(string) string { return "" }
 	tavily := func(env string) string { return map[string]string{TavilyKey: "k"}[env] }
-	r := config.Research{Search: config.SearchAuto, Endpoints: map[string]string{SearXNG: up.URL, Tavily: "https://t.example"}}
+	r := Options{Search: Auto, Endpoints: map[string]string{SearXNG: up.URL, Tavily: "https://t.example"}}
 
 	if p, err := New(context.Background(), r, tavily); err != nil || p.Name() != SearXNG {
 		t.Errorf("a SearXNG that answers wins: %v %v", p, err)
@@ -101,7 +100,7 @@ func TestNewPicksWhatIsThere(t *testing.T) {
 	if _, err := New(context.Background(), r, none); err == nil || !strings.Contains(err.Error(), BraveKey) {
 		t.Errorf("a service asked for by name without its key is a mistake worth naming: %v", err)
 	}
-	r.Search = config.SearchLLM
+	r.Search = LLM
 	if p, err := New(context.Background(), r, tavily); err != nil || p != nil {
 		t.Errorf("llm leaves the searching to the writer: %v %v", p, err)
 	}

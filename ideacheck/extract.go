@@ -21,10 +21,10 @@ var extractQuestion = judge.Question{ID: "extract", Instructions: "Read the stat
 func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options) (Intake, *judge.Answer) {
 	extractor, ok := e.writer().(judge.Extractor)
 	want := in.emptyFields()
-	if !ok || !e.Config.Extract || len(want) == 0 || (in.Idea == "" && in.Context == "") {
+	if !ok || !e.Settings.Extract || len(want) == 0 || (in.Idea == "" && in.Context == "") {
 		return in, nil
 	}
-	prompts, err := prompt.Load(e.Files, e.Config.PromptsDir)
+	prompts, err := prompt.Load(e.Files, e.Settings.PromptsDir)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "document not read for stated facts: "+err.Error())
 		return in, nil
@@ -40,7 +40,7 @@ func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options)
 		return in, nil
 	}
 	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageExtract, Question: extractQuestion})
-	ctx, cancel := context.WithTimeout(ctx, e.Config.Timeouts.Batch)
+	ctx, cancel := context.WithTimeout(ctx, e.Settings.Timeouts.Batch)
 	defer cancel()
 	start := e.now()
 	out, err := extractor.Extract(ctx, prompts.ExtractSystem, user, want)

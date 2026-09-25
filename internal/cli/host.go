@@ -112,7 +112,7 @@ func (h *host) Search() tui.SearchState {
 		return tui.SearchState{}
 	}
 	s := tui.SearchState{Enabled: cfg.Research.Enabled}
-	if provider, err := search.New(h.ctx, cfg.Research, h.app.secrets().Get); err == nil && provider != nil {
+	if provider, err := search.New(h.ctx, cfg.Research.Searching(), h.app.secrets().Get); err == nil && provider != nil {
 		s.With = provider.Name()
 		return s
 	}

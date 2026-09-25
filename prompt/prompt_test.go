@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/judge"
 )
 
@@ -41,7 +41,7 @@ func golden(t *testing.T, name, got string) {
 }
 
 func TestRenderedPromptsMatchGolden(t *testing.T) {
-	s, err := Load(config.NewFiles(""), "prompts")
+	s, err := Load(configs.Defaults(), "prompts")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestRenderedPromptsMatchGolden(t *testing.T) {
 // The explain brief puts values into words with bands kept in explain.tmpl;
 // these pin the embedded bands at their edges.
 func TestExplainBandsLiveInTheTemplate(t *testing.T) {
-	s, _ := Load(config.NewFiles(""), "prompts")
+	s, _ := Load(configs.Defaults(), "prompts")
 	cases := []struct {
 		f    Finding
 		want string
@@ -107,7 +107,7 @@ func TestExplainBandsLiveInTheTemplate(t *testing.T) {
 // A noul's criteria must reach every backend, or the same question would mean
 // one thing to Jev and another to a prompted model.
 func TestNoulCriteriaReachEveryPrompt(t *testing.T) {
-	s, _ := Load(config.NewFiles(""), "prompts")
+	s, _ := Load(configs.Defaults(), "prompts")
 	q := noul
 	q.Criteria = &judge.NoulCriteria{Yes: "a known failure pattern", No: "a fresh angle"}
 	lp, _ := s.Logprob(judge.State{"idea": "x"}, q, nil)
@@ -121,7 +121,7 @@ func TestNoulCriteriaReachEveryPrompt(t *testing.T) {
 }
 
 func TestVoteModeAsksForNoProbabilities(t *testing.T) {
-	s, _ := Load(config.NewFiles(""), "prompts")
+	s, _ := Load(configs.Defaults(), "prompts")
 	vote, _ := s.Questions([]judge.Question{choice, noul}, "vote")
 	if strings.Contains(vote, "probabilit") {
 		t.Errorf("vote prompt must not request probabilities:\n%s", vote)

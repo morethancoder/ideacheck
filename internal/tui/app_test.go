@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
@@ -109,9 +110,8 @@ func (h *fakeHost) Engine() (*ideacheck.Engine, error) {
 	if h.notReady != "" {
 		return nil, &NotReady{Reason: h.notReady}
 	}
-	files := config.NewFiles("")
-	cfg, err := config.Load(files, config.LoadOptions{Environ: func() []string { return nil }, Overrides: map[string]any{"backend": "mock"}})
-	return &ideacheck.Engine{Config: cfg, Files: files, Judge: &mock.Judge{Seed: 1, FixturesDir: h.fixtures}}, err
+	settings, err := ideacheck.DefaultSettings("mock", "")
+	return &ideacheck.Engine{Settings: settings, Files: configs.Defaults(), Judge: &mock.Judge{Seed: 1, FixturesDir: h.fixtures}}, err
 }
 func (h *fakeHost) Profile() map[string]string               { return h.profile }
 func (h *fakeHost) SaveProfile(p map[string]string) error    { h.profile = p; return nil }

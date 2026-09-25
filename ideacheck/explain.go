@@ -22,10 +22,10 @@ var summaryQuestion = judge.Question{ID: "summary", Instructions: "Plain-languag
 // It returns the call's usage as an answer so the cost includes it.
 func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb *rubric.Rubric, answers []judge.Answer, o Options) *judge.Answer {
 	narrator, ok := e.writer().(judge.Narrator)
-	if !ok || !e.Config.Explain || res.Status != StatusOK {
+	if !ok || !e.Settings.Explain || res.Status != StatusOK {
 		return nil
 	}
-	prompts, err := prompt.Load(e.Files, e.Config.PromptsDir)
+	prompts, err := prompt.Load(e.Files, e.Settings.PromptsDir)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "no summary: "+err.Error())
 		return nil
@@ -37,7 +37,7 @@ func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb
 		return nil
 	}
 	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageExplain, Question: summaryQuestion})
-	ctx, cancel := context.WithTimeout(ctx, e.Config.Timeouts.Batch)
+	ctx, cancel := context.WithTimeout(ctx, e.Settings.Timeouts.Batch)
 	defer cancel()
 	start := e.now()
 	n, err := narrator.Narrate(ctx, prompts.ExplainSystem, brief)

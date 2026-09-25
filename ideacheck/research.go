@@ -13,7 +13,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/prompt"
 	"github.com/morethancoder/ideacheck/rubric"
@@ -159,7 +158,7 @@ func (e *Engine) plan(in Intake, res *Result, rb *rubric.Rubric) (*researchPlan,
 	if by != nil && !by.CanResearch() {
 		by = nil
 	}
-	if !e.Config.Research.Enabled || in.Empty() || (e.Search == nil && by == nil) {
+	if !e.Settings.Research.Enabled || in.Empty() || (e.Search == nil && by == nil) {
 		return nil, nil
 	}
 	topics, raw, err := LoadTopics(e.Files)
@@ -274,7 +273,7 @@ func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, st
 	if err != nil {
 		return nil, "", judge.Research{}, false, err
 	}
-	if ttl := e.Config.Research.CacheTTL; e.Cache != nil && ttl > 0 {
+	if ttl := e.Settings.Research.CacheTTL; e.Cache != nil && ttl > 0 {
 		if b, ok := e.Cache.Get(ctx, key, ttl); ok {
 			var found []remembered
 			if json.Unmarshal(b, &found) == nil {
@@ -282,7 +281,7 @@ func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, st
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.Config.Research.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, e.Settings.Research.Timeout)
 	defer cancel()
 	var call judge.Research
 	var reported []judge.Finding
@@ -304,7 +303,7 @@ func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, st
 
 // remember caches a successful search, typed as far as the sift got.
 func (e *Engine) remember(ctx context.Context, key string, found []remembered) {
-	if e.Cache == nil || e.Config.Research.CacheTTL <= 0 {
+	if e.Cache == nil || e.Settings.Research.CacheTTL <= 0 {
 		return
 	}
 	if b, err := json.Marshal(found); err == nil {
@@ -318,7 +317,7 @@ func (e *Engine) ask(ctx context.Context, p *researchPlan, about judge.State) ([
 	for i, t := range p.topics.Topics {
 		topics[i] = prompt.Topic{ID: t.ID, LookFor: t.LookFor}
 	}
-	system, user, err := prompt.Research(e.Files, e.Config.PromptsDir, about, topics, p.topics.MaxFindings)
+	system, user, err := prompt.Research(e.Files, e.Settings.PromptsDir, about, topics, p.topics.MaxFindings)
 	if err != nil {
 		return nil, judge.Research{}, err
 	}
@@ -333,7 +332,7 @@ func (e *Engine) cacheKey(p *researchPlan, about judge.State) (string, error) {
 		return "", err
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00", p.via(""), e.writer().Name(), e.Config.Backends[e.Config.WriterName()].Model)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00", p.via(""), e.writer().Name(), e.Settings.Writer.Model)
 	h.Write(p.raw)
 	fmt.Fprintf(h, "\x00%s\x00", strings.Join(p.topics.ids(), ",")) // a rubric that reads fewer topics searches less
 	h.Write([]byte(idea))
@@ -378,10 +377,10 @@ func capped(found []judge.Finding, n int) []judge.Finding {
 // model that chose the findings whether they are related adds a call per
 // finding and no second opinion.
 func (e *Engine) sifts(p *researchPlan) bool {
-	switch e.Config.Research.Sift {
-	case config.SiftAlways:
+	switch e.Settings.Research.Sift {
+	case SiftAlways:
 		return true
-	case config.SiftNever:
+	case SiftNever:
 		return false
 	}
 	_, digests := e.writer().(judge.Digester)
@@ -394,16 +393,16 @@ func (e *Engine) sifts(p *researchPlan) bool {
 // already typed with this rubric (a cached search) is not asked again, and
 // what is typed now is written back to found for the cache.
 func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchReport, found []remembered, res *Result, o Options) []judge.Answer {
-	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.EvidenceName)
+	rb, err := rubric.Load(e.Files, e.Settings.RubricsDir, rubric.EvidenceName)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "findings kept as reported: "+err.Error())
 		return nil
 	}
 	q := rb.Questions[0]
-	sifter := e.Judge.Name() + "/" + e.Config.Active().Model + "/" + rb.Hash
+	sifter := e.Judge.Name() + "/" + e.Settings.Judge.Model + "/" + rb.Hash
 	answers := make([]judge.Answer, len(report.Findings))
 	reused := make([]bool, len(report.Findings))
-	slots := make(chan struct{}, max(e.Config.MaxConcurrent(), 1))
+	slots := make(chan struct{}, max(e.Settings.MaxConcurrent, 1))
 	var wg sync.WaitGroup
 	for i := range report.Findings {
 		if found[i].SiftedBy == sifter && found[i].Relation != "" {

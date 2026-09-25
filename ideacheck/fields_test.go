@@ -3,13 +3,13 @@ package ideacheck
 import (
 	"testing"
 
-	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/configs"
 )
 
 // The catalogue is what a caller reads to know what to send, so it must cover
 // exactly what the intake accepts — no undescribed field, no invented one.
 func TestFieldsCatalogueCoversTheIntake(t *testing.T) {
-	f, err := LoadFields(config.NewFiles(""))
+	f, err := LoadFields(configs.Defaults())
 	if err != nil {
 		t.Fatal(err)
 	}

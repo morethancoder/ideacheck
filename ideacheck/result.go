@@ -1,7 +1,6 @@
 package ideacheck
 
 import (
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
 )
 
@@ -63,8 +62,8 @@ type Cost struct {
 	TokensOut    int     `json:"tokens_out"`
 	// Price is the per-million-token rate used for tokens the provider did not
 	// cost itself; nil when no price is known or none applies.
-	Price *config.Price `json:"price_per_mtok,omitempty"`
-	Note  string        `json:"note,omitempty"`
+	Price *Price `json:"price_per_mtok,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
 const (

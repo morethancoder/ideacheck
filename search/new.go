@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/morethancoder/ideacheck/internal/config"
 )
 
 // Keys are the environment names of the hosted services' API keys.
@@ -18,10 +16,23 @@ const (
 // RequestTimeout bounds one search request.
 const RequestTimeout = 15 * time.Second
 
+// Who searches (research.search): a service by name, Auto to pick one, or LLM
+// to leave it to the writer's own web tool.
+const (
+	Auto = "auto"
+	LLM  = "llm"
+)
+
+// Options name the service to search with and where each one answers.
+type Options struct {
+	Search    string            // Auto, LLM, SearXNG, Tavily or Brave
+	Endpoints map[string]string // base URL by service name
+}
+
 // New picks the search service research.search names. nil with no error means
 // ideacheck will not search itself: the setting is `llm`, or it is `auto` and
 // nothing is there to search with — no SearXNG answering, no key set.
-func New(ctx context.Context, r config.Research, secret func(string) string) (Provider, error) {
+func New(ctx context.Context, r Options, secret func(string) string) (Provider, error) {
 	client := &http.Client{Timeout: RequestTimeout}
 	searx := &SearX{BaseURL: r.Endpoints[SearXNG], Client: client}
 	keyed := func(name, env string) (Provider, error) {
@@ -35,7 +46,7 @@ func New(ctx context.Context, r config.Research, secret func(string) string) (Pr
 		return &TavilyAPI{BaseURL: r.Endpoints[Tavily], APIKey: key, Client: client}, nil
 	}
 	switch r.Search {
-	case config.SearchLLM:
+	case LLM:
 		return nil, nil
 	case SearXNG:
 		if searx.BaseURL == "" {
@@ -46,7 +57,7 @@ func New(ctx context.Context, r config.Research, secret func(string) string) (Pr
 		return keyed(Tavily, TavilyKey)
 	case Brave:
 		return keyed(Brave, BraveKey)
-	case config.SearchAuto:
+	case Auto:
 		if searx.BaseURL != "" && searx.Reachable(ctx) {
 			return searx, nil
 		}

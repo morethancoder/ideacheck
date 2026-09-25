@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/mock"
 )
@@ -43,7 +43,7 @@ func TestResearchFeedsTheRubric(t *testing.T) {
 	fixture(t, dir, "relation.1", judge.Answer{Choice: "direct", Confidence: 0.9})
 	fixture(t, dir, "relation.2", judge.Answer{Choice: "unrelated", Confidence: 0.95})
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
-	e.Config.Research.Sift = config.SiftAlways
+	e.Settings.Research.Sift = SiftAlways
 
 	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
 	if err != nil {
@@ -73,7 +73,7 @@ func TestResearchFeedsTheRubric(t *testing.T) {
 }
 
 func TestEvidenceState(t *testing.T) {
-	topics, _, err := LoadTopics(config.NewFiles(""))
+	topics, _, err := LoadTopics(configs.Defaults())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSiftIsCachedWithTheFindings(t *testing.T) {
 	findingsFixture(t, dir)
 	fixture(t, dir, "relation.2", judge.Answer{Choice: "unrelated", Confidence: 0.95})
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
-	e.Config.Research.Sift = config.SiftAlways
+	e.Settings.Research.Sift = SiftAlways
 	cache := &memCache{m: map[string][]byte{}}
 	e.Cache = cache
 	sifted := func(res *Result) (n int) {
@@ -206,7 +206,7 @@ func TestOnlyTheTopicsTheRubricReadsAreSearched(t *testing.T) {
 	}
 	rubricFile("quiet", "[idea]")
 	rubricFile("odd", "[idea, evidence.weather]")
-	e.Files = config.NewFiles(user)
+	e.Files = configs.Over(user)
 	if res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "quiet"}); err != nil || res.Research != nil {
 		t.Errorf("a rubric that reads no evidence: research = %+v, %v", res.Research, err)
 	}

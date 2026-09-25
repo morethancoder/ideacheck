@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/mock"
 	"github.com/morethancoder/ideacheck/rubric"
@@ -59,7 +58,7 @@ func TestDerivedAnswersAreMarkedAndCount(t *testing.T) {
 	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.2})
 	fixture(t, dir, "relation.1", judge.Answer{Choice: "direct", Confidence: 0.9})
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
-	e.Config.Research.Sift = config.SiftAlways
+	e.Settings.Research.Sift = SiftAlways
 	res, err := e.Check(context.Background(), idea, Options{Rubric: "business", Proceed: true})
 	if err != nil {
 		t.Fatal(err)

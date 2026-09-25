@@ -102,7 +102,7 @@ func derived(q judge.Question, p float64) judge.Answer {
 // fields, and relations the evidence rubric can answer.
 func (e *Engine) derivable(rb, gaps *rubric.Rubric) error {
 	var relations map[string]string
-	if ev, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.EvidenceName); err == nil {
+	if ev, err := rubric.Load(e.Files, e.Settings.RubricsDir, rubric.EvidenceName); err == nil {
 		relations = ev.Questions[0].Options
 	}
 	for _, q := range rb.Questions {

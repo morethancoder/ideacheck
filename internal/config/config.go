@@ -15,6 +15,10 @@ import (
 	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
+
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/judge"
+	"github.com/morethancoder/ideacheck/search"
 )
 
 // delim never occurs in a config key, so keys such as "jev-1.13.0" or
@@ -82,15 +86,15 @@ type LocalSearXNG struct {
 
 // SearchLLM leaves the searching to the writer's own web tool; SearchAuto picks.
 const (
-	SearchAuto = "auto"
-	SearchLLM  = "llm"
+	SearchAuto = search.Auto
+	SearchLLM  = search.LLM
 )
 
 // Sift modes.
 const (
-	SiftAuto   = "auto"
-	SiftAlways = "always"
-	SiftNever  = "never"
+	SiftAuto   = ideacheck.SiftAuto
+	SiftAlways = ideacheck.SiftAlways
+	SiftNever  = ideacheck.SiftNever
 )
 
 type Timeouts struct {
@@ -184,24 +188,18 @@ type Price struct {
 	CachedIn float64 `koanf:"cached_in" json:"cached_in,omitempty"`
 }
 
-// PriceFor finds a model's price: the exact id, then without a provider prefix
-// ("anthropic/claude-sonnet-5"), then the longest priced id it starts with
-// ("claude-haiku-4-5-20251001" → "claude-haiku-4-5").
+// PriceFor finds a model's price the way a check does (ideacheck.Pricing.Find).
 func (c Config) PriceFor(model string) (Price, bool) {
-	if p, ok := c.Pricing[model]; ok {
-		return p, true
+	p, ok := c.pricing().Find(model)
+	return Price(p), ok
+}
+
+func (c Config) pricing() ideacheck.Pricing {
+	out := make(ideacheck.Pricing, len(c.Pricing))
+	for id, p := range c.Pricing {
+		out[id] = ideacheck.Price(p)
 	}
-	if i := strings.LastIndex(model, "/"); i >= 0 {
-		return c.PriceFor(model[i+1:])
-	}
-	best := ""
-	for id := range c.Pricing {
-		if strings.HasPrefix(model, id+"-") && len(id) > len(best) {
-			best = id
-		}
-	}
-	p, ok := c.Pricing[best]
-	return p, ok && best != ""
+	return out
 }
 
 type Store struct {
@@ -248,7 +246,7 @@ func fileLayers(files Files) [][]byte {
 	if b, err := (Files{Embedded: files.Embedded}).Read(mainFile); err == nil {
 		layers = append(layers, b)
 	}
-	if b, ok := files.override(mainFile); ok {
+	if b, ok := files.Override(mainFile); ok {
 		layers = append(layers, b)
 	}
 	return layers
@@ -329,6 +327,29 @@ func (c Config) MaxConcurrent() int {
 		return n
 	}
 	return c.Concurrency.DefaultMax
+}
+
+// Settings are the part of the configuration a check runs with.
+func (c Config) Settings() ideacheck.Settings {
+	r, writer := c.Research, c.Backends[c.WriterName()]
+	return ideacheck.Settings{
+		RubricsDir: c.RubricsDir, PromptsDir: c.PromptsDir, Explain: c.Explain, Extract: c.Extract,
+		Timeouts:      ideacheck.Timeouts{Question: c.Timeouts.Question, Batch: c.Timeouts.Batch},
+		Retry:         judge.RetryPolicy{MaxAttempts: c.Retries.MaxAttempts, Base: c.Retries.BaseBackoff, Max: c.Retries.MaxBackoff},
+		MaxConcurrent: c.MaxConcurrent(),
+		Batch:         c.Active().Batch,
+		Research: ideacheck.Research{Enabled: r.Enabled, Sift: r.Sift, QueriesPerTopic: r.QueriesPerTopic, ResultsPerQuery: r.ResultsPerQuery,
+			ReadPages: r.ReadPages, PageChars: r.PageChars, PageTimeout: r.PageTimeout, Timeout: r.Timeout, CacheTTL: r.CacheTTL},
+		Pricing: c.pricing(),
+		Judge:   ideacheck.Role{Model: c.Active().Model, Billing: c.Active().Billing},
+		Writer:  ideacheck.Role{Model: writer.Model, Billing: writer.Billing},
+		Hash:    c.Hash(),
+	}
+}
+
+// Searching is what research searches with, for search.New.
+func (r Research) Searching() search.Options {
+	return search.Options{Search: r.Search, Endpoints: r.Endpoints}
 }
 
 // Hash identifies the effective configuration a result was produced under.

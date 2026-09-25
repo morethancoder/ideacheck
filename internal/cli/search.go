@@ -165,7 +165,7 @@ func (a *app) searchStatus(ctx context.Context) error {
 // searchUsed says what a check would search with right now — the question
 // behind every one of these commands.
 func (a *app) searchUsed(ctx context.Context, p *ui.Printer, cfg config.Config) {
-	provider, err := search.New(ctx, cfg.Research, a.secrets().Get)
+	provider, err := search.New(ctx, cfg.Research.Searching(), a.secrets().Get)
 	switch {
 	case !cfg.Research.Enabled:
 		p.Note("research is off (research.enabled): checks score the description alone.")

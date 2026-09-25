@@ -12,16 +12,16 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/ideacheck"
-	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge/mock"
 	"github.com/morethancoder/ideacheck/store"
 )
 
 func newServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	files := config.NewFiles("")
-	cfg, err := config.Load(files, config.LoadOptions{Environ: func() []string { return nil }, Overrides: map[string]any{"backend": "mock"}})
+	files := configs.Defaults()
+	settings, err := ideacheck.DefaultSettings("mock", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func newServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	s := &Server{Engine: &ideacheck.Engine{Config: cfg, Files: files, Judge: &mock.Judge{Seed: 1}}, Store: st, Files: files, RubricsDir: cfg.RubricsDir, Log: zerolog.Nop()}
+	s := &Server{Engine: &ideacheck.Engine{Settings: settings, Files: files, Judge: &mock.Judge{Seed: 1}}, Store: st, Files: files, RubricsDir: settings.RubricsDir, Log: zerolog.Nop()}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv

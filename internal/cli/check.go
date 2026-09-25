@@ -194,14 +194,14 @@ func (a *app) newEngine(cfg config.Config) (*ideacheck.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := &ideacheck.Engine{Config: cfg, Files: a.files(), Judge: judge, Writer: writer,
+	engine := &ideacheck.Engine{Settings: cfg.Settings(), Files: a.files(), Judge: judge, Writer: writer,
 		Cache: findingsCache{path: store.ExpandHome(cfg.Store.Path, a.home)}}
 	if !cfg.Research.Enabled {
 		return engine, nil
 	}
 	// A nil provider is not an error: the writer's own web tool searches, or
 	// nothing does and the description is scored as it is.
-	provider, err := search.New(context.Background(), cfg.Research, deps.Secret)
+	provider, err := search.New(context.Background(), cfg.Research.Searching(), deps.Secret)
 	if err != nil {
 		return nil, err
 	}
