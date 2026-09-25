@@ -1,5 +1,13 @@
 {{- /* The brief for the plain-language summary. Findings are sorted most
-influential first; Effect is strength, weakness, mixed, or context. */ -}}
+influential first. Good is a weighted answer's value with polarity applied, so 1
+is always good news; an unweighted one is context. A noul is read out as how
+likely its statement is. */ -}}
+{{- define "effect" -}}
+{{ if not .Weighted }}context{{ else if ge .Good 0.6 }}strength{{ else if le .Good 0.4 }}weakness{{ else }}mixed{{ end }}
+{{- end -}}
+{{- define "likely" -}}
+{{ if ge . 0.8 }}clearly true{{ else if ge . 0.6 }}probably true{{ else if gt . 0.4 }}unclear{{ else if gt . 0.2 }}probably not true{{ else }}clearly not true{{ end }}
+{{- end -}}
 IDEA:
 ```json
 {{ .StateJSON }}
@@ -10,7 +18,7 @@ WHY THE RULES CHOSE IT: {{ .Reason }}
 
 FINDINGS (most influential first):
 {{- range .Findings }}
-- [{{ .Effect }}] {{ .Question }} → {{ .Reading }}
+- [{{ template "effect" . }}] {{ .Question }} → {{ if .Noul }}{{ template "likely" .Probability }}{{ else }}{{ .Reading }}{{ end }}
 {{- end }}
 {{- if .Missing }}
 

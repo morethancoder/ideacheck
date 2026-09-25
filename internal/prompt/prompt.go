@@ -147,10 +147,18 @@ func (s *Set) Logprob(state judge.State, q judge.Question, labels []Label) (stri
 }
 
 // Finding is one scored question as the summary brief shows it.
+// Where a value turns into "strength" or "probably true" is the template's
+// business, so the bands live in explain.tmpl, not here.
 type Finding struct {
-	Effect   string // strength | weakness | mixed | context
 	Question string // the question's instructions
-	Reading  string // the answer in words: a level, an option, or how likely a statement is
+	Reading  string // a score or choice answer in the rubric's own words
+	// Noul marks a statement answered with a probability: Probability.
+	Noul        bool
+	Probability float64
+	// Weighted marks an answer that counts toward the composite; Good is then
+	// its value with polarity applied (1 is always good news).
+	Weighted bool
+	Good     float64
 }
 
 // Brief is everything the summary writer sees.

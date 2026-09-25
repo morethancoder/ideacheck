@@ -91,7 +91,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	open := Unanswered(res.Missing, in, o.Answered)
 	res.Partial = len(open) > 0
 
-	name, warnings := e.pickRubric(o.Rubric, routeAnswer)
+	name, warnings := e.pickRubric(o.Rubric, router.Fallback, routeAnswer)
 	res.Warnings = append(res.Warnings, warnings...)
 	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, name)
 	if err != nil {
@@ -297,17 +297,17 @@ func ideaType(a judge.Answer) *IdeaType {
 	return &IdeaType{Choice: a.Choice, Confidence: a.Confidence}
 }
 
-// pickRubric honors a forced rubric, else the router's choice, else the fallback.
-func (e *Engine) pickRubric(forced string, route judge.Answer) (string, []string) {
+// pickRubric honors a forced rubric, else the router's choice, else the router's fallback.
+func (e *Engine) pickRubric(forced, fallback string, route judge.Answer) (string, []string) {
 	if forced != "" {
 		return forced, nil
 	}
 	if route.Failed() {
-		return rubric.Fallback, []string{fmt.Sprintf("could not classify the idea (%s); using the %s rubric", route.Err, rubric.Fallback)}
+		return fallback, []string{fmt.Sprintf("could not classify the idea (%s); using the %s rubric", route.Err, fallback)}
 	}
 	names, _ := rubric.Names(e.Files, e.Config.RubricsDir)
 	if route.Choice == rubric.Other || !contains(names, route.Choice) {
-		return rubric.Fallback, []string{fmt.Sprintf("idea type %q has no rubric; using the %s rubric", route.Choice, rubric.Fallback)}
+		return fallback, []string{fmt.Sprintf("idea type %q has no rubric; using the %s rubric", route.Choice, fallback)}
 	}
 	return route.Choice, nil
 }

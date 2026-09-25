@@ -18,6 +18,11 @@
 #
 # max_findings caps each topic, so one noisy topic cannot crowd out the rest.
 max_findings: 5
+# subject_chars caps {{.Subject}}: a search engine reads a few words, not a pitch.
+# snippet_chars caps a search result kept as a finding when no writer digests
+# the results — enough for the judge to type it. 0 = no cap.
+subject_chars: 120
+snippet_chars: 300
 topics:
   - id: competitors
     look_for: Products, services or open-source projects that already address the same problem for the same audience. Name each one and say what it does and who it is for.

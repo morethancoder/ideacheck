@@ -320,10 +320,10 @@ func TestFindingsPutTheBiggestPullFirstInPlainWords(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("failed answers must be left out: %+v", got)
 	}
-	if got[0].Question != "tarpit" || got[0].Effect != "weakness" || got[0].Reading != "clearly true" {
-		t.Errorf("first = %+v, want the heavy tarpit as a weakness", got[0])
+	if got[0].Question != "tarpit" || !got[0].Weighted || !near(got[0].Good, 0.1) || !got[0].Noul || got[0].Probability != 0.9 {
+		t.Errorf("first = %+v, want the heavy tarpit, bad news with polarity applied", got[0])
 	}
-	if got[1].Reading != "high" || got[1].Effect != "strength" || got[2].Effect != "context" {
+	if got[1].Reading != "high" || !near(got[1].Good, 0.9) || got[2].Weighted {
 		t.Errorf("rest = %+v", got[1:])
 	}
 }

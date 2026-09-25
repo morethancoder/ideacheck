@@ -82,14 +82,14 @@ func findings(qs []judge.Question, answers []judge.Answer) []prompt.Finding {
 		if a.Failed() {
 			continue
 		}
-		f := prompt.Finding{Effect: "context", Question: q.Instructions, Reading: reading(q, a)}
+		f := prompt.Finding{Question: q.Instructions, Reading: reading(q, a), Noul: q.Kind == judge.Noul, Probability: a.Noul}
 		pull := -1.0 // informational questions sort last
 		if v, ok := Normalize(q, a); ok && q.Polarity != 0 && q.Weight > 0 {
 			good := v
 			if q.Polarity < 0 {
 				good = 1 - v
 			}
-			f.Effect = effect(good)
+			f.Weighted, f.Good = true, good
 			pull = q.Weight * math.Abs(good-0.5)
 		}
 		rs = append(rs, ranked{f, pull})
@@ -102,18 +102,8 @@ func findings(qs []judge.Question, answers []judge.Answer) []prompt.Finding {
 	return out
 }
 
-// effect reads a polarity-adjusted value (1 is always good).
-func effect(good float64) string {
-	switch {
-	case good >= 0.6:
-		return "strength"
-	case good <= 0.4:
-		return "weakness"
-	}
-	return "mixed"
-}
-
-// reading is the answer in the rubric's own words.
+// reading is a score or choice answer in the rubric's own words; a noul's
+// probability is put into words by the template.
 func reading(q judge.Question, a judge.Answer) string {
 	switch q.Kind {
 	case judge.Score:
@@ -128,15 +118,5 @@ func reading(q judge.Question, a judge.Answer) string {
 		}
 		return a.Choice
 	}
-	switch p := a.Noul; {
-	case p >= 0.8:
-		return "clearly true"
-	case p >= 0.6:
-		return "probably true"
-	case p > 0.4:
-		return "unclear"
-	case p > 0.2:
-		return "probably not true"
-	}
-	return "clearly not true"
+	return ""
 }

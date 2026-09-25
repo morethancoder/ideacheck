@@ -34,8 +34,12 @@ var researchQuestion = judge.Question{ID: "research", Instructions: "Look the id
 
 // Topics is research.yaml: what the writer looks up before an idea is scored.
 type Topics struct {
-	MaxFindings int     `yaml:"max_findings"`
-	Topics      []Topic `yaml:"topics"`
+	MaxFindings int `yaml:"max_findings"`
+	// SubjectChars caps {{.Subject}} in a topic's own queries; SnippetChars
+	// caps a search snippet kept as a finding when no writer digests. 0 = no cap.
+	SubjectChars int     `yaml:"subject_chars"`
+	SnippetChars int     `yaml:"snippet_chars"`
+	Topics       []Topic `yaml:"topics"`
 }
 
 // Topic is one thing worth looking up. Covers names the intake field the
@@ -62,6 +66,9 @@ func LoadTopics(r interface{ Read(string) ([]byte, error) }) (*Topics, []byte, e
 	}
 	if len(t.Topics) == 0 || t.MaxFindings < 1 {
 		return nil, nil, fmt.Errorf("%s: needs at least one topic and max_findings >= 1", ResearchFile)
+	}
+	if t.SubjectChars < 0 || t.SnippetChars < 0 {
+		return nil, nil, fmt.Errorf("%s: subject_chars and snippet_chars must not be negative", ResearchFile)
 	}
 	seen := map[string]bool{}
 	for _, topic := range t.Topics {

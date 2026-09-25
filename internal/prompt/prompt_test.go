@@ -58,8 +58,11 @@ func TestRenderedPromptsMatchGolden(t *testing.T) {
 		golden(t, "questions_"+mode+".golden", got)
 	}
 	brief, err := s.Explain(Brief{State: state, Verdict: "park", Reason: "Tarpit fired",
-		Findings: []Finding{{"weakness", "This is a tarpit idea.", "probably true"}, {"strength", "How clear?", "Clear"}},
-		Missing:  []string{"Who exactly is the first user?"}})
+		Findings: []Finding{
+			{Question: "This is a tarpit idea.", Noul: true, Probability: 0.7, Weighted: true, Good: 0.3},
+			{Question: "How clear?", Reading: "Clear", Weighted: true, Good: 1},
+		},
+		Missing: []string{"Who exactly is the first user?"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +78,29 @@ func TestRenderedPromptsMatchGolden(t *testing.T) {
 	lpNoul, _ := s.Logprob(state, noul, nil)
 	if !strings.Contains(lpNoul, "Y) yes  N) no") {
 		t.Errorf("noul logprob prompt:\n%s", lpNoul)
+	}
+}
+
+// The explain brief puts values into words with bands kept in explain.tmpl;
+// these pin the embedded bands at their edges.
+func TestExplainBandsLiveInTheTemplate(t *testing.T) {
+	s, _ := Load(config.NewFiles(""), "prompts")
+	cases := []struct {
+		f    Finding
+		want string
+	}{
+		{Finding{Question: "q", Noul: true, Probability: 0.8, Weighted: true, Good: 0.6}, "[strength] q → clearly true"},
+		{Finding{Question: "q", Noul: true, Probability: 0.6, Weighted: true, Good: 0.4}, "[weakness] q → probably true"},
+		{Finding{Question: "q", Noul: true, Probability: 0.4, Weighted: true, Good: 0.5}, "[mixed] q → probably not true"},
+		{Finding{Question: "q", Noul: true, Probability: 0.2}, "[context] q → clearly not true"},
+		{Finding{Question: "q", Noul: true, Probability: 0.5}, "[context] q → unclear"},
+		{Finding{Question: "q", Reading: "Clear"}, "[context] q → Clear"},
+	}
+	for _, c := range cases {
+		got, err := s.Explain(Brief{State: state, Findings: []Finding{c.f}})
+		if err != nil || !strings.Contains(got, "- "+c.want+"\n") {
+			t.Errorf("%+v: want %q in\n%s (%v)", c.f, c.want, got, err)
+		}
 	}
 }
 

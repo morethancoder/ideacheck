@@ -218,6 +218,9 @@ func (rb *Rubric) validateRouter() error {
 	if len(rb.Questions) != 1 || rb.Questions[0].Kind != judge.Choice {
 		return errors.New("router must contain exactly one choice question")
 	}
+	if rb.Fallback == "" {
+		return errors.New("router must name a fallback rubric")
+	}
 	return nil
 }
 
@@ -227,6 +230,9 @@ func (rb *Rubric) validateScoring() error {
 	}
 	if len(rb.Drop) > 0 {
 		return errors.New("drop belongs to _evidence.yaml only")
+	}
+	if rb.Fallback != "" {
+		return errors.New("fallback belongs to _router.yaml only")
 	}
 	var total float64
 	for _, q := range rb.Questions {

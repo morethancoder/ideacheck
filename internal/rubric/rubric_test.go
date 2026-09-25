@@ -113,6 +113,13 @@ func TestRoleSpecificRules(t *testing.T) {
 	if err := load(t, RouterName, "questions:\n  - {id: r, kind: noul, instructions: x, uses: [idea]}\n"); err == nil || !strings.Contains(err.Error(), "router") {
 		t.Errorf("router with noul: %v", err)
 	}
+	router := "questions:\n  - {id: r, kind: choice, instructions: x, uses: [idea], options: {a: A, other: O}}\n"
+	if err := load(t, RouterName, router); err == nil || !strings.Contains(err.Error(), "fallback") {
+		t.Errorf("router without a fallback: %v", err)
+	}
+	if err := load(t, RouterName, "fallback: business\n"+router); err != nil {
+		t.Errorf("valid router: %v", err)
+	}
 }
 
 func TestGateFiresOnlyWithAllInputsPresent(t *testing.T) {

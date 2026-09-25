@@ -35,8 +35,6 @@ var (
 const (
 	searchesAtOnce = 4
 	pagesAtOnce    = 6
-	snippetChars   = 300 // of a snippet kept as a finding's summary when no writer digests
-	subjectChars   = 120
 )
 
 // hit is one search result on its way to becoming evidence.
@@ -68,7 +66,7 @@ func (e *Engine) lookup(ctx context.Context, p *researchPlan, in Intake, about j
 
 	digester, ok := e.writer().(judge.Digester)
 	if !ok || len(hits) == 0 {
-		return asFindings(hits), spent, nil
+		return asFindings(hits, p.topics.SnippetChars), spent, nil
 	}
 	system, user, err := prompt.ResearchDigest(e.Files, e.Config.PromptsDir, about, topicsWith(p.topics, hits), p.topics.MaxFindings)
 	if err != nil {
@@ -114,7 +112,7 @@ func (e *Engine) queries(ctx context.Context, p *researchPlan, in Intake, about 
 	for _, t := range p.topics.Topics {
 		texts := byTopic[t.ID]
 		if len(texts) == 0 {
-			texts = own(t, subject(in), per)
+			texts = own(t, subject(in, p.topics.SubjectChars), per)
 		}
 		for _, text := range texts {
 			out = append(out, judge.Query{Topic: t.ID, Query: text})
@@ -140,11 +138,11 @@ func own(t Topic, subject string, n int) []string {
 }
 
 // subject is the idea in a few words, from the most specific thing known.
-func subject(in Intake) string {
+func subject(in Intake, chars int) string {
 	for _, s := range []string{in.Fields["solution"], in.Fields["problem"], in.Fields["title"], in.Idea, in.Context} {
 		if s = strings.Join(strings.Fields(s), " "); s != "" {
-			if r := []rune(s); len(r) > subjectChars {
-				s = string(r[:subjectChars])
+			if r := []rune(s); chars > 0 && len(r) > chars {
+				s = string(r[:chars])
 			}
 			return s
 		}
@@ -258,15 +256,15 @@ func topicsWith(t *Topics, hits []hit) []prompt.Topic {
 
 // asFindings is the lookup with no writer to digest it: each result is a
 // finding as the search engine described it, and the judge sifts them.
-func asFindings(hits []hit) []judge.Finding {
+func asFindings(hits []hit, chars int) []judge.Finding {
 	out := make([]judge.Finding, 0, len(hits))
 	for _, h := range hits {
 		summary := h.Snippet
 		if summary == "" {
 			summary = h.text
 		}
-		if r := []rune(summary); len(r) > snippetChars {
-			summary = string(r[:snippetChars]) + "…"
+		if r := []rune(summary); chars > 0 && len(r) > chars {
+			summary = string(r[:chars]) + "…"
 		}
 		out = append(out, judge.Finding{Topic: h.topic, Title: h.Title, Summary: summary, URL: h.URL})
 	}

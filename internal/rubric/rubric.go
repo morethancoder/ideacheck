@@ -22,9 +22,7 @@ const (
 	// finding: how it relates to the idea. Optional — without the file, every
 	// finding is kept as the researcher reported it.
 	EvidenceName = "_evidence"
-	// Fallback is the rubric used when the router answers "other".
-	Fallback = "business"
-	Other    = "other"
+	Other        = "other"
 )
 
 // Reader is the slice of config.Files a rubric needs.
@@ -43,6 +41,9 @@ type Rubric struct {
 	// AskLimit is _gaps only: the most follow-ups a person is asked in one
 	// check, taken in file order (most important first). 0 = ask them all.
 	AskLimit int `yaml:"ask_limit" json:"ask_limit,omitempty"`
+	// Fallback is _router only: the rubric scored when the router answers
+	// "other", names a type with no rubric, or cannot answer at all.
+	Fallback string `yaml:"fallback" json:"fallback,omitempty"`
 	// Drop is _evidence only: the options that remove a finding from the evidence.
 	Drop      []string         `yaml:"drop" json:"drop,omitempty"`
 	Questions []judge.Question `yaml:"questions" json:"questions"`
