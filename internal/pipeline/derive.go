@@ -18,6 +18,23 @@ type known struct {
 	gaps     *rubric.Rubric
 	answers  map[string]judge.Answer // gap answers, by question id
 	research *ResearchReport         // nil = not researched
+	earlier  map[string]judge.Answer // a follow-up's preflight answers that stand
+}
+
+// earlier is what a follow-up keeps of the check it follows: every answer the
+// judge gave. The fields answered since are no longer asked about at all, and
+// a derived answer is derived again from the intake as it now is.
+func earlier(res *Result) map[string]judge.Answer {
+	if res == nil {
+		return nil
+	}
+	out := map[string]judge.Answer{}
+	for _, a := range res.Answers {
+		if !a.Failed() && a.Method != MethodDerived {
+			out[a.ID] = a
+		}
+	}
+	return out
 }
 
 // derive answers q by its rule; ok is false when there is no rule or the rule
@@ -127,10 +144,11 @@ func fillsSome(gaps *rubric.Rubric, field string) bool {
 	return false
 }
 
-// announce shows derived answers in the live view, as the judge's are shown.
+// announce shows answers the judge was not asked for — derived, or kept from
+// an earlier run — in the live view, as the judge's are shown.
 func announce(ch chan<- Event, stage string, qs []judge.Question, held map[int]judge.Answer) {
 	for i, a := range held {
-		if a.Method != MethodDerived {
+		if a.Failed() {
 			continue
 		}
 		a := a

@@ -77,3 +77,33 @@ func TestJudgeCallsPerCheck(t *testing.T) {
 		}
 	}
 }
+
+// A follow-up after needs_input keeps the judgments already made: the gaps the
+// person answered are not asked (their fields are filled), the ones left
+// blank and the router keep their earlier answers, and only scoring is new.
+func TestFollowUpAsksOnlyWhatChanged(t *testing.T) {
+	dir := t.TempDir()
+	fixture(t, dir, "idea_type", judge.Answer{Choice: "side_project", Confidence: 0.9})
+	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.2})
+	fixture(t, dir, "has_differentiation", judge.Answer{Noul: 0.2})
+	j := &counting{Judge: &mock.Judge{Seed: 1, FixturesDir: dir}}
+	e := engine(t, j)
+
+	first, err := e.Check(context.Background(), idea, Options{})
+	if err != nil || first.Status != StatusNeedsInput {
+		t.Fatalf("first = %+v, %v", first, err)
+	}
+	j.calls.Store(0)
+	replied := idea.With("why_now", "the models got cheap") // differentiation left blank
+	res, err := e.Check(context.Background(), replied, Options{Proceed: true, Earlier: first})
+	if err != nil || res.Status != StatusOK {
+		t.Fatalf("follow-up = %+v, %v", res, err)
+	}
+	// side_project with a background: its 8 questions, none held back or derived.
+	if got := j.calls.Load(); got != 8 {
+		t.Errorf("follow-up asked the judge %d times, want only the 8 scoring questions", got)
+	}
+	if len(res.Missing) != 1 || res.Missing[0].Fills != "differentiation" || res.IdeaType == nil || res.IdeaType.Choice != "side_project" {
+		t.Errorf("missing=%+v idea_type=%+v, want the kept judgments reported as before", res.Missing, res.IdeaType)
+	}
+}

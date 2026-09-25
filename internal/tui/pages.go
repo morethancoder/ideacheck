@@ -719,6 +719,7 @@ func (a *App) openLive() tea.Cmd {
 	opts := a.start.Options
 	opts.Events, opts.Proceed = events, opts.Proceed || a.asked // asked once: judge with what is known
 	opts.Answered = append(opts.Answered, a.answered...)
+	opts.Earlier = a.earlier
 	in := a.intake
 	go func() {
 		res, err := engine.Check(ctx, in, opts)
@@ -746,6 +747,7 @@ func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 			return a.fail(got.err)
 		}
 		if got.res.Status == pipeline.StatusNeedsInput && !a.asked && !a.start.NoAsk {
+			a.earlier = got.res
 			return a.openAsk(a.engine.FollowUps(got.res, a.intake, a.answered))
 		}
 		a.host.Persist(a.intake, got.res)
@@ -769,7 +771,7 @@ func (a *App) updateResult(msg tea.Msg) tea.Cmd {
 	case "left", "shift+tab":
 		a.tab = (a.tab + len(resultTabs) - 1) % len(resultTabs)
 	case "n":
-		a.intake, a.asked, a.answered = pipeline.Intake{}, false, nil
+		a.intake, a.asked, a.answered, a.earlier = pipeline.Intake{}, false, nil, nil
 		return a.open(pageIdea)
 	case "h":
 		return a.open(pageHistory)

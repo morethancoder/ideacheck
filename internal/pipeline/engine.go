@@ -48,6 +48,10 @@ type Options struct {
 	// that has a value, is reported but never stops the check: asking again for
 	// something the user just answered is noise.
 	Answered []string
+	// Earlier is the needs_input result this check follows up (the TUI, after
+	// its questions). Its gap and router answers stand; only the fields
+	// answered since are reconsidered, since those gaps are no longer asked.
+	Earlier *Result
 	// Events receives live progress. The caller must drain it until Check returns;
 	// Check never closes it.
 	Events chan<- Event
@@ -74,25 +78,33 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	}
 	state := in.State()
 	unknown := unstated(gaps.Questions, in)
-	k := known{in: in, gaps: gaps}
-	gapAsk, derived := settle(unknown, state, k)
+	k := known{in: in, gaps: gaps, earlier: earlier(o.Earlier)}
+	gapAsk, held := settle(unknown, state, k)
+	route := router.Questions[0]
+	routeAnswer, routed := k.earlier[route.ID]
+	routed = routed && !routeAnswer.Failed()
 	asked := append([]judge.Question{}, gapAsk...)
-	if o.Rubric == "" { // a forced rubric leaves nothing for the router to decide
-		asked = append(asked, router.Questions...)
+	if o.Rubric == "" && !routed { // a forced rubric leaves nothing for the router to decide
+		asked = append(asked, route)
 	}
-	announce(o.Events, StagePreflight, unknown, derived)
+	announce(o.Events, StagePreflight, unknown, held)
 	pre := e.fanout(ctx, state, asked, o, StagePreflight)
-	gapAnswers := restore(pre[:len(gapAsk)], derived, len(unknown))
-	res.Answers = append(append([]judge.Answer{}, gapAnswers...), pre[len(gapAsk):]...)
+	gapAnswers := restore(pre[:len(gapAsk)], held, len(unknown))
+	res.Answers = append([]judge.Answer{}, gapAnswers...)
 	res.Missing = FindMissing(gaps, gapAnswers, in)
-	var routeAnswer judge.Answer
-	if o.Rubric != "" {
+	switch {
+	case o.Rubric != "":
 		res.IdeaType = &IdeaType{Choice: o.Rubric, Confidence: 1}
-	} else {
+	case routed:
+		announce(o.Events, StagePreflight, router.Questions, map[int]judge.Answer{0: routeAnswer})
+	default:
 		routeAnswer = pre[len(gapAsk)]
-		res.IdeaType = ideaType(routeAnswer)
 	}
-	k.answers = byID(gapAnswers)
+	if o.Rubric == "" {
+		res.IdeaType = ideaType(routeAnswer)
+		res.Answers = append(res.Answers, routeAnswer)
+	}
+	k.answers, k.earlier = byID(gapAnswers), nil
 
 	// The rubric is known before research, so only what it reads is looked up.
 	name, warnings := e.pickRubric(o.Rubric, router.Fallback, routeAnswer)
@@ -307,13 +319,17 @@ func confidenceFactor(gaps *rubric.Rubric, open int) float64 {
 // restore. A question whose `requires:` state was not given is held back
 // unanswered: scoring a dimension from material we do not have (founder fit
 // with no profile) reads as a judgment of the idea when it is really a
-// judgment of the input. A question whose `derive:` rule can decide is
-// answered by the rule.
+// judgment of the input. A question an earlier run of this check answered
+// keeps that answer, and one whose `derive:` rule can decide is answered by it.
 func settle(qs []judge.Question, s judge.State, k known) (ask []judge.Question, held map[int]judge.Answer) {
 	held = map[int]judge.Answer{}
 	for i, q := range qs {
 		if absent := absentState(q, s); len(absent) > 0 {
 			held[i] = judge.Answer{ID: q.ID, Kind: q.Kind, Probabilities: map[string]float64{}, Err: "no " + strings.Join(absent, " or ") + " given"}
+			continue
+		}
+		if a, ok := k.earlier[q.ID]; ok {
+			held[i] = a
 			continue
 		}
 		if a, ok := derive(q, k); ok {

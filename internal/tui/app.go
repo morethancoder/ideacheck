@@ -138,6 +138,9 @@ type App struct {
 	asked   bool
 	// answered: fields already offered in the detail steps; never re-asked.
 	answered []string
+	// earlier: the needs_input result the follow-up questions came from; the
+	// re-run keeps its judgments and reconsiders only what was answered.
+	earlier *pipeline.Result
 
 	live    liveModel
 	engine  *pipeline.Engine // the running check's engine; it decides what is worth asking
@@ -254,7 +257,7 @@ func (a *App) updateMenu(msg tea.Msg) tea.Cmd {
 		if menuItems[a.cursor].page < 0 {
 			return tea.Quit
 		}
-		a.intake, a.asked, a.answered = pipeline.Intake{}, false, nil
+		a.intake, a.asked, a.answered, a.earlier = pipeline.Intake{}, false, nil, nil
 		return a.open(menuItems[a.cursor].page)
 	}
 	return nil

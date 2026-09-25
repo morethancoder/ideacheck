@@ -79,7 +79,9 @@ Invariants worth keeping:
   researched; some failing = a warning beside the findings.
 - A gap whose field a research topic `covers:` is never asked about while research
   will run, and leaves `missing[]` once findings come back. The TUI asks at most
-  `ask_limit` follow-ups (`Engine.FollowUps`).
+  `ask_limit` follow-ups (`Engine.FollowUps`), then re-runs with the needs_input
+  result as `Options.Earlier`: its gap and router answers stand, and a gap whose
+  field is now filled is never asked (nor is any gap on a filled field).
 - Missing facts do not block a verdict outside the TUI: agent and server runs
   score what is known and report `missing[]` with `partial: true`. `--strict`
   restores the old "stop and ask" behaviour.
