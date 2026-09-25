@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help doctor setup dev build install run serve api up down test race lint core fmt tidy bench dry dump schema release deploy clean
+.PHONY: help doctor setup dev build install run serve api up down test race lint core mobile fmt tidy bench dry dump schema release deploy clean
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "; printf "\n\033[1mUsage:\033[0m make \033[36m<target>\033[0m\n\n\033[1mTargets:\033[0m\n"} \
@@ -48,8 +48,11 @@ lint: ## go vet, gofmt check, and golangci-lint when installed
 core: ## check the public packages import nothing desktop-only and build for iOS and Android
 	@bash scripts/core.sh
 
+mobile: ## build build/Sparkcore.xcframework for the iOS app (ARGS=test runs the Swift proof)
+	@bash scripts/mobile.sh $(ARGS)
+
 fmt: ## format all Go code
-	@gofmt -w cmd internal configs ideacheck judge rubric prompt search store server
+	@gofmt -w cmd internal configs ideacheck judge rubric prompt search store server mobile
 
 tidy: ## tidy go.mod and go.sum
 	@go mod tidy

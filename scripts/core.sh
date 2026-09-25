@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The public packages are the core other hosts import: the HTTP server, a
-# hosted API, a gomobile binding. They must not start processes or reach the
+# hosted API, the gomobile binding (mobile/). They must not start processes or reach the
 # terminal, the CLI's config or anything under internal/, and they must build
 # for iOS and Android.
 set -euo pipefail
@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 source scripts/_lib.sh
 
 module="$(go list -m)"
-public=(./configs/... ./ideacheck/... ./judge/... ./rubric/... ./prompt/... ./search/... ./store/... ./server/...)
+public=(./configs/... ./ideacheck/... ./judge/... ./rubric/... ./prompt/... ./search/... ./store/... ./server/... ./mobile/...)
 # modernc.org/libc, under the pure-Go SQLite, links os/exec for C's system();
 # the store never calls it.
 exec_ok="modernc.org/libc"
