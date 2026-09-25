@@ -8,13 +8,16 @@ struct LaunchOptions: Sendable {
     /// Use an in-memory store filled with sample ideas.
     var seed: Bool
     var tab: AppTab?
-    /// `review` (the sample draft), `detail` (the best-rated idea), `pile:<category>`.
+    /// `review` (the sample draft), `detail` (the best-rated idea), `pile:<category>`,
+    /// `lab:share|mixer|trends` (a Lab screen), `lab:mix` (mix the two best ideas, then review).
     var open: String?
     /// Replace the microphone with a scripted voice.
     var demoDictation: Bool
     /// Start a take as soon as the dictate screen appears.
     var autoDictate: Bool
     var colorScheme: ColorScheme?
+    /// Write each rendered share image to Documents (screenshots).
+    var exportShare = false
 
     static let current: LaunchOptions = {
         let d = UserDefaults.standard
@@ -24,7 +27,8 @@ struct LaunchOptions: Sendable {
             open: d.string(forKey: "sjOpen"),
             demoDictation: d.bool(forKey: "sjDemoDictation"),
             autoDictate: d.bool(forKey: "sjAutoDictate"),
-            colorScheme: d.string(forKey: "sjScheme").flatMap { $0 == "light" ? .light : ($0 == "dark" ? .dark : nil) }
+            colorScheme: d.string(forKey: "sjScheme").flatMap { $0 == "light" ? .light : ($0 == "dark" ? .dark : nil) },
+            exportShare: d.bool(forKey: "sjExportShare")
         )
     }()
 }

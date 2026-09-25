@@ -11,6 +11,7 @@ struct IdeaDetailView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var confirmDelete = false
+    @State private var sharing = false
 
     private var result: CheckResult? { idea.result }
 
@@ -20,6 +21,9 @@ struct IdeaDetailView: View {
                 IdeaCardView(idea: idea, size: .hero, animated: true)
                     .padding(.top, 4)
                 actions
+                if let origin = idea.origin {
+                    OriginLine(origin: origin)
+                }
                 if let run = coordinator.runs[idea.id] {
                     progress(run)
                 }
@@ -58,6 +62,7 @@ struct IdeaDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Edit details", systemImage: "pencil") { appState.reviewing = idea }
+                    Button("Share as an image", systemImage: "square.and.arrow.up") { sharing = true }
                     Button("New card style", systemImage: "dice") {
                         var rng = SplitMix64(seed: idea.seed)
                         withAnimation(.smooth) { idea.styleSeed = Int64(bitPattern: rng.next()) }
@@ -69,6 +74,12 @@ struct IdeaDetailView: View {
                     Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("More")
+            }
+        }
+        .sheet(isPresented: $sharing) {
+            NavigationStack {
+                ShareView(initial: [idea.id])
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { sharing = false } } }
             }
         }
         .confirmationDialog("Delete this idea?", isPresented: $confirmDelete, titleVisibility: .visible) {

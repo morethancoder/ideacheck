@@ -21,7 +21,7 @@ struct CardBackground: View {
     }
 
     private func surface(time: Double) -> some View {
-        let palette = (muted ? style.palette.map { OKLCH(l: $0.l * 0.85, c: 0.012, h: $0.h) } : style.palette).map(Color.init)
+        let palette = style.shownPalette(muted: muted).map(Color.init)
         let family = Float(style.family.rawValue)
         let warp = Float(style.warp)
         let offset = CGPoint(x: style.offset.x, y: style.offset.y)
