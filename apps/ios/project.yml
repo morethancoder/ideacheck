@@ -16,6 +16,10 @@ packages:
   RevenueCat:
     url: https://github.com/RevenueCat/purchases-ios-spm
     exactVersion: 5.91.0
+  # Laya typed-decision checkpoints on Core ML: the fast on-device judge, and
+  # the downloader that lists them live from the Hugging Face Hub.
+  LayaKit:
+    path: Packages/LayaKit
 
 settings:
   base:
@@ -34,14 +38,45 @@ settings:
     Release:
       SPARKJUDGE_API_URL: https://sparkjudge-api.fly.dev
 
+# build/Sparkcore.xcframework is rebuilt when it is missing or older than any
+# source of the core (ideacheck/ judge/ rubric/ prompt/ configs/ mobile/): by
+# the scheme's pre-action (below), before Xcode plans the build. Up to date it
+# is one `find` (well under a second); stale, `make mobile` (~25 s). This
+# target, built before the app, checks again where the build log shows it:
+# it fails when it had to rebuild (the pre-action did not run, or failed),
+# since the app would link the old framework this once. See scripts/sparkcore.sh.
+aggregateTargets:
+  Sparkcore:
+    buildScripts:
+      - name: Sparkcore.xcframework up to date
+        script: '"$SRCROOT/scripts/sparkcore.sh" --phase'
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
+    settings:
+      base:
+        # `make mobile` writes build/ and Go's caches: more than a sandboxed
+        # script may touch.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
 targets:
   Sparkjudge:
     type: application
     platform: iOS
     sources:
       - path: Sparkjudge
+      # The Swift side of the Go core's judge protocol (FoundationJudge,
+      # FoundationWriter, LayaDeviceJudge, the throwing overloads). One copy,
+      # beside the Go package it implements; mobile/swiftcheck compiles the
+      # same files.
+      - path: ../../mobile/swift
     dependencies:
       - package: RevenueCat
+      - package: LayaKit
+      # The whole check in Go (make mobile). A static framework: linked, not
+      # embedded. Kept fresh by the Sparkcore target, built first.
+      - target: Sparkcore
+      - framework: ../../build/Sparkcore.xcframework
+        embed: false
     # REVENUECAT_API_KEY comes from Config/Secrets.xcconfig (not committed; see
     # Config/Sparkjudge.xcconfig). Without it the paywall shows StoreKit's own
     # products and says purchases are not connected.
@@ -71,8 +106,13 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
       configs:
-        # App Attest's production environment. Needs a team id and the App
-        # Attest capability on the App ID; simulator Debug builds skip it.
+        # Both carry com.apple.developer.kernel.increased-memory-limit: the
+        # Laya judge holds ~1 GB of weights. On a device the App ID needs the
+        # Increased Memory Limit capability.
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Sparkjudge/Sparkjudge-Debug.entitlements
+        # Plus App Attest's production environment. Needs a team id and the
+        # App Attest capability on the App ID; simulator Debug builds skip it.
         Release:
           CODE_SIGN_ENTITLEMENTS: Sparkjudge/Sparkjudge.entitlements
 
@@ -94,6 +134,15 @@ schemes:
       targets:
         Sparkjudge: all
         SparkjudgeTests: [test]
+      # Brings Sparkcore.xcframework up to date before Xcode plans the build:
+      # the app copies the framework in before any build phase runs, so a
+      # framework rebuilt later is linked one build late (and a missing one
+      # fails the plan). Output: build/sparkcore.log. The Sparkcore target
+      # checks again and reports what went wrong.
+      preActions:
+        - name: Sparkcore.xcframework
+          script: '"$SRCROOT/scripts/sparkcore.sh" > "$SRCROOT/build/sparkcore.log" 2>&1'
+          settingsTarget: Sparkjudge
     test:
       targets:
         - SparkjudgeTests
