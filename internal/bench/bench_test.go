@@ -106,7 +106,11 @@ func TestDryRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := func(seed int64) Checker {
-		return &ideacheck.Engine{Settings: settings, Files: files, Judge: &mock.Judge{Seed: seed}}
+		e, err := ideacheck.New(ideacheck.Options{Settings: settings, Files: files, Judge: &mock.Judge{Seed: seed}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
 	}
 	r := Runner{Engines: map[string]Checker{"a": engine(1), "b": engine(1), "c": engine(2)}, Order: []string{"a", "b", "c"}, Repeats: 2, Parallel: 4}
 	rep := r.Execute(context.Background(), "bench/ideas.jsonl", ideas, catalog(t), time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))

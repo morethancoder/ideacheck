@@ -145,7 +145,7 @@ func (a *app) runCheck(cmd *cobra.Command, args []string, c *checkFlags) error {
 	// Nothing here can ask a follow-up, so a missing fact discounts the
 	// confidence and is reported in missing[]; it never withholds the verdict
 	// unless the caller asked for that with --strict.
-	res, err := engine.Check(cmd.Context(), intake, ideacheck.Options{Rubric: c.rubric, Sequential: c.sequential, Proceed: !c.strict})
+	res, err := engine.Check(cmd.Context(), intake, ideacheck.CheckOptions{Rubric: c.rubric, Sequential: c.sequential, Proceed: !c.strict})
 	if err != nil {
 		return err
 	}
@@ -194,21 +194,20 @@ func (a *app) newEngine(cfg config.Config) (*ideacheck.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := &ideacheck.Engine{Settings: cfg.Settings(), Files: a.files(), Judge: judge, Writer: writer,
+	o := ideacheck.Options{Settings: cfg.Settings(), Files: a.files(), Judge: judge, Writer: writer,
 		Cache: findingsCache{path: store.ExpandHome(cfg.Store.Path, a.home)}}
-	if !cfg.Research.Enabled {
-		return engine, nil
+	if cfg.Research.Enabled {
+		// A nil provider is not an error: the writer's own web tool searches, or
+		// nothing does and the description is scored as it is.
+		provider, err := search.New(context.Background(), cfg.Research.Searching(), deps.Secret)
+		if err != nil {
+			return nil, err
+		}
+		if provider != nil {
+			o.Search, o.Pages = provider, search.NewReader(cfg.Research.PageTimeout)
+		}
 	}
-	// A nil provider is not an error: the writer's own web tool searches, or
-	// nothing does and the description is scored as it is.
-	provider, err := search.New(context.Background(), cfg.Research.Searching(), deps.Secret)
-	if err != nil {
-		return nil, err
-	}
-	if provider != nil {
-		engine.Search, engine.Pages = provider, search.NewReader(cfg.Research.PageTimeout)
-	}
-	return engine, nil
+	return ideacheck.New(o)
 }
 
 func (a *app) secrets() config.Secrets { return config.Secrets{Getenv: a.getenv, Dir: a.files().Dir} }
@@ -217,7 +216,7 @@ func (a *app) secrets() config.Secrets { return config.Secrets{Getenv: a.getenv,
 // the live check; with none (or -i) it opens on the menu / the idea steps.
 func (a *app) runApp(ctx context.Context, c *checkFlags, intake ideacheck.Intake, interactive bool) error {
 	start := tui.Start{Page: tui.OpenCheck, Intake: intake, NoAsk: c.noAsk, NeedSetup: a.needsSetup(c),
-		Options: ideacheck.Options{Rubric: c.rubric, Sequential: c.sequential, Proceed: c.partial && !c.strict}}
+		Options: ideacheck.CheckOptions{Rubric: c.rubric, Sequential: c.sequential, Proceed: c.partial && !c.strict}}
 	switch {
 	case interactive && intake.Idea == "":
 		start.Page = tui.OpenMenu

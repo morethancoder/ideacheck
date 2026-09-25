@@ -82,7 +82,7 @@ const (
 type Start struct {
 	Page      page
 	Intake    ideacheck.Intake // pageLive / pageIdea: the idea to check or prefill
-	Options   ideacheck.Options
+	Options   ideacheck.CheckOptions
 	NoAsk     bool // never ask follow-ups (-A)
 	ExitAfter bool // quit when the opening task finishes instead of going to the menu
 	NeedSetup bool // run setup first, then continue to Page

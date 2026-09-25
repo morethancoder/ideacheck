@@ -18,7 +18,7 @@ var extractQuestion = judge.Question{ID: "extract", Instructions: "Read the stat
 // already says, so a fact given in prose is not reported as missing and does
 // not vary from run to run. It never overwrites a field the user set, and it
 // never fails the check: without it the check simply knows less.
-func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options) (Intake, *judge.Answer) {
+func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o CheckOptions) (Intake, *judge.Answer) {
 	extractor, ok := e.writer().(judge.Extractor)
 	want := in.emptyFields()
 	if !ok || !e.Settings.Extract || len(want) == 0 || (in.Idea == "" && in.Context == "") {
@@ -39,7 +39,7 @@ func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options)
 		res.Warnings = append(res.Warnings, "document not read for stated facts: "+err.Error())
 		return in, nil
 	}
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageExtract, Question: extractQuestion})
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageExtract, Question: extractQuestion})
 	ctx, cancel := context.WithTimeout(ctx, e.Settings.Timeouts.Batch)
 	defer cancel()
 	start := e.now()
@@ -49,7 +49,7 @@ func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options)
 	if err != nil {
 		a.Err = err.Error()
 		res.Warnings = append(res.Warnings, "document not read for stated facts: "+err.Error())
-		emit(o.Events, Event{Type: judge.EventFailed, Stage: StageExtract, Question: extractQuestion, Answer: &a})
+		emit(o.OnEvent, Event{Type: judge.EventFailed, Stage: StageExtract, Question: extractQuestion, Answer: &a})
 		return in, &a
 	}
 	for _, field := range want {
@@ -57,7 +57,7 @@ func (e *Engine) extract(ctx context.Context, in Intake, res *Result, o Options)
 			in, res.Extracted = in.With(field, v), append(res.Extracted, field)
 		}
 	}
-	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageExtract, Question: extractQuestion, Answer: &a})
+	emit(o.OnEvent, Event{Type: judge.EventAnswered, Stage: StageExtract, Question: extractQuestion, Answer: &a})
 	return in, &a
 }
 

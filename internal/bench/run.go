@@ -14,7 +14,7 @@ import (
 
 // Checker is the slice of ideacheck.Engine the runner needs.
 type Checker interface {
-	Check(ctx context.Context, in ideacheck.Intake, o ideacheck.Options) (*ideacheck.Result, error)
+	Check(ctx context.Context, in ideacheck.Intake, o ideacheck.CheckOptions) (*ideacheck.Result, error)
 }
 
 type Runner struct {
@@ -83,7 +83,7 @@ func (r Runner) runBackend(ctx context.Context, backend string, ideas []Idea) []
 	for i := range runs {
 		g.Go(func() error {
 			// Proceed: gaps are measured (recall) but must not stop scoring.
-			res, err := r.Engines[backend].Check(ctx, byID[runs[i].IdeaID].Intake(), ideacheck.Options{Rubric: r.Rubric, Proceed: true})
+			res, err := r.Engines[backend].Check(ctx, byID[runs[i].IdeaID].Intake(), ideacheck.CheckOptions{Rubric: r.Rubric, Proceed: true})
 			if err != nil {
 				runs[i].Err = err.Error()
 			}

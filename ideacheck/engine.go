@@ -2,21 +2,26 @@ package ideacheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/rubric"
 )
 
-// Engine runs checks. It is safe for concurrent use.
-type Engine struct {
+// Options build an Engine: the settings and the ports a check reaches the
+// world through. Only Judge is required.
+type Options struct {
 	Settings Settings
-	Files    rubric.Reader
-	Judge    judge.Judge
+	// Files holds rubrics/, prompts/, fields.yaml and research.yaml; nil = the
+	// embedded defaults (package configs).
+	Files rubric.Reader
+	Judge judge.Judge
 	// Writer reads, researches and writes (extract, research, explain) when that
 	// is not the judge's job too; nil = the judge does it all. Every typed
 	// question — including how a research finding relates to the idea — goes to
@@ -33,8 +38,28 @@ type Engine struct {
 	NewID func() string    // nil = "chk_" + ULID
 }
 
-// Options vary per check.
-type Options struct {
+// Engine runs checks. It is safe for concurrent use; its Options are read,
+// never written, while checks run.
+type Engine struct {
+	Options
+}
+
+// New checks the options and builds an engine.
+func New(o Options) (*Engine, error) {
+	if o.Judge == nil {
+		return nil, errors.New("ideacheck: an engine needs a judge")
+	}
+	if err := o.Settings.validate(); err != nil {
+		return nil, err
+	}
+	if o.Files == nil {
+		o.Files = configs.Defaults()
+	}
+	return &Engine{Options: o}, nil
+}
+
+// CheckOptions vary per check.
+type CheckOptions struct {
 	ID         string // preset check id (the server needs it before the check ends); "" = generate
 	Rubric     string // force a rubric instead of routing
 	Sequential bool
@@ -51,15 +76,16 @@ type Options struct {
 	// its questions). Its gap and router answers stand; only the fields
 	// answered since are reconsidered, since those gaps are no longer asked.
 	Earlier *Result
-	// Events receives live progress. The caller must drain it until Check returns;
-	// Check never closes it.
-	Events chan<- Event
+	// OnEvent receives live progress, one event at a time, before Check
+	// returns. It runs on the check's goroutines: a slow OnEvent slows the check.
+	OnEvent func(Event)
 }
 
 // Check runs the whole pipeline. It returns an error only for problems that stop
 // a result being produced at all (bad rubric, bad gate); model failures land in
 // the Result.
-func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, error) {
+func (e *Engine) Check(ctx context.Context, in Intake, o CheckOptions) (*Result, error) {
+	o.OnEvent = serial(o.OnEvent)
 	start := e.now()
 	res := e.newResult(start)
 	if o.ID != "" {
@@ -86,7 +112,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	if o.Rubric == "" && !routed { // a forced rubric leaves nothing for the router to decide
 		asked = append(asked, route)
 	}
-	announce(o.Events, StagePreflight, unknown, held)
+	announce(o.OnEvent, StagePreflight, unknown, held)
 	pre := e.fanout(ctx, state, asked, o, StagePreflight)
 	gapAnswers := restore(pre[:len(gapAsk)], held, len(unknown))
 	res.Answers = append([]judge.Answer{}, gapAnswers...)
@@ -95,7 +121,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	case o.Rubric != "":
 		res.IdeaType = &IdeaType{Choice: o.Rubric, Confidence: 1}
 	case routed:
-		announce(o.Events, StagePreflight, router.Questions, map[int]judge.Answer{0: routeAnswer})
+		announce(o.OnEvent, StagePreflight, router.Questions, map[int]judge.Answer{0: routeAnswer})
 	default:
 		routeAnswer = pre[len(gapAsk)]
 	}
@@ -134,7 +160,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 
 	k.research = res.Research
 	ask, held := settle(rb.Questions, state, k)
-	announce(o.Events, StageScore, rb.Questions, held)
+	announce(o.OnEvent, StageScore, rb.Questions, held)
 	answers := restore(e.fanout(ctx, state, ask, o, StageScore), held, len(rb.Questions))
 	res.Answers = append(res.Answers, answers...)
 	if err := e.conclude(res, rb, answers); err != nil {
@@ -246,7 +272,7 @@ func byID(answers []judge.Answer) map[string]judge.Answer {
 	return out
 }
 
-func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Question, o Options, stage string) []judge.Answer {
+func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Question, o CheckOptions, stage string) []judge.Answer {
 	if len(qs) == 0 {
 		return nil
 	}
@@ -259,14 +285,14 @@ func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Quest
 		Batch:           s.Batch,
 		Retry:           s.Retry,
 	}
-	if o.Events == nil {
+	if o.OnEvent == nil {
 		return judge.Run(ctx, e.Judge, state, qs, opts)
 	}
 	// Buffered for every event the fan-out can emit, so a slow UI never stalls a question.
 	raw := make(chan judge.Event, 2*len(qs))
 	relayed := make(chan struct{})
 	go func() {
-		relay(raw, o.Events, stage, qs)
+		relay(raw, o.OnEvent, stage, qs)
 		close(relayed)
 	}()
 	opts.Events = raw

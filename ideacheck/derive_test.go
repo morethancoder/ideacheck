@@ -59,7 +59,7 @@ func TestDerivedAnswersAreMarkedAndCount(t *testing.T) {
 	fixture(t, dir, "relation.1", judge.Answer{Choice: "direct", Confidence: 0.9})
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
 	e.Settings.Research.Sift = SiftAlways
-	res, err := e.Check(context.Background(), idea, Options{Rubric: "business", Proceed: true})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Rubric: "business", Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}

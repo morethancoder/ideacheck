@@ -55,18 +55,20 @@ func TestJudgeCallsPerCheck(t *testing.T) {
 	cases := []struct {
 		name string
 		in   Intake
-		o    Options
+		o    CheckOptions
 		want int64
 	}{
-		{"routed, researched and sifted", routed, Options{Proceed: true}, 9},
-		{"the same idea again, research cached", routed, Options{Proceed: true}, 8},
-		{"rubric forced, with a profile", forced, Options{Proceed: true, Rubric: "business"}, 22},
+		{"routed, researched and sifted", routed, CheckOptions{Proceed: true}, 9},
+		{"the same idea again, research cached", routed, CheckOptions{Proceed: true}, 8},
+		{"rubric forced, with a profile", forced, CheckOptions{Proceed: true, Rubric: "business"}, 22},
 	}
 	for _, c := range cases {
 		j.calls.Store(0)
+		var events []Event // sift asks from several goroutines: -race checks OnEvent is called one at a time
+		c.o.OnEvent = func(ev Event) { events = append(events, ev) }
 		res, err := e.Check(context.Background(), c.in, c.o)
-		if err != nil {
-			t.Fatal(err)
+		if err != nil || len(events) == 0 {
+			t.Fatal(err, len(events))
 		}
 		if res.Status != StatusOK {
 			t.Fatalf("%s: status %q", c.name, res.Status)
@@ -88,13 +90,13 @@ func TestFollowUpAsksOnlyWhatChanged(t *testing.T) {
 	j := &counting{Judge: &mock.Judge{Seed: 1, FixturesDir: dir}}
 	e := engine(t, j)
 
-	first, err := e.Check(context.Background(), idea, Options{})
+	first, err := e.Check(context.Background(), idea, CheckOptions{})
 	if err != nil || first.Status != StatusNeedsInput {
 		t.Fatalf("first = %+v, %v", first, err)
 	}
 	j.calls.Store(0)
 	replied := idea.With("why_now", "the models got cheap") // differentiation left blank
-	res, err := e.Check(context.Background(), replied, Options{Proceed: true, Earlier: first})
+	res, err := e.Check(context.Background(), replied, CheckOptions{Proceed: true, Earlier: first})
 	if err != nil || res.Status != StatusOK {
 		t.Fatalf("follow-up = %+v, %v", res, err)
 	}

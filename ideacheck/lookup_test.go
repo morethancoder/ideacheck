@@ -80,7 +80,7 @@ func TestLookupWithoutAWriter(t *testing.T) {
 	fs, fp := &fakeSearch{}, &fakePages{}
 	e.Search, e.Pages = fs, fp
 
-	res, err := e.Check(context.Background(), Intake{Idea: "x", Fields: map[string]string{"solution": "dental recall texting"}}, Options{Proceed: true, Rubric: "business"})
+	res, err := e.Check(context.Background(), Intake{Idea: "x", Fields: map[string]string{"solution": "dental recall texting"}}, CheckOptions{Proceed: true, Rubric: "business"})
 	if err != nil || res.Research == nil {
 		t.Fatalf("research = %+v, %v", res.Research, err)
 	}
@@ -122,7 +122,7 @@ func TestLookupPlansSearchesAndDigests(t *testing.T) {
 	fs := &fakeSearch{}
 	e.Writer, e.Search, e.Pages = w, fs, &fakePages{}
 
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "business"})
 	if err != nil || res.Research == nil {
 		t.Fatalf("research = %+v, %v", res.Research, err)
 	}
@@ -155,7 +155,7 @@ func TestLookupPlansSearchesAndDigests(t *testing.T) {
 func TestLookupFailureScoresTheDescription(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1})
 	e.Search, e.Pages = &fakeSearch{fail: true}, &fakePages{}
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
 	if err != nil || res.Status != StatusOK || res.Research != nil || res.Verdict == "" {
 		t.Fatalf("status=%q research=%+v verdict=%q err=%v", res.Status, res.Research, res.Verdict, err)
 	}
@@ -169,12 +169,12 @@ func TestLookupWarnsWhenSomeSearchesFail(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1})
 	fs := &fakeSearch{}
 	e.Search, e.Pages = fs, &fakePages{}
-	if _, err := e.Check(context.Background(), idea, Options{Proceed: true}); err != nil || len(fs.queries) < 2 {
+	if _, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true}); err != nil || len(fs.queries) < 2 {
 		t.Fatalf("err=%v queries=%v", err, fs.queries)
 	}
 	e = engine(t, &mock.Judge{Seed: 1})
 	e.Search, e.Pages = &fakeSearch{failOn: fs.queries[0]}, &fakePages{}
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
 	if err != nil || res.Research == nil || len(res.Research.Findings) == 0 {
 		t.Fatalf("research=%+v err=%v", res.Research, err)
 	}

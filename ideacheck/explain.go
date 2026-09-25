@@ -20,7 +20,7 @@ var summaryQuestion = judge.Question{ID: "summary", Instructions: "Plain-languag
 // explain asks the backend for the plain-language summary. It never fails the
 // check: without a summary the scores still stand, so a failure is a warning.
 // It returns the call's usage as an answer so the cost includes it.
-func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb *rubric.Rubric, answers []judge.Answer, o Options) *judge.Answer {
+func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb *rubric.Rubric, answers []judge.Answer, o CheckOptions) *judge.Answer {
 	narrator, ok := e.writer().(judge.Narrator)
 	if !ok || !e.Settings.Explain || res.Status != StatusOK {
 		return nil
@@ -36,7 +36,7 @@ func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb
 		res.Warnings = append(res.Warnings, "no summary: "+err.Error())
 		return nil
 	}
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageExplain, Question: summaryQuestion})
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageExplain, Question: summaryQuestion})
 	ctx, cancel := context.WithTimeout(ctx, e.Settings.Timeouts.Batch)
 	defer cancel()
 	start := e.now()
@@ -46,17 +46,17 @@ func (e *Engine) explain(ctx context.Context, res *Result, state judge.State, rb
 	if err != nil {
 		a.Err = err.Error()
 		res.Warnings = append(res.Warnings, "no summary: "+err.Error())
-		emit(o.Events, Event{Type: judge.EventFailed, Stage: StageExplain, Question: summaryQuestion, Answer: &a})
+		emit(o.OnEvent, Event{Type: judge.EventFailed, Stage: StageExplain, Question: summaryQuestion, Answer: &a})
 		return &a
 	}
 	res.Summary = n.Text
-	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageExplain, Question: summaryQuestion, Answer: &a})
+	emit(o.OnEvent, Event{Type: judge.EventAnswered, Stage: StageExplain, Question: summaryQuestion, Answer: &a})
 	return &a
 }
 
-func emit(ch chan<- Event, e Event) {
-	if ch != nil {
-		ch <- e
+func emit(on func(Event), e Event) {
+	if on != nil {
+		on(e)
 	}
 }
 

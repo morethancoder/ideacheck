@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/mock"
 	"github.com/morethancoder/ideacheck/rubric"
@@ -34,7 +33,26 @@ func engine(t *testing.T, j judge.Judge) *Engine {
 		t.Fatal(err)
 	}
 	s.Retry.MaxAttempts = 1
-	return &Engine{Settings: s, Files: configs.Defaults(), Judge: j}
+	e, err := New(Options{Settings: s, Judge: j})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestNewNeedsAJudgeAndWorkableSettings(t *testing.T) {
+	s, _ := DefaultSettings("mock", "")
+	if _, err := New(Options{Settings: s}); err == nil {
+		t.Error("an engine without a judge was built")
+	}
+	s.Timeouts.Question = 0
+	if _, err := New(Options{Settings: s, Judge: &mock.Judge{}}); err == nil {
+		t.Error("an engine whose questions can never finish was built")
+	}
+	s, _ = DefaultSettings("mock", "")
+	if e, err := New(Options{Settings: s, Judge: &mock.Judge{}}); err != nil || e.Files == nil {
+		t.Errorf("New = %v, %v; want the embedded files by default", e, err)
+	}
 }
 
 func fixture(t *testing.T, dir, id string, a judge.Answer) {
@@ -56,7 +74,7 @@ var (
 func TestCheckEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	fixture(t, dir, "idea_type", judge.Answer{Choice: "business", Confidence: 0.91})
-	res, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, Options{})
+	res, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, CheckOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +100,7 @@ func TestCheckEndToEnd(t *testing.T) {
 		t.Errorf("id=%q hash=%q missing=%v", res.ID, res.ConfigHash, res.Missing)
 	}
 
-	again, _ := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, Options{})
+	again, _ := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, CheckOptions{})
 	if again.Composite != res.Composite || again.Verdict != res.Verdict {
 		t.Error("mock backend must be deterministic for a seed")
 	}
@@ -94,7 +112,7 @@ func TestGapsStopTheCheckUnlessProceed(t *testing.T) {
 	fixture(t, dir, "has_problem", judge.Answer{Noul: 0.5}) // exactly at threshold: not missing
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
 
-	res, err := e.Check(context.Background(), idea, Options{})
+	res, err := e.Check(context.Background(), idea, CheckOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +127,7 @@ func TestGapsStopTheCheckUnlessProceed(t *testing.T) {
 		t.Errorf("missing[0] = %+v", m)
 	}
 
-	res, _ = e.Check(context.Background(), idea, Options{Proceed: true})
+	res, _ = e.Check(context.Background(), idea, CheckOptions{Proceed: true})
 	if res.Status != StatusOK || res.Verdict == "" || len(res.Missing) != 1 {
 		t.Errorf("proceed: status=%q verdict=%q missing=%d", res.Status, res.Verdict, len(res.Missing))
 	}
@@ -125,7 +143,7 @@ func TestGapsOnAnsweredFieldsDoNotStopTheCheck(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
 	filled := idea.With("why_now", "a vague reason")
 
-	res, _ := e.Check(context.Background(), filled, Options{Answered: []string{"differentiation"}})
+	res, _ := e.Check(context.Background(), filled, CheckOptions{Answered: []string{"differentiation"}})
 	if res.Status != StatusOK || len(res.Missing) != 1 || res.Missing[0].Fills != "differentiation" {
 		t.Errorf("status=%q missing=%+v, want ok reporting only differentiation", res.Status, res.Missing)
 	}
@@ -134,7 +152,7 @@ func TestGapsOnAnsweredFieldsDoNotStopTheCheck(t *testing.T) {
 			t.Error("the judge was asked whether why_now is stated, although the intake fills it")
 		}
 	}
-	res, _ = e.Check(context.Background(), filled, Options{})
+	res, _ = e.Check(context.Background(), filled, CheckOptions{})
 	if ask := Unanswered(res.Missing, filled, nil); res.Status != StatusNeedsInput || len(ask) != 1 || ask[0].Fills != "differentiation" {
 		t.Errorf("status=%q ask=%+v, want only the never-offered differentiation", res.Status, ask)
 	}
@@ -153,7 +171,7 @@ func TestRouting(t *testing.T) {
 	for _, c := range cases {
 		dir := t.TempDir()
 		fixture(t, dir, "idea_type", judge.Answer{Choice: c.choice, Confidence: 0.8})
-		res, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, Options{Rubric: c.forced})
+		res, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, CheckOptions{Rubric: c.forced})
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
@@ -175,7 +193,7 @@ func TestRouting(t *testing.T) {
 			}
 		}
 	}
-	if _, err := engine(t, &mock.Judge{}).Check(context.Background(), idea, Options{Rubric: "nonexistent"}); err == nil {
+	if _, err := engine(t, &mock.Judge{}).Check(context.Background(), idea, CheckOptions{Rubric: "nonexistent"}); err == nil {
 		t.Error("forcing a rubric that does not exist must fail")
 	}
 }
@@ -187,7 +205,7 @@ func (failing) Evaluate(context.Context, judge.State, judge.Question) (judge.Ans
 }
 
 func TestBackendDownYieldsErrorStatusNotAVerdict(t *testing.T) {
-	res, err := engine(t, failing{&mock.Judge{}}).Check(context.Background(), idea, Options{})
+	res, err := engine(t, failing{&mock.Judge{}}).Check(context.Background(), idea, CheckOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +291,7 @@ func TestEventsCarryQuestionStageAndValue(t *testing.T) {
 	fixture(t, dir, "idea_type", judge.Answer{Choice: "business", Confidence: 0.9})
 	fixture(t, dir, "problem_acuity", judge.Answer{Score: 1.5})
 	ch := make(chan Event, 128)
-	if _, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), bare, Options{Events: ch, Proceed: true}); err != nil {
+	if _, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), bare, CheckOptions{OnEvent: func(e Event) { ch <- e }, Proceed: true}); err != nil {
 		t.Fatal(err)
 	}
 	close(ch)
@@ -302,7 +320,7 @@ func TestSummaryIsWrittenAfterScoring(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1})
 	e.Settings.Explain = true
 	ch := make(chan Event, 128)
-	res, err := e.Check(context.Background(), idea, Options{Events: ch})
+	res, err := e.Check(context.Background(), idea, CheckOptions{OnEvent: func(e Event) { ch <- e }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +338,7 @@ func TestSummaryIsWrittenAfterScoring(t *testing.T) {
 		t.Errorf("explain events = %d, want started + answered", explained)
 	}
 	e.Settings.Explain = false
-	if res, _ := e.Check(context.Background(), idea, Options{}); res.Summary != "" {
+	if res, _ := e.Check(context.Background(), idea, CheckOptions{}); res.Summary != "" {
 		t.Error("explain: false must skip the summary")
 	}
 }
@@ -349,7 +367,7 @@ func TestFindingsPutTheBiggestPullFirstInPlainWords(t *testing.T) {
 // guessed: its weight goes to the questions that could be answered.
 func TestQuestionsRequiringAProfileAreNotGuessed(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1})
-	res, err := e.Check(context.Background(), bare, Options{Rubric: "business", Proceed: true})
+	res, err := e.Check(context.Background(), bare, CheckOptions{Rubric: "business", Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +379,7 @@ func TestQuestionsRequiringAProfileAreNotGuessed(t *testing.T) {
 		t.Errorf("one unscored dimension must not stop the verdict: %+v", res)
 	}
 	withProfile := bare.With("profile.background", "ten years in payroll software")
-	res, err = e.Check(context.Background(), withProfile, Options{Rubric: "business", Proceed: true})
+	res, err = e.Check(context.Background(), withProfile, CheckOptions{Rubric: "business", Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,14 +395,14 @@ func TestPartialResultDiscountsConfidence(t *testing.T) {
 	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.2})
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
 
-	full, err := e.Check(context.Background(), idea.With("why_now", "the models got cheap"), Options{Proceed: true})
+	full, err := e.Check(context.Background(), idea.With("why_now", "the models got cheap"), CheckOptions{Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if full.Partial || len(full.Missing) != 0 || !near(full.CompositeConfidence, weightedConfidence(full)) {
 		t.Fatalf("nothing missing: partial=%v missing=%+v confidence=%v", full.Partial, full.Missing, full.CompositeConfidence)
 	}
-	part, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	part, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +471,7 @@ func TestExtractFillsOnlyEmptyFields(t *testing.T) {
 	e.Settings.Extract = true
 
 	in := idea.With("problem", "nobody can tell a good idea from a bad one")
-	res, err := e.Check(context.Background(), in, Options{Proceed: true})
+	res, err := e.Check(context.Background(), in, CheckOptions{Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +488,7 @@ func TestExtractFillsOnlyEmptyFields(t *testing.T) {
 	}
 
 	e.Settings.Extract = false
-	res, err = e.Check(context.Background(), in, Options{Proceed: true})
+	res, err = e.Check(context.Background(), in, CheckOptions{Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}

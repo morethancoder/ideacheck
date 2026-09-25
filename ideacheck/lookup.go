@@ -50,7 +50,7 @@ type hit struct {
 // to seconds and a few thousand tokens. Every step degrades instead of failing:
 // no planner means the topic's own queries, an unreadable page means its
 // snippet, no digester means the results themselves are the findings.
-func (e *Engine) lookup(ctx context.Context, p *researchPlan, in Intake, about judge.State, report *ResearchReport, o Options) ([]judge.Finding, judge.Research, error) {
+func (e *Engine) lookup(ctx context.Context, p *researchPlan, in Intake, about judge.State, report *ResearchReport, o CheckOptions) ([]judge.Finding, judge.Research, error) {
 	var spent judge.Research
 	queries := e.queries(ctx, p, in, about, &spent, o)
 	report.Queries = queries
@@ -89,8 +89,8 @@ func add(to *judge.Research, model string, in, out, cached int, usd float64) {
 
 // queries asks the writer what to search for; when it cannot say, or says
 // nothing usable for a topic, that topic's own queries from research.yaml run.
-func (e *Engine) queries(ctx context.Context, p *researchPlan, in Intake, about judge.State, spent *judge.Research, o Options) []judge.Query {
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: planStep})
+func (e *Engine) queries(ctx context.Context, p *researchPlan, in Intake, about judge.State, spent *judge.Research, o CheckOptions) []judge.Query {
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageResearch, Question: planStep})
 	per := e.Settings.Research.QueriesPerTopic
 	byTopic := map[string][]string{}
 	if planner, ok := e.writer().(judge.Planner); ok {
@@ -119,7 +119,7 @@ func (e *Engine) queries(ctx context.Context, p *researchPlan, in Intake, about 
 		}
 	}
 	a := judge.Answer{ID: planStep.ID, Choice: fmt.Sprintf("%d searches", len(out)), Model: spent.Model}
-	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: planStep, Answer: &a})
+	emit(o.OnEvent, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: planStep, Answer: &a})
 	return out
 }
 
@@ -153,8 +153,8 @@ func subject(in Intake, chars int) string {
 // searches runs every query at once (a few at a time) and keeps each page once,
 // under the first topic that found it. It reports how many searches failed and
 // the last reason; the step itself fails only when every one of them did.
-func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.Query, o Options) ([]hit, int, error) {
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: searchStep})
+func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.Query, o CheckOptions) ([]hit, int, error) {
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageResearch, Question: searchStep})
 	results := make([][]search.Result, len(queries))
 	errs := make([]error, len(queries))
 	slots := make(chan struct{}, searchesAtOnce)
@@ -188,10 +188,10 @@ func (e *Engine) searches(ctx context.Context, p *researchPlan, queries []judge.
 	a := judge.Answer{ID: searchStep.ID, Choice: fmt.Sprintf("%d results · %s", len(hits), p.search.Name())}
 	if failed == len(queries) && failed > 0 {
 		a.Err = lastErr.Error()
-		emit(o.Events, Event{Type: judge.EventFailed, Stage: StageResearch, Question: searchStep, Answer: &a})
+		emit(o.OnEvent, Event{Type: judge.EventFailed, Stage: StageResearch, Question: searchStep, Answer: &a})
 		return nil, failed, lastErr
 	}
-	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: searchStep, Answer: &a})
+	emit(o.OnEvent, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: searchStep, Answer: &a})
 	return hits, failed, lastErr
 }
 
@@ -206,12 +206,12 @@ func pageKey(raw string) string {
 
 // readPages fetches the first read_pages results of each topic and boils them
 // down. A page that cannot be read keeps its snippet; that is never an error.
-func (e *Engine) readPages(ctx context.Context, p *researchPlan, hits []hit, o Options) {
+func (e *Engine) readPages(ctx context.Context, p *researchPlan, hits []hit, o CheckOptions) {
 	n := e.Settings.Research.ReadPages
 	if n == 0 || e.Pages == nil {
 		return
 	}
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: readStep})
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageResearch, Question: readStep})
 	perTopic := map[string]int{}
 	slots := make(chan struct{}, pagesAtOnce)
 	var wg sync.WaitGroup
@@ -237,7 +237,7 @@ func (e *Engine) readPages(ctx context.Context, p *researchPlan, hits []hit, o O
 		}
 	}
 	a := judge.Answer{ID: readStep.ID, Choice: fmt.Sprintf("%d read", read)}
-	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: readStep, Answer: &a})
+	emit(o.OnEvent, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: readStep, Answer: &a})
 }
 
 // topicsWith groups the hits under their topics for the digest prompt.

@@ -211,11 +211,11 @@ func (p *researchPlan) covers() []string {
 // research looks the idea up and returns the state with `evidence` added. It
 // never fails the check: without findings the description is scored as it is.
 // The returned answers are the writer's calls, for the cost line.
-func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, state judge.State, res *Result, o Options) (judge.State, []judge.Answer) {
+func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, state judge.State, res *Result, o CheckOptions) (judge.State, []judge.Answer) {
 	if p == nil {
 		return state, nil
 	}
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: researchQuestion})
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageResearch, Question: researchQuestion})
 	start := e.now()
 	report := &ResearchReport{By: p.via(e.writer().Name())}
 	found, key, call, cached, err := e.findings(ctx, p, given, state, report, o)
@@ -224,14 +224,14 @@ func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, st
 	if err != nil {
 		a.Err = err.Error()
 		res.Warnings = append(res.Warnings, "not researched, scoring the description alone: "+err.Error())
-		emit(o.Events, Event{Type: judge.EventFailed, Stage: StageResearch, Question: researchQuestion, Answer: &a})
+		emit(o.OnEvent, Event{Type: judge.EventFailed, Stage: StageResearch, Question: researchQuestion, Answer: &a})
 		return state, []judge.Answer{a}
 	}
 	if report.partial != "" {
 		res.Warnings = append(res.Warnings, report.partial)
 	}
 	a.Choice = fmt.Sprintf("%d found", len(found))
-	emit(o.Events, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: researchQuestion, Answer: &a})
+	emit(o.OnEvent, Event{Type: judge.EventAnswered, Stage: StageResearch, Question: researchQuestion, Answer: &a})
 
 	report.Model, report.Cached, report.Findings = call.Model, cached, make([]Evidence, len(found))
 	for i, f := range found {
@@ -267,7 +267,7 @@ type remembered struct {
 // else searches. The search reads the idea with the extracted fields; it is
 // remembered under the idea as the caller gave it (key), because extraction
 // words the same fact differently from run to run.
-func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, state judge.State, report *ResearchReport, o Options) ([]remembered, string, judge.Research, bool, error) {
+func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, state judge.State, report *ResearchReport, o CheckOptions) ([]remembered, string, judge.Research, bool, error) {
 	about := state.Sub([]string{ideaKey}) // who the person is has no bearing on what exists
 	key, err := e.cacheKey(p, given.State().Sub([]string{ideaKey}))
 	if err != nil {
@@ -392,7 +392,7 @@ func (e *Engine) sifts(p *researchPlan) bool {
 // question is not evidence that a finding is unrelated. A finding this judge
 // already typed with this rubric (a cached search) is not asked again, and
 // what is typed now is written back to found for the cache.
-func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchReport, found []remembered, res *Result, o Options) []judge.Answer {
+func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchReport, found []remembered, res *Result, o CheckOptions) []judge.Answer {
 	rb, err := rubric.Load(e.Files, e.Settings.RubricsDir, rubric.EvidenceName)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "findings kept as reported: "+err.Error())
@@ -449,16 +449,16 @@ func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchRe
 }
 
 // fanoutAs asks one question and reports it to the live view as shown.
-func (e *Engine) fanoutAs(ctx context.Context, s judge.State, asked, shown judge.Question, o Options) judge.Answer {
-	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: shown})
+func (e *Engine) fanoutAs(ctx context.Context, s judge.State, asked, shown judge.Question, o CheckOptions) judge.Answer {
+	emit(o.OnEvent, Event{Type: judge.EventStarted, Stage: StageResearch, Question: shown})
 	quiet := o
-	quiet.Events = nil
+	quiet.OnEvent = nil
 	a := e.fanout(ctx, s, []judge.Question{asked}, quiet, StageResearch)[0]
 	t := judge.EventAnswered
 	if a.Failed() {
 		t = judge.EventFailed
 	}
-	emit(o.Events, Event{Type: t, Stage: StageResearch, Question: shown, Answer: &a})
+	emit(o.OnEvent, Event{Type: t, Stage: StageResearch, Question: shown, Answer: &a})
 	return a
 }
 

@@ -45,7 +45,7 @@ func TestResearchFeedsTheRubric(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
 	e.Settings.Research.Sift = SiftAlways
 
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestResearchFeedsTheRubric(t *testing.T) {
 	}
 
 	findingsFixture(t, dir)
-	res, err = e.Check(context.Background(), idea, Options{}) // not Proceed: a researchable gap must not stop the check
+	res, err = e.Check(context.Background(), idea, CheckOptions{}) // not Proceed: a researchable gap must not stop the check
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,9 +128,9 @@ func TestResearchIsCachedPerIdea(t *testing.T) {
 	cache := &memCache{m: map[string][]byte{}}
 	e.Cache = cache
 
-	first, _ := e.Check(context.Background(), idea, Options{Proceed: true})
-	second, _ := e.Check(context.Background(), idea, Options{Proceed: true})
-	other, _ := e.Check(context.Background(), Intake{Idea: "A different idea"}, Options{Proceed: true})
+	first, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
+	second, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
+	other, _ := e.Check(context.Background(), Intake{Idea: "A different idea"}, CheckOptions{Proceed: true})
 	if first.Research.Cached || !second.Research.Cached || other.Research.Cached || cache.puts != 2 {
 		t.Errorf("cached = %v %v %v, puts = %d; want false true false, 2", first.Research.Cached, second.Research.Cached, other.Research.Cached, cache.puts)
 	}
@@ -158,8 +158,8 @@ func TestSiftIsCachedWithTheFindings(t *testing.T) {
 		return n
 	}
 
-	first, _ := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
-	second, _ := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
+	first, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "business"})
+	second, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "business"})
 	if sifted(first) != 3 || sifted(second) != 0 || !second.Research.Cached {
 		t.Fatalf("sift questions = %d then %d, want 3 then none", sifted(first), sifted(second))
 	}
@@ -171,7 +171,7 @@ func TestSiftIsCachedWithTheFindings(t *testing.T) {
 	for k := range cache.m {
 		cache.m[k] = old
 	}
-	third, _ := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
+	third, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "business"})
 	if sifted(third) != 3 || third.Research.Findings[1].Used {
 		t.Errorf("an old cache entry: %d sift questions, findings %+v", sifted(third), third.Research.Findings)
 	}
@@ -184,7 +184,7 @@ func TestOnlyTheTopicsTheRubricReadsAreSearched(t *testing.T) {
 	dir := t.TempDir()
 	findingsFixture(t, dir)
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "side_project"})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "side_project"})
 	if err != nil || res.Research == nil || len(res.Research.Findings) != 2 {
 		t.Fatalf("side_project research = %+v, %v; want the two competitors only", res.Research, err)
 	}
@@ -207,10 +207,10 @@ func TestOnlyTheTopicsTheRubricReadsAreSearched(t *testing.T) {
 	rubricFile("quiet", "[idea]")
 	rubricFile("odd", "[idea, evidence.weather]")
 	e.Files = configs.Over(user)
-	if res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "quiet"}); err != nil || res.Research != nil {
+	if res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "quiet"}); err != nil || res.Research != nil {
 		t.Errorf("a rubric that reads no evidence: research = %+v, %v", res.Research, err)
 	}
-	if _, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "odd"}); err == nil || !strings.Contains(err.Error(), "evidence.weather") {
+	if _, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "odd"}); err == nil || !strings.Contains(err.Error(), "evidence.weather") {
 		t.Errorf("a topic research.yaml does not have: %v", err)
 	}
 }
@@ -233,7 +233,7 @@ func TestWriterWritesAndJudgeJudges(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1}) // no fixtures: this judge cannot research
 	e.Writer = writer{&mock.Judge{FixturesDir: dir}, t}
 
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestFollowUpsAreFewAndSkipWhatResearchAnswers(t *testing.T) {
 		fixture(t, dir, id, judge.Answer{Noul: 0.1})
 	}
 	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
-	res, err := e.Check(context.Background(), idea, Options{})
+	res, err := e.Check(context.Background(), idea, CheckOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

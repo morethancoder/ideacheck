@@ -1,6 +1,8 @@
 package ideacheck
 
 import (
+	"sync"
+
 	"github.com/morethancoder/ideacheck/judge"
 )
 
@@ -19,8 +21,22 @@ type Event struct {
 	Value    *float64        `json:"value,omitempty"` // normalized [0,1] before polarity; nil when not valued
 }
 
-// relay forwards judge events as pipeline events until in is closed.
-func relay(in <-chan judge.Event, out chan<- Event, stage string, qs []judge.Question) {
+// serial hands on one event at a time: sift asks its questions from several
+// goroutines, and a host's callback should not have to care.
+func serial(on func(Event)) func(Event) {
+	if on == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	return func(e Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		on(e)
+	}
+}
+
+// relay forwards judge events as check events until in is closed.
+func relay(in <-chan judge.Event, on func(Event), stage string, qs []judge.Question) {
 	byID := make(map[string]judge.Question, len(qs))
 	for _, q := range qs {
 		byID[q.ID] = q
@@ -32,6 +48,6 @@ func relay(in <-chan judge.Event, out chan<- Event, stage string, qs []judge.Que
 				e.Value = &v
 			}
 		}
-		out <- e
+		on(e)
 	}
 }

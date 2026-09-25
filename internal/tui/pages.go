@@ -717,7 +717,7 @@ func (a *App) openLive() tea.Cmd {
 	events := make(chan ideacheck.Event, 64)
 	a.done, a.cancel = make(chan outcome, 1), cancel
 	opts := a.start.Options
-	opts.Events, opts.Proceed = events, opts.Proceed || a.asked // asked once: judge with what is known
+	opts.OnEvent, opts.Proceed = func(e ideacheck.Event) { events <- e }, opts.Proceed || a.asked // asked once: judge with what is known
 	opts.Answered = append(opts.Answered, a.answered...)
 	opts.Earlier = a.earlier
 	in := a.intake

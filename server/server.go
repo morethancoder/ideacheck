@@ -23,7 +23,7 @@ const maxBody = 1 << 20
 
 // Checker is the slice of ideacheck.Engine the server uses.
 type Checker interface {
-	Check(ctx context.Context, in ideacheck.Intake, o ideacheck.Options) (*ideacheck.Result, error)
+	Check(ctx context.Context, in ideacheck.Intake, o ideacheck.CheckOptions) (*ideacheck.Result, error)
 }
 
 type Server struct {
@@ -107,7 +107,7 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 	// Nothing on this side can answer a follow-up, so missing facts are reported
 	// beside the scores rather than instead of them; ?strict=1 asks for the old
 	// needs_input behavior.
-	opts := ideacheck.Options{ID: ideacheck.NewID(), Rubric: q.Get("rubric"), Proceed: q.Get("strict") != "1"}
+	opts := ideacheck.CheckOptions{ID: ideacheck.NewID(), Rubric: q.Get("rubric"), Proceed: q.Get("strict") != "1"}
 	live := s.runs.start(opts.ID)
 	if q.Get("async") == "1" {
 		// The check outlives this request, so it must not inherit its context.
@@ -124,19 +124,9 @@ func (s *Server) check(w http.ResponseWriter, r *http.Request) {
 }
 
 // execute runs one check, feeding its events into the run and saving the result.
-func (s *Server) execute(ctx context.Context, in ideacheck.Intake, opts ideacheck.Options, live *run) (*ideacheck.Result, error) {
-	events := make(chan ideacheck.Event, 64)
-	drained := make(chan struct{})
-	go func() {
-		for e := range events {
-			live.add(e)
-		}
-		close(drained)
-	}()
-	opts.Events = events
+func (s *Server) execute(ctx context.Context, in ideacheck.Intake, opts ideacheck.CheckOptions, live *run) (*ideacheck.Result, error) {
+	opts.OnEvent = live.add
 	res, err := s.Engine.Check(ctx, in, opts)
-	close(events)
-	<-drained
 	if err == nil && s.Store != nil {
 		if serr := s.Store.Save(ctx, in, res); serr != nil {
 			s.Log.Warn().Err(serr).Str("request_id", res.ID).Msg("result was not saved to history")

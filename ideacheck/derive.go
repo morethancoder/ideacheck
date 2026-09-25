@@ -146,7 +146,7 @@ func fillsSome(gaps *rubric.Rubric, field string) bool {
 
 // announce shows answers the judge was not asked for — derived, or kept from
 // an earlier run — in the live view, as the judge's are shown.
-func announce(ch chan<- Event, stage string, qs []judge.Question, held map[int]judge.Answer) {
+func announce(on func(Event), stage string, qs []judge.Question, held map[int]judge.Answer) {
 	for i, a := range held {
 		if a.Failed() {
 			continue
@@ -156,6 +156,6 @@ func announce(ch chan<- Event, stage string, qs []judge.Question, held map[int]j
 		if v, ok := Normalize(qs[i], a); ok {
 			ev.Value = &v
 		}
-		emit(ch, ev)
+		emit(on, ev)
 	}
 }

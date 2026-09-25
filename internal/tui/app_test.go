@@ -13,7 +13,6 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/judge"
@@ -111,7 +110,10 @@ func (h *fakeHost) Engine() (*ideacheck.Engine, error) {
 		return nil, &NotReady{Reason: h.notReady}
 	}
 	settings, err := ideacheck.DefaultSettings("mock", "")
-	return &ideacheck.Engine{Settings: settings, Files: configs.Defaults(), Judge: &mock.Judge{Seed: 1, FixturesDir: h.fixtures}}, err
+	if err != nil {
+		return nil, err
+	}
+	return ideacheck.New(ideacheck.Options{Settings: settings, Judge: &mock.Judge{Seed: 1, FixturesDir: h.fixtures}})
 }
 func (h *fakeHost) Profile() map[string]string               { return h.profile }
 func (h *fakeHost) SaveProfile(p map[string]string) error    { h.profile = p; return nil }
@@ -164,7 +166,7 @@ func TestCheckFlowAsksOnceThenShowsAndSavesTheResult(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "has_why_now.json"), []byte(`{"noul":0.2}`), 0o644)
 	h := &fakeHost{t: t, fixtures: dir}
-	a := newApp(h, Start{Page: pageLive, Intake: ideacheck.Intake{Idea: "A payroll tool", Profile: map[string]string{"background": "ran payroll at a restaurant"}}, Options: ideacheck.Options{Rubric: "business"}})
+	a := newApp(h, Start{Page: pageLive, Intake: ideacheck.Intake{Idea: "A payroll tool", Profile: map[string]string{"background": "ran payroll at a restaurant"}}, Options: ideacheck.CheckOptions{Rubric: "business"}})
 
 	pump(t, a, a.Init(), pageLive)
 	if a.page != pageAsk || len(a.missing) != 1 || a.missing[0].ID != "has_why_now" || len(h.persists) != 0 {
@@ -207,7 +209,7 @@ func TestDetailStepsAreNotAskedAgain(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(dir, gap+".json"), []byte(`{"noul":0.2}`), 0o644)
 	}
 	h := &fakeHost{t: t, fixtures: dir}
-	a := newApp(h, Start{Page: pageIdea, Options: ideacheck.Options{Rubric: "business"}})
+	a := newApp(h, Start{Page: pageIdea, Options: ideacheck.CheckOptions{Rubric: "business"}})
 	a.Init()
 	a.draft.idea, a.draft.details = "A payroll tool", true // "Yes, step by step": one box is the default
 	*a.draft.fields["why_now"] = "vague"
@@ -217,7 +219,7 @@ func TestDetailStepsAreNotAskedAgain(t *testing.T) {
 		t.Fatalf("page=%v asks=%+v, want only the background question", a.page, a.missing)
 	}
 
-	a = newApp(h, Start{Page: pageIdea, Options: ideacheck.Options{Rubric: "business"}})
+	a = newApp(h, Start{Page: pageIdea, Options: ideacheck.CheckOptions{Rubric: "business"}})
 	a.Init()
 	a.draft.idea, a.draft.details = "A payroll tool", false // "Skip, just check it"
 	pump(t, a, a.wizardDone(), pageIdea)

@@ -30,7 +30,11 @@ func newServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	s := &Server{Engine: &ideacheck.Engine{Settings: settings, Files: files, Judge: &mock.Judge{Seed: 1}}, Store: st, Files: files, RubricsDir: settings.RubricsDir, Log: zerolog.Nop()}
+	engine, err := ideacheck.New(ideacheck.Options{Settings: settings, Files: files, Judge: &mock.Judge{Seed: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Engine: engine, Store: st, Files: files, RubricsDir: settings.RubricsDir, Log: zerolog.Nop()}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv
