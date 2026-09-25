@@ -1,17 +1,22 @@
 import Foundation
 
 /// The hosted API's Lab routes (docs/sparkjudge-api.md, "The Lab"):
-/// `POST /v1/mix` and `GET /v1/trends`. Both are signed like every hosted
-/// request; `sign` is where App Attest's assertion goes once the app has one.
+/// `POST /v1/mix` and `GET /v1/trends`. In the app they go through
+/// `SparkjudgeAPI` (`hosted(baseURL:)`), so they are signed with App Attest and
+/// wait their turn behind hosted checks; tests send unsigned through `session`.
 struct LabClient: Sendable {
     let baseURL: URL
     var session: URLSession = .shared
     /// The app's user id, the same one RevenueCat knows (`X-App-User-Id`).
-    var userID: String = LabIdentity.userID
-    /// Adds whatever proves the request came from this app (App Attest's
-    /// assertion headers). Identity by default: fine for a server running with
-    /// `-attest off`, as `make api` does.
-    var sign: @Sendable (URLRequest, Data) async throws -> URLRequest = { request, _ in request }
+    var userID: String = AppUserID.current()
+    /// The signed, one-at-a-time client; nil sends through `session` unsigned.
+    var api: SparkjudgeAPI? = nil
+
+    /// The client the app uses: the shared signed client for this server.
+    static func hosted(baseURL: URL) -> LabClient {
+        let api = SparkjudgeAPI.shared(baseURL: baseURL)
+        return LabClient(baseURL: baseURL, userID: api.user, api: api)
+    }
 
     struct ServerError: LocalizedError, Equatable {
         var status: Int
@@ -46,7 +51,10 @@ struct LabClient: Sendable {
     }
 
     private func send(_ method: String, path: String, body: Data, timeout: TimeInterval) async throws -> Data {
-        var r = try await sign(request(method, path: path, body: body), body)
+        if let api {
+            return try await api.data(method, api.url(path), body: method == "POST" ? body : nil, timeout: timeout)
+        }
+        var r = request(method, path: path, body: body)
         r.timeoutInterval = timeout
         let (data, response) = try await session.data(for: r)
         try Self.expect(response, body: data)
@@ -60,19 +68,5 @@ struct LabClient: Sendable {
         let decoded = try? JSONDecoder().decode([String: String].self, from: body)
         throw ServerError(status: http.statusCode, code: decoded?["error"] ?? "http_\(http.statusCode)",
                           message: decoded?["message"] ?? "The server answered \(http.statusCode).")
-    }
-}
-
-/// The app's user id for the hosted API: a UUID made once. The paid tier keeps
-/// its own in the Keychain; until the two meet this one stands in.
-enum LabIdentity {
-    static let key = "labUserID"
-
-    static var userID: String {
-        let d = UserDefaults.standard
-        if let id = d.string(forKey: key), UUID(uuidString: id) != nil { return id }
-        let id = UUID().uuidString.lowercased()
-        d.set(id, forKey: key)
-        return id
     }
 }

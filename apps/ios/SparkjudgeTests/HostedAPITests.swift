@@ -320,6 +320,8 @@ struct HostedErrorTests {
         #expect(map(503, "daily_cap", "paused").localizedDescription.contains("midnight UTC"))
         #expect(map(401, "bad_assertion", "no") == .unauthorized(code: "bad_assertion"))
         #expect(map(400, "bad_request", "not an intake") == .http(status: 400, code: "bad_request", message: "not an intake"))
+        let mix = map(402, "pro_required", "mixing on the server is part of Pro")
+        #expect(mix == .http(status: 402, code: "pro_required", message: "mixing on the server is part of Pro"), "a Pro-only route is not a used-up allowance")
         #expect(HostedError.from(status: 502, body: Data("Bad Gateway".utf8)) == .http(status: 502, code: "", message: "Bad Gateway"))
     }
 }

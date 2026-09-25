@@ -29,6 +29,8 @@ enum HostedError: LocalizedError, Equatable, Sendable {
         let code = decoded?.error ?? ""
         let message = decoded?.message ?? decoded?.error ?? String(decoding: body.prefix(200), as: UTF8.self)
         switch (status, code) {
+        case (402, "pro_required"): // a Pro-only route (the mixer), not a used-up allowance
+            return .http(status: status, code: code, message: message)
         case (402, _):
             return .quotaExceeded(upgrade: message.localizedCaseInsensitiveContains("upgrade"), message: message)
         case (429, _):

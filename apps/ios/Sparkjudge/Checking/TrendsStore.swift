@@ -34,7 +34,7 @@ final class TrendsStore {
                 return (try TrendsReport.decode(data), data)
             }, cacheURL: nil)
         }
-        let client = LabClient(baseURL: AppSettings.serverURL)
+        let client = LabClient.hosted(baseURL: AppSettings.serverURL)
         return TrendsStore(fetch: { try await client.trends() })
     }
 

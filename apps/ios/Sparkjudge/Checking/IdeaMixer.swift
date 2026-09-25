@@ -101,7 +101,7 @@ enum MixerChoice {
     /// nobody, with the reason. Preview mode always stitches.
     @MainActor static func pick(isPro: Bool, checker: CheckerKind = AppSettings.checker,
                                 onDevice: any IdeaMixer = OnDeviceMixer(),
-                                server: @autoclosure () -> any IdeaMixer = RemoteMixer(client: LabClient(baseURL: AppSettings.serverURL))) -> (any IdeaMixer)? {
+                                server: @autoclosure () -> any IdeaMixer = RemoteMixer(client: .hosted(baseURL: AppSettings.serverURL))) -> (any IdeaMixer)? {
         if checker == .preview { return PreviewMixer() }
         if onDevice.availability.isAvailable { return onDevice }
         if isPro { return server() }
