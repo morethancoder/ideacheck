@@ -18,7 +18,8 @@ judge_timeout: 90s            # typing every item, all at once
 #   github  GitHub's repository search ({items: [{full_name, html_url, description, stargazers_count}]})
 #   search  the research search service (SearXNG, Tavily or Brave, as research
 #           is configured), once per query; skipped when there is none
-# In a url, {since_unix} and {since_date} are now minus `since`. An item with no
+# In a url, {since_unix} and {since_date} are now minus `since` (the url is sent
+# as written: escape what a query may not carry, such as > as %3E). An item with no
 # link of its own (an Ask HN) points at `item_url`, {id} being its id;
 # `strip_prefix` comes off the front of every title.
 # `token_env` names an environment variable whose value, when set, is sent as a
@@ -28,7 +29,7 @@ sources:
   - id: show_hn
     name: Show HN
     kind: hn
-    url: https://hn.algolia.com/api/v1/search?tags=show_hn&numericFilters=created_at_i>{since_unix}&hitsPerPage=15
+    url: https://hn.algolia.com/api/v1/search?tags=show_hn&numericFilters=created_at_i%3E{since_unix}&hitsPerPage=15
     since: 168h
     limit: 12
     strip_prefix: "Show HN: "
@@ -42,7 +43,7 @@ sources:
   - id: github
     name: GitHub
     kind: github
-    url: https://api.github.com/search/repositories?q=created:>{since_date}&sort=stars&order=desc&per_page=15
+    url: https://api.github.com/search/repositories?q=created:%3E{since_date}&sort=stars&order=desc&per_page=15
     since: 168h
     limit: 12
     token_env: GITHUB_TOKEN
