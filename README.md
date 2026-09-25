@@ -288,7 +288,7 @@ ideacheck does the searching itself, in Go, and no model drives a loop:
 2. **search** — all of them at once against a search service; a page found twice is
    kept once.
 3. **read** — the first `read_pages` results of each topic are fetched and boiled
-   down to their text (`internal/search`: an article extractor first, the visible
+   down to their text (package `search`: an article extractor first, the visible
    body minus nav/header/footer/scripts when a page is no article), `page_chars` each.
    Only public addresses are ever fetched.
 4. **digest** — the writer turns snippets and page text into findings (one call). A
@@ -423,8 +423,14 @@ and CSV; `bench --compare a.json b.json` diffs two runs.
 
 ## Development
 
-`make` lists targets: `dev build install run serve test race lint fmt tidy bench dry dump schema release doctor setup clean`.
-Prompt changes are pinned by golden files: `go test ./internal/prompt -update`.
+`make` lists targets: `dev build install run serve test race lint core fmt tidy bench dry dump schema release doctor setup clean`.
+Prompt changes are pinned by golden files: `go test ./prompt -update`.
+
+The check itself is an importable Go package, `github.com/morethancoder/ideacheck/ideacheck`,
+with the judges, rubrics, prompts, search, history store and HTTP server beside it;
+the CLI and the app are shells around it. `make core` checks those packages stay
+free of anything desktop-only and build for iOS and Android. CLAUDE.md has a
+minimal example of running a check from another program.
 
 ### Cutting a release
 

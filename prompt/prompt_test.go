@@ -22,7 +22,7 @@ var (
 )
 
 // Golden files pin the exact text the model sees; a prompt edit must be deliberate.
-// Regenerate with: go test ./internal/prompt -update
+// Regenerate with: go test ./prompt -update
 func golden(t *testing.T, name, got string) {
 	t.Helper()
 	p := filepath.Join("testdata", name)

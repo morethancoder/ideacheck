@@ -36,12 +36,13 @@ Corollary: to change behaviour, first ask whether the change belongs in
 |---|---|---|
 | Human | `ideacheck` / `ideacheck "idea"` | bubbletea TUI (`internal/tui`) |
 | Agent | `ideacheck --agent --answer problem=… ` or `ideacheck idea.md --agent` | JSON on stdout, logs on stderr, exit code carries the status |
-| Server | `ideacheck serve` | same JSON over HTTP (`internal/server`) |
+| Server | `ideacheck serve` | same JSON over HTTP (`server`) |
 
-All three call `pipeline.Engine.Check`. Nothing in `pipeline` knows about a
-terminal.
+All three call `ideacheck.Engine.Check`. Nothing in package `ideacheck` knows
+about a terminal, a process or a config file — see "Using the core from another
+host" below.
 
-## Pipeline (`internal/pipeline`)
+## Pipeline (`ideacheck/`, package `ideacheck`)
 
 ```
 intake → extract → gaps + router (one batch) → research + sift → score (fan-out) → aggregate → verdict → explain → persist
@@ -57,11 +58,11 @@ intake → extract → gaps + router (one batch) → research + sift → score (
 | route | `engine.go` + `rubrics/_router.yaml` | one `choice` over idea types → picks `rubrics/<type>.yaml` (`other` → the router's `fallback:`) |
 | research | `research.go`, `lookup.go` + `research.yaml` + `prompts/research*` | the rubric is picked first, so only the `research.yaml` topics its questions read (`uses: [evidence.<topic>]`) are looked up. Findings (with URLs) land in `result.research` and, grouped by topic, in `evidence` state. `lookup.go` is the default path and has no model in the loop: writer **plans** queries (`Planner`; else the topic's own `queries:`) → Go **searches** (`Engine.Search`: SearXNG / Tavily / Brave) → Go **reads** pages to text (`Engine.Pages`) → writer **digests** (`Digester`; else results are the findings; a finding whose URL was not among the results is dropped). `research.search: llm`, or nothing to search with, falls back to the writer's own web tool (`Researcher`). Cached per idea-as-given (`Engine.Cache`, the history DB). Every step degrades, none fails the check |
 | sift | `research.go` + `rubrics/_evidence.yaml` | the judge types each finding (one `choice` over `idea` + `finding`); options under `drop:` remove it from `evidence`. `research.sift: auto` = only when judge ≠ writer. The cache keeps each finding's relation and who typed it, so the same judge never sifts a cached search twice |
-| score | `engine.go`, `judge/fanout.go` | every rubric question at once, one goroutine each |
+| score | `engine.go`, `../judge/fanout.go` | every rubric question at once, one goroutine each |
 | aggregate | `aggregate.go` | normalize to [0,1], apply polarity, weight, divide by the weights **answered** |
 | verdict | `verdict.go` + rubric `verdict:` block | ordered gates, then composite thresholds. No model call |
 | explain | `explain.go` + `prompts/explain.tmpl` | optional paragraph saying why, after scoring. Never changes a score. The bands that turn a value into "strength" or "probably true" are in the template |
-| persist | `store/` | SQLite history (`history`, `last`, `show`) |
+| persist | `../store/` | SQLite history (`history`, `last`, `show`); the host saves, not the engine |
 
 Invariants worth keeping:
 
@@ -80,7 +81,7 @@ Invariants worth keeping:
 - A gap whose field a research topic `covers:` is never asked about while research
   will run, and leaves `missing[]` once findings come back. The TUI asks at most
   `ask_limit` follow-ups (`Engine.FollowUps`), then re-runs with the needs_input
-  result as `Options.Earlier`: its gap and router answers stand, and a gap whose
+  result as `CheckOptions.Earlier`: its gap and router answers stand, and a gap whose
   field is now filled is never asked (nor is any gap on a filled field).
 - Missing facts do not block a verdict outside the TUI: agent and server runs
   score what is known and report `missing[]` with `partial: true`. `--strict`
@@ -92,38 +93,53 @@ Invariants worth keeping:
 
 ## Layout
 
+The public packages are the core any host imports; `internal/` is the desktop
+CLI around it. `make core` fails when a public package reaches `os/exec`,
+`internal/`, cobra, bubbletea, zerolog or koanf, and builds them for iOS and
+Android.
+
 ```
-cmd/ideacheck/         main; everything else is internal
-internal/
-  cli/                 cobra commands and flags. check.go is the default action
-  pipeline/            the stages above; pure functions except the judge call
-  judge/               the ONE interface all model access goes through + fanout
-    backends/          jev, laya (Jev's wire format over an embedded Python worker
-                       running laya-mlx locally; one process per checkpoint, shared by
-                       every engine in the binary), logprob (OpenAI-compatible +
-                       logprobs), structured (Anthropic SDK / OpenAI-compatible),
-                       claudecli, codexcli, mock
-  rubric/              YAML load, validate, hash; verdict gates
-  prompt/              text/template loading of configs/prompts/*
-  config/              koanf: flags > env IDEACHECK_* > user dir > embedded
-  search/              the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
-                       page reader (public addresses only) that boils HTML down to text.
-                       local.go drives Docker for `ideacheck search up|down|status`
-  store/               SQLite history (modernc.org/sqlite, pure Go)
-  tui/                 bubbletea app: menu, idea form, live check, result, setup
-  ui/                  the shared step column — install.sh in Go: rows, pending
-                       lines with a spinner, the download bar, warnings, errors
-  server/              HTTP API + SSE
-  bench/               backend comparison on bench/ideas.jsonl
-  selfupdate/          daily release check, verified self-replace
-  logging/             zerolog to stderr, always
-configs/               EMBEDDED DEFAULTS (go:embed), user-overridable
+cmd/ideacheck/         main; cmd/schemagen writes schemas/
+ideacheck/             THE CORE (package ideacheck): Engine, New(Options), Check(ctx,
+                       Intake, CheckOptions), Settings, Result, Event — the stages above
+judge/                 the ONE interface all model access goes through + fanout,
+                       and judge.WithLogger (log/slog on the context)
+  jev/ logprob/        backends that run anywhere: plain HTTP, no processes
+  structured/ openai/  (structured: Anthropic SDK / OpenAI-compatible)
+  mock/                the offline, fixture-driven backend
+rubric/                YAML load, validate, hash; verdict gates
+prompt/                text/template loading of configs/prompts/*
+search/                the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
+                       page reader (public addresses only) that boils HTML down to text
+store/                 SQLite history (modernc.org/sqlite, pure Go) and FindingsCache,
+                       the research cache over it
+server/                HTTP API + SSE; takes any Store, logs through slog, and has an Auth
+                       hook (unset = the local API) for a hosted one
+configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-embedded
+                       reader. Kept at this path (not defaults/): it is what CLAUDE.md,
+                       README and every "lives in configs/" rule name
   config.yaml          backends, pricing, setup wizard choices
   fields.yaml          what a caller can send about an idea, and what each field means
   research.yaml        what the writer looks up on the web, and which gap each topic covers
   searxng/settings.yml the SearXNG `ideacheck search up` runs in Docker: the defaults + JSON output
   rubrics/             _gaps, _router, _evidence, business, side_project, content, research, creative
   prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
+internal/              desktop only
+  cli/                 cobra commands and flags. check.go is the default action
+  config/              koanf: flags > env IDEACHECK_* > user dir > embedded;
+                       Config.Settings() is what the core runs with
+  backends/            the registry: config → judge, for -b and setup
+  judge/               backends that start processes: laya (Jev's wire format over an
+                       embedded Python worker running laya-mlx locally; one process per
+                       checkpoint, shared by every engine in the binary), claudecli, codexcli
+  searchlocal/         Docker SearXNG for `ideacheck search up|down|status`
+  tui/                 bubbletea app: menu, idea form, live check, result, setup
+  ui/                  the shared step column — install.sh in Go: rows, pending
+                       lines with a spinner, the download bar, warnings, errors
+  bench/               backend comparison on bench/ideas.jsonl
+  selfupdate/          daily release check, verified self-replace
+  logging/             zerolog to stderr, always; Slog bridges log/slog into it
+  schema/              the JSON schema of Result
 schemas/               check_result.schema.json, generated from the Go types
 scripts/               bash for every non-trivial make target
 ```
@@ -131,7 +147,7 @@ scripts/               bash for every non-trivial make target
 User overrides live in `$XDG_CONFIG_HOME/ideacheck/` (or `-c DIR`) with the same
 relative paths; any file present there replaces the embedded one.
 
-## Core interface (`internal/judge`)
+## Core interface (`judge`)
 
 ```go
 type Judge interface {
@@ -158,6 +174,38 @@ good-when-high, −1 bad-when-high, 0 informational), `uses`, `requires`, `deriv
 gates/thresholds/min_confidence for one backend: cuts are tuned per backend on
 `bench`, never carried across. Composite confidence averages choice and score
 answers only — a noul is a probability, not a doubt.
+
+## Using the core from another host
+
+A host builds `ideacheck.Settings` from its own configuration (the CLI:
+`config.Config.Settings()`; anyone else: `ideacheck.DefaultSettings`, the
+embedded config.yaml's values), picks a judge from `judge/…`, and calls `New`:
+
+```go
+settings, err := ideacheck.DefaultSettings("jev", "") // judge jev, no separate writer
+if err != nil {
+	return err
+}
+engine, err := ideacheck.New(ideacheck.Options{
+	Settings: settings, // Files nil = the embedded rubrics, prompts and research.yaml
+	Judge:    &jev.Judge{BaseURL: "https://api.typesafe.ai", APIKey: key, Model: settings.Judge.Model},
+})
+if err != nil {
+	return err
+}
+res, err := engine.Check(ctx, ideacheck.Intake{Idea: "a to-do app for dentists"}, ideacheck.CheckOptions{
+	Proceed: true,                                 // score what is known, report missing[]
+	OnEvent: func(e ideacheck.Event) { /* … */ }, // live progress, one event at a time
+})
+```
+
+The rest is optional ports on `Options`: `Writer` (a backend that can write —
+extract, research, explain), `Search` + `Pages` (`search.New`,
+`search.NewReader`), `Cache` (`store.FindingsCache`). Saving is the host's job
+(`store.Open(…).Save`). `server.Server` is the HTTP face of the same engine. A
+result's `config_hash` is `Settings.Hash`, or a hash of the Settings when the
+host leaves it empty; the CLI's is `Config.Hash()`, pinned by a test in
+`internal/config` because history and bench baselines compare it.
 
 ## Writing rubric questions (`rubric.Validate` enforces most of it)
 
@@ -233,7 +281,7 @@ convention elsewhere (`-j` jobs, `-p` port) are not reused for something else.
 Document the flag in `README.md` too.
 
 Agent contract: `--agent` = JSON on stdout + never ask + score with gaps. A field
-added to `pipeline.ideaFields`/`profileFields` must be described in
+added to `ideacheck.ideaFields`/`profileFields` must be described in
 `configs/fields.yaml` — a test fails otherwise, because that catalogue is what
 callers and the extraction prompt both read.
 Exit codes: `0` scored, `2` `needs_input` (only under `--strict`), `3` the check
@@ -275,10 +323,10 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
   kept the old width (cut off at the edge) and the form measured too short —
   huh then squeezed the list into a window starting at the cursor, often just
   the chosen option. Settings builds selects with `choose` (options before value).
-- `search.Local` talks to Docker through the `search.Docker` func (`app.docker` in
+- `searchlocal.Local` talks to Docker through the `searchlocal.Docker` func (`app.docker` in
   the CLI), so its tests fake the docker CLI and no test needs Docker. Its errors
   are the product: `DockerError` is problem + what to do, per OS.
-- Pipeline tests replace `Engine.Search` / `Engine.Pages` with fakes; `internal/search`
+- Core tests replace `Engine.Search` / `Engine.Pages` with fakes; `search`
   tests use `httptest` per provider. No test touches the network.
 - An agent loop is the expensive way to do anything here: each turn re-sends all
   earlier tool output. Before adding a tool to a model call, ask whether Go can
@@ -292,7 +340,7 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
   `codex` 0.153.4) — re-verify them, as the comments beside them say, when bumping.
 - `-b mock` is the offline backend: use it for anything that is not about a real
   provider's wire format.
-- Prompt output is pinned by golden files: `go test ./internal/prompt -update`.
+- Prompt output is pinned by golden files: `go test ./prompt -update`.
 - Backend tests use `net/http/httptest` fixtures per wire format — never a live API.
 - Fan-out tests assert real concurrency (12 questions × 200 ms must finish well
   under their sum) and partial failure, timeout and 429 `Retry-After` handling.

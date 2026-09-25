@@ -45,7 +45,7 @@ func newLive(header string, events <-chan ideacheck.Event) liveModel {
 
 func (m liveModel) Init() tea.Cmd { return tea.Batch(m.spin.Tick, m.wait()) }
 
-// wait blocks for the next pipeline event; a closed channel means the check is over.
+// wait blocks for the next check event; a closed channel means the check is over.
 func (m liveModel) wait() tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-m.events

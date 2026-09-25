@@ -14,7 +14,7 @@ import (
 	"github.com/morethancoder/ideacheck/search"
 )
 
-// Searcher and PageReader are what the lookup needs from internal/search; tests
+// Searcher and PageReader are what the lookup needs from package search; tests
 // replace them, so no pipeline test touches the network.
 type Searcher interface {
 	Name() string

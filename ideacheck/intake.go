@@ -1,5 +1,8 @@
-// Package pipeline runs a check: intake → gaps → route → score → aggregate →
-// verdict. Every stage is a pure function of (input, config) except the judge call.
+// Package ideacheck is the check itself: intake → gaps → route → research →
+// score → aggregate → verdict. Every stage is a pure function of (input,
+// Settings) except the model calls, which go through the ports in Options, so
+// any host — the CLI, the HTTP server, a hosted API, a mobile binding — can
+// run it. It knows nothing about terminals, processes or config files.
 package ideacheck
 
 import (

@@ -25,7 +25,7 @@ const (
 	Other        = "other"
 )
 
-// Reader is the slice of config.Files a rubric needs.
+// Reader is the slice of configs.Files a rubric needs.
 type Reader interface {
 	Read(name string) ([]byte, error)
 	List(dir string) ([]string, error)

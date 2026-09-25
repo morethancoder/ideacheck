@@ -172,7 +172,7 @@ func statusExit(res *ideacheck.Result) error {
 	return nil
 }
 
-// engine builds the pipeline from the current effective config.
+// engine builds the check engine from the current effective config.
 func (a *app) engine(c *checkFlags) (*ideacheck.Engine, config.Config, error) {
 	cfg, err := a.loadConfig(c)
 	if err != nil {

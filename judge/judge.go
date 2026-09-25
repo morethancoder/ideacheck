@@ -190,7 +190,7 @@ type Researcher interface {
 }
 
 // Planner and Digester are the writer's two jobs when ideacheck does the
-// searching itself (internal/search): say what to search for, then say what
+// searching itself (package search): say what to search for, then say what
 // the results amount to. Neither touches the web, so any chat model can do
 // them — including a local one that could never research on its own.
 type Planner interface {

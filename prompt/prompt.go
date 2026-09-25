@@ -13,7 +13,7 @@ import (
 	"github.com/morethancoder/ideacheck/judge"
 )
 
-// Reader is the slice of config.Files this package needs.
+// Reader is the slice of configs.Files this package needs.
 type Reader interface {
 	Read(name string) ([]byte, error)
 }
