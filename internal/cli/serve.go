@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/morethancoder/ideacheck/internal/judge/backends"
+	"github.com/morethancoder/ideacheck/internal/backends"
 	"github.com/morethancoder/ideacheck/internal/logging"
-	"github.com/morethancoder/ideacheck/internal/server"
-	"github.com/morethancoder/ideacheck/internal/store"
+	"github.com/morethancoder/ideacheck/server"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 func (a *app) serveCmd() *cobra.Command {

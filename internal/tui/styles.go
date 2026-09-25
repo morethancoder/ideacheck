@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/morethancoder/ideacheck/internal/rubric"
+	"github.com/morethancoder/ideacheck/rubric"
 )
 
 // The palette is the install script's — faint text rather than a grey that

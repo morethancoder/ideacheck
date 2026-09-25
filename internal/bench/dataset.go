@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/morethancoder/ideacheck/internal/judge"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/rubric"
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/judge"
+	"github.com/morethancoder/ideacheck/rubric"
 )
 
 // Idea is one line of the dataset. Labels hold only what is obvious: 0/1 for a
@@ -24,8 +24,8 @@ type Idea struct {
 	Note          string            `json:"note,omitempty"`
 }
 
-func (i Idea) Intake() pipeline.Intake {
-	return pipeline.Intake{Idea: i.Idea, Fields: i.Fields, Profile: i.Profile}
+func (i Idea) Intake() ideacheck.Intake {
+	return ideacheck.Intake{Idea: i.Idea, Fields: i.Fields, Profile: i.Profile}
 }
 
 // Catalog is every question across every rubric file, by id.

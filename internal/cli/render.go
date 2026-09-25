@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/ideacheck"
 )
 
 const (
@@ -31,19 +31,19 @@ func outputFormat(flag string, jsonFlag, stdoutTTY bool) (string, error) {
 	return formatJSON, nil
 }
 
-func renderJSON(w io.Writer, res *pipeline.Result) error {
+func renderJSON(w io.Writer, res *ideacheck.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(res)
 }
 
 // renderPlain is the no-bubbletea text view (-o plain).
-func renderPlain(w io.Writer, res *pipeline.Result) error {
+func renderPlain(w io.Writer, res *ideacheck.Result) error {
 	var b strings.Builder
 	switch res.Status {
-	case pipeline.StatusNeedsInput:
+	case ideacheck.StatusNeedsInput:
 		fmt.Fprintf(&b, "NEEDS INPUT — answer these before the idea can be judged:\n")
-	case pipeline.StatusError:
+	case ideacheck.StatusError:
 		fmt.Fprintf(&b, "ERROR — %s\n", res.Error)
 	default:
 		fmt.Fprintf(&b, "%s  composite %.2f  confidence %.2f\n%s\n", strings.ToUpper(res.Verdict), res.Composite, res.CompositeConfidence, res.VerdictReason)
@@ -78,7 +78,7 @@ func renderPlain(w io.Writer, res *pipeline.Result) error {
 	return err
 }
 
-func plainList(b *strings.Builder, title string, cs []pipeline.Contribution) {
+func plainList(b *strings.Builder, title string, cs []ideacheck.Contribution) {
 	if len(cs) == 0 {
 		return
 	}
@@ -88,9 +88,9 @@ func plainList(b *strings.Builder, title string, cs []pipeline.Contribution) {
 	}
 }
 
-func plainCost(c pipeline.Cost) string {
+func plainCost(c ideacheck.Cost) string {
 	switch c.Basis {
-	case pipeline.CostFree, pipeline.CostUnpriced:
+	case ideacheck.CostFree, ideacheck.CostUnpriced:
 		return c.Basis + " — " + c.Note
 	}
 	out := fmt.Sprintf("$%.4f (%s) · %d tokens in", c.USD, c.Basis, c.TokensIn)

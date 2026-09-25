@@ -12,13 +12,13 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/internal/backends"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge/backends"
 	"github.com/morethancoder/ideacheck/internal/logging"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/search"
-	"github.com/morethancoder/ideacheck/internal/store"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/search"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 type checkFlags struct {
@@ -145,7 +145,7 @@ func (a *app) runCheck(cmd *cobra.Command, args []string, c *checkFlags) error {
 	// Nothing here can ask a follow-up, so a missing fact discounts the
 	// confidence and is reported in missing[]; it never withholds the verdict
 	// unless the caller asked for that with --strict.
-	res, err := engine.Check(cmd.Context(), intake, pipeline.Options{Rubric: c.rubric, Sequential: c.sequential, Proceed: !c.strict})
+	res, err := engine.Check(cmd.Context(), intake, ideacheck.Options{Rubric: c.rubric, Sequential: c.sequential, Proceed: !c.strict})
 	if err != nil {
 		return err
 	}
@@ -162,18 +162,18 @@ func (a *app) runCheck(cmd *cobra.Command, args []string, c *checkFlags) error {
 // statusExit turns the result's status into the process exit code, so an agent
 // can branch without parsing anything: 0 scored, 2 nothing scored because facts
 // are missing, 3 the check ran but produced no score.
-func statusExit(res *pipeline.Result) error {
+func statusExit(res *ideacheck.Result) error {
 	switch res.Status {
-	case pipeline.StatusNeedsInput:
+	case ideacheck.StatusNeedsInput:
 		return exitError{code: 2, msg: fmt.Sprintf("needs input: %d fact(s) are not stated; supply them with --answer, or score without them with --partial", len(res.Missing))}
-	case pipeline.StatusError:
+	case ideacheck.StatusError:
 		return exitError{code: 3, msg: res.Error}
 	}
 	return nil
 }
 
 // engine builds the pipeline from the current effective config.
-func (a *app) engine(c *checkFlags) (*pipeline.Engine, config.Config, error) {
+func (a *app) engine(c *checkFlags) (*ideacheck.Engine, config.Config, error) {
 	cfg, err := a.loadConfig(c)
 	if err != nil {
 		return nil, cfg, err
@@ -184,7 +184,7 @@ func (a *app) engine(c *checkFlags) (*pipeline.Engine, config.Config, error) {
 
 // newEngine builds the judge, the writer when it is a different backend, and
 // the findings cache: every command that checks ideas goes through here.
-func (a *app) newEngine(cfg config.Config) (*pipeline.Engine, error) {
+func (a *app) newEngine(cfg config.Config) (*ideacheck.Engine, error) {
 	deps := backends.Deps{Files: a.files(), Secret: a.secrets().Get}
 	judge, err := backends.New(cfg, deps)
 	if err != nil {
@@ -194,7 +194,7 @@ func (a *app) newEngine(cfg config.Config) (*pipeline.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine := &pipeline.Engine{Config: cfg, Files: a.files(), Judge: judge, Writer: writer,
+	engine := &ideacheck.Engine{Config: cfg, Files: a.files(), Judge: judge, Writer: writer,
 		Cache: findingsCache{path: store.ExpandHome(cfg.Store.Path, a.home)}}
 	if !cfg.Research.Enabled {
 		return engine, nil
@@ -215,9 +215,9 @@ func (a *app) secrets() config.Secrets { return config.Secrets{Getenv: a.getenv,
 
 // runApp is human mode: the paged app. With an idea in hand it opens straight on
 // the live check; with none (or -i) it opens on the menu / the idea steps.
-func (a *app) runApp(ctx context.Context, c *checkFlags, intake pipeline.Intake, interactive bool) error {
+func (a *app) runApp(ctx context.Context, c *checkFlags, intake ideacheck.Intake, interactive bool) error {
 	start := tui.Start{Page: tui.OpenCheck, Intake: intake, NoAsk: c.noAsk, NeedSetup: a.needsSetup(c),
-		Options: pipeline.Options{Rubric: c.rubric, Sequential: c.sequential, Proceed: c.partial && !c.strict}}
+		Options: ideacheck.Options{Rubric: c.rubric, Sequential: c.sequential, Proceed: c.partial && !c.strict}}
 	switch {
 	case interactive && intake.Idea == "":
 		start.Page = tui.OpenMenu
@@ -239,13 +239,13 @@ func (a *app) openApp(ctx context.Context, c *checkFlags, start tui.Start) error
 
 // intake resolves the idea from args/file/stdin and merges the saved profile.
 // interactive is true when the idea should be collected (or edited) in the app.
-func (a *app) intake(args []string, c *checkFlags) (in pipeline.Intake, interactive bool, err error) {
+func (a *app) intake(args []string, c *checkFlags) (in ideacheck.Intake, interactive bool, err error) {
 	src, err := resolveInput(args, c.file, a.input)
 	if err != nil {
 		return in, false, err
 	}
 	if !src.Interactive {
-		if in, err = pipeline.ParseIntake(src.Data); err != nil {
+		if in, err = ideacheck.ParseIntake(src.Data); err != nil {
 			return in, false, err
 		}
 	}
@@ -263,7 +263,7 @@ func (a *app) intake(args []string, c *checkFlags) (in pipeline.Intake, interact
 // given applies the facts passed on the command line. They are set before the
 // saved profile is merged, which only fills what is still empty, so an explicit
 // --answer always wins.
-func given(in pipeline.Intake, c *checkFlags) (pipeline.Intake, error) {
+func given(in ideacheck.Intake, c *checkFlags) (ideacheck.Intake, error) {
 	if c.context != "" {
 		in.Context = c.context
 	}
@@ -273,9 +273,9 @@ func given(in pipeline.Intake, c *checkFlags) (pipeline.Intake, error) {
 		if !ok || field == "" || value == "" {
 			return in, fmt.Errorf("--answer %q: want field=value", kv)
 		}
-		if !pipeline.KnownField(field) {
+		if !ideacheck.KnownField(field) {
 			return in, fmt.Errorf("--answer %q: %q is not an intake field (idea: %s; yours: profile.%s)",
-				kv, field, strings.Join(pipeline.IdeaFields(), ", "), strings.Join(pipeline.ProfileFields(), ", profile."))
+				kv, field, strings.Join(ideacheck.IdeaFields(), ", "), strings.Join(ideacheck.ProfileFields(), ", profile."))
 		}
 		in = in.With(field, value)
 	}
@@ -305,7 +305,7 @@ func (a *app) saveProfile(profile map[string]string) error {
 
 // withProfile fills profile fields the intake did not set from the saved profile
 // (profile.yaml), a named one (profiles/NAME.yaml), or an explicit file.
-func (a *app) withProfile(in pipeline.Intake, flag string) (pipeline.Intake, error) {
+func (a *app) withProfile(in ideacheck.Intake, flag string) (ideacheck.Intake, error) {
 	saved, err := a.readProfile(flag)
 	if err != nil {
 		return in, err
@@ -334,8 +334,8 @@ func (a *app) readProfile(flag string) (map[string]string, error) {
 		return nil, fmt.Errorf("profile %s: %w", path, err)
 	}
 	for field := range saved {
-		if !pipeline.KnownField(profileField(field)) {
-			return nil, fmt.Errorf("profile %s: %q is not a profile field (allowed: %v)", path, field, pipeline.ProfileFields())
+		if !ideacheck.KnownField(profileField(field)) {
+			return nil, fmt.Errorf("profile %s: %q is not a profile field (allowed: %v)", path, field, ideacheck.ProfileFields())
 		}
 	}
 	return saved, nil

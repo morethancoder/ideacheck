@@ -43,7 +43,7 @@ lint: ## go vet, gofmt check, and golangci-lint when installed
 	@bash scripts/lint.sh
 
 fmt: ## format all Go code
-	@gofmt -w cmd internal configs
+	@gofmt -w cmd internal configs ideacheck judge rubric prompt search store server
 
 tidy: ## tidy go.mod and go.sum
 	@go mod tidy

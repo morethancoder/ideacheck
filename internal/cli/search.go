@@ -8,8 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/search"
+	"github.com/morethancoder/ideacheck/internal/searchlocal"
 	"github.com/morethancoder/ideacheck/internal/ui"
+	"github.com/morethancoder/ideacheck/search"
 )
 
 // searchUpTimeout bounds `search up`: the first run downloads the image.
@@ -50,7 +51,7 @@ are ` + searxngSettings + ` among the config files (` + "`ideacheck config dump`
 }
 
 // localSearch is the container as the config describes it.
-func (a *app) localSearch() (*search.Local, config.Config, error) {
+func (a *app) localSearch() (*searchlocal.Local, config.Config, error) {
 	cfg, err := config.Load(a.files(), config.LoadOptions{Environ: a.environ})
 	if err != nil {
 		return nil, cfg, err
@@ -59,7 +60,7 @@ func (a *app) localSearch() (*search.Local, config.Config, error) {
 	if err != nil {
 		return nil, cfg, err
 	}
-	return &search.Local{
+	return &searchlocal.Local{
 		Image:     cfg.Research.SearXNG.Image,
 		Container: cfg.Research.SearXNG.Container,
 		Endpoint:  cfg.Research.Endpoints[search.SearXNG],
@@ -78,7 +79,7 @@ func (a *app) searchUp(ctx context.Context) error {
 	p := a.printer(a.stdout)
 	defer p.Stop()
 	p.Title("ideacheck", "search up")
-	if err := local.Up(ctx, func(s search.Step) {
+	if err := local.Up(ctx, func(s searchlocal.Step) {
 		switch {
 		case s.Warn:
 			p.Warn("%s", s.Text)
@@ -128,7 +129,7 @@ func (a *app) searchStatus(ctx context.Context) error {
 	p.Title("ideacheck", "search")
 	p.Pending("docker", "looking for Docker")
 	state := local.Status(ctx)
-	var noDocker *search.DockerError
+	var noDocker *searchlocal.DockerError
 	if errors.As(state.DockerErr, &noDocker) {
 		p.Skip("docker", noDocker.Problem)
 	} else if state.DockerErr != nil {

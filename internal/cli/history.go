@@ -11,10 +11,10 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/store"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 // openStore opens the history database named by the effective config.
@@ -53,7 +53,7 @@ func (c findingsCache) Put(ctx context.Context, key string, findings []byte) err
 
 // persist saves a finished check. History is a convenience: failing to write it
 // must never cost the user the result they just waited (and paid) for.
-func (a *app) persist(ctx context.Context, path string, in pipeline.Intake, res *pipeline.Result) error {
+func (a *app) persist(ctx context.Context, path string, in ideacheck.Intake, res *ideacheck.Result) error {
 	s, err := store.Open(store.ExpandHome(path, a.home))
 	if err != nil {
 		return err
@@ -63,7 +63,7 @@ func (a *app) persist(ctx context.Context, path string, in pipeline.Intake, res 
 }
 
 // show renders a stored result the same way a fresh check would be rendered.
-func (a *app) show(res *pipeline.Result, output string, jsonFlag bool) error {
+func (a *app) show(res *ideacheck.Result, output string, jsonFlag bool) error {
 	format, err := outputFormat(output, jsonFlag, a.stdoutTTY)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (a *app) show(res *pipeline.Result, output string, jsonFlag bool) error {
 	return err
 }
 
-func (a *app) stored(use, short string, args cobra.PositionalArgs, find func(context.Context, *store.Store, []string) (*pipeline.Result, error)) *cobra.Command {
+func (a *app) stored(use, short string, args cobra.PositionalArgs, find func(context.Context, *store.Store, []string) (*ideacheck.Result, error)) *cobra.Command {
 	var output string
 	var jsonFlag bool
 	cmd := &cobra.Command{
@@ -103,12 +103,12 @@ func (a *app) stored(use, short string, args cobra.PositionalArgs, find func(con
 
 func (a *app) lastCmd() *cobra.Command {
 	return a.stored("last", "re-show the most recent result", cobra.NoArgs,
-		func(ctx context.Context, s *store.Store, _ []string) (*pipeline.Result, error) { return s.Last(ctx) })
+		func(ctx context.Context, s *store.Store, _ []string) (*ideacheck.Result, error) { return s.Last(ctx) })
 }
 
 func (a *app) showCmd() *cobra.Command {
 	return a.stored("show <id>", "re-show one past result (history number or chk_ id)", cobra.ExactArgs(1),
-		func(ctx context.Context, s *store.Store, args []string) (*pipeline.Result, error) {
+		func(ctx context.Context, s *store.Store, args []string) (*ideacheck.Result, error) {
 			res, err := s.Get(ctx, args[0])
 			if err != nil {
 				return nil, fmt.Errorf("%w: %s (see `ideacheck history`)", err, args[0])

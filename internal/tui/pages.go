@@ -14,9 +14,9 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/internal/backends"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge/backends"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
 )
 
 // ---- Settings ---------------------------------------------------------------
@@ -600,8 +600,8 @@ func (d *ideaDraft) offered() []string {
 	return out
 }
 
-func (d *ideaDraft) intake(base pipeline.Intake) pipeline.Intake {
-	out := pipeline.Intake{Idea: strings.TrimSpace(d.idea), Fields: map[string]string{}, Profile: base.Profile}
+func (d *ideaDraft) intake(base ideacheck.Intake) ideacheck.Intake {
+	out := ideacheck.Intake{Idea: strings.TrimSpace(d.idea), Fields: map[string]string{}, Profile: base.Profile}
 	for name, v := range d.fields {
 		if s := strings.TrimSpace(*v); s != "" {
 			out.Fields[name] = s
@@ -614,7 +614,7 @@ func (a *App) openIdea() tea.Cmd {
 	// One box is the default: the details are read out of the text, what the web
 	// can answer is looked up, and only what is still missing gets asked.
 	d := &ideaDraft{idea: a.intake.Idea, details: false, fields: map[string]*string{}}
-	for _, name := range pipeline.IdeaFields() {
+	for _, name := range ideacheck.IdeaFields() {
 		v := a.intake.Fields[name]
 		d.fields[name] = &v
 	}
@@ -659,7 +659,7 @@ func (a *App) openIdea() tea.Cmd {
 func (a *App) openProfile() tea.Cmd {
 	current := a.host.Profile()
 	a.profile = map[string]*string{}
-	for _, name := range pipeline.ProfileFields() {
+	for _, name := range ideacheck.ProfileFields() {
 		v := current[name]
 		a.profile[name] = &v
 	}
@@ -682,7 +682,7 @@ func (a *App) openProfile() tea.Cmd {
 
 // ---- Follow-up questions ---------------------------------------------------
 
-func (a *App) openAsk(missing []pipeline.Missing) tea.Cmd {
+func (a *App) openAsk(missing []ideacheck.Missing) tea.Cmd {
 	a.page, a.missing, a.replies = pageAsk, missing, make([]string, len(missing))
 	steps := make([]step, len(missing))
 	for i, m := range missing {
@@ -714,7 +714,7 @@ func (a *App) openLive() tea.Cmd {
 	}
 	a.engine = engine
 	ctx, cancel := context.WithCancel(a.ctx)
-	events := make(chan pipeline.Event, 64)
+	events := make(chan ideacheck.Event, 64)
 	a.done, a.cancel = make(chan outcome, 1), cancel
 	opts := a.start.Options
 	opts.Events, opts.Proceed = events, opts.Proceed || a.asked // asked once: judge with what is known
@@ -733,7 +733,7 @@ func (a *App) openLive() tea.Cmd {
 func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case eventMsg:
-		a.live = a.live.apply(pipeline.Event(msg))
+		a.live = a.live.apply(ideacheck.Event(msg))
 		return a.live.wait()
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -746,7 +746,7 @@ func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 		if got.err != nil {
 			return a.fail(got.err)
 		}
-		if got.res.Status == pipeline.StatusNeedsInput && !a.asked && !a.start.NoAsk {
+		if got.res.Status == ideacheck.StatusNeedsInput && !a.asked && !a.start.NoAsk {
 			a.earlier = got.res
 			return a.openAsk(a.engine.FollowUps(got.res, a.intake, a.answered))
 		}
@@ -771,7 +771,7 @@ func (a *App) updateResult(msg tea.Msg) tea.Cmd {
 	case "left", "shift+tab":
 		a.tab = (a.tab + len(resultTabs) - 1) % len(resultTabs)
 	case "n":
-		a.intake, a.asked, a.answered, a.earlier = pipeline.Intake{}, false, nil, nil
+		a.intake, a.asked, a.answered, a.earlier = ideacheck.Intake{}, false, nil, nil
 		return a.open(pageIdea)
 	case "h":
 		return a.open(pageHistory)
@@ -817,7 +817,7 @@ func (a *App) resultView() string {
 }
 
 // ScoresView lists every rubric dimension: the scores are the explanation.
-func ScoresView(res *pipeline.Result) string {
+func ScoresView(res *ideacheck.Result) string {
 	if len(res.Dimensions) == 0 {
 		return dim.Render("No rubric was scored for this check.")
 	}
@@ -837,21 +837,21 @@ func ScoresView(res *pipeline.Result) string {
 		good.Render("■") + dim.Render(" good news  ") + warnSty.Render("■") + dim.Render(" middling  ") + bad.Render("■") + dim.Render(" bad news")
 }
 
-func evidenceTab(res *pipeline.Result) string {
+func evidenceTab(res *ideacheck.Result) string {
 	if res.Research == nil {
 		return dim.Render("This check scored the description alone: nothing was looked up.\nResearch needs something to search with. The free way: `ideacheck search up` starts a search engine in Docker.\nOr set a TAVILY_API_KEY or BRAVE_API_KEY, or use a writer with its own web tool (Claude CLI, Codex CLI,\nAnthropic, OpenRouter). See `research:` in config.yaml.")
 	}
 	return EvidenceView(res.Research)
 }
 
-func gapsView(res *pipeline.Result) string {
+func gapsView(res *ideacheck.Result) string {
 	if len(res.Missing) == 0 {
 		return good.Render("✓") + " Nothing important is missing from the description."
 	}
 	return missingPanel(res.Missing)
 }
 
-func detailsView(res *pipeline.Result) string {
+func detailsView(res *ideacheck.Result) string {
 	var b strings.Builder
 	for _, w := range res.Warnings {
 		b.WriteString(warnSty.Bold(true).Render("! ") + warnSty.Render(w) + "\n")

@@ -6,12 +6,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/laya"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/search"
-	"github.com/morethancoder/ideacheck/internal/store"
+	"github.com/morethancoder/ideacheck/internal/judge/laya"
+	"github.com/morethancoder/ideacheck/internal/searchlocal"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/search"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 // host connects the TUI app to config, credentials, the engine and history.
@@ -124,7 +125,7 @@ func (h *host) StartSearch(ctx context.Context, progress func(tui.Progress)) err
 	if err != nil {
 		return err
 	}
-	return local.Up(ctx, func(s search.Step) {
+	return local.Up(ctx, func(s searchlocal.Step) {
 		if !s.Done && !s.Warn {
 			progress(tui.Progress{Status: s.Text})
 		}
@@ -180,7 +181,7 @@ func (h *host) Writer() (string, string, string) {
 
 // Engine is only handed out once the model can be reached; a *tui.NotReady
 // error sends the app to Settings with the reason instead of failing every question.
-func (h *host) Engine() (*pipeline.Engine, error) {
+func (h *host) Engine() (*ideacheck.Engine, error) {
 	engine, cfg, err := h.app.engine(h.flags)
 	if err != nil {
 		return nil, err
@@ -189,7 +190,7 @@ func (h *host) Engine() (*pipeline.Engine, error) {
 }
 
 func (h *host) Profile() map[string]string {
-	in, err := h.app.withProfile(pipeline.Intake{}, h.flags.profile)
+	in, err := h.app.withProfile(ideacheck.Intake{}, h.flags.profile)
 	if err != nil {
 		return nil
 	}
@@ -214,7 +215,7 @@ func (h *host) History(limit int) ([]store.Row, error) {
 	return s.List(h.ctx, limit)
 }
 
-func (h *host) Stored(ref string) (*pipeline.Result, error) {
+func (h *host) Stored(ref string) (*ideacheck.Result, error) {
 	s, err := h.store()
 	if err != nil {
 		return nil, err
@@ -224,7 +225,7 @@ func (h *host) Stored(ref string) (*pipeline.Result, error) {
 }
 
 // Persist is best-effort: history must never cost the user a result.
-func (h *host) Persist(in pipeline.Intake, res *pipeline.Result) {
+func (h *host) Persist(in ideacheck.Intake, res *ideacheck.Result) {
 	if cfg, err := h.config(); err == nil {
 		_ = h.app.persist(h.ctx, cfg.Store.Path, in, res)
 	}

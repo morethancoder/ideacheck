@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/morethancoder/ideacheck/internal/bench"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/mock"
+	"github.com/morethancoder/ideacheck/judge/mock"
 )
 
 const benchResultsDir = "bench/results"

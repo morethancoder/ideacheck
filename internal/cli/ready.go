@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/laya"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/logprob"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/structured"
+	"github.com/morethancoder/ideacheck/internal/judge/laya"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/judge/logprob"
+	"github.com/morethancoder/ideacheck/judge/structured"
 )
 
 const readyTimeout = 3 * time.Second

@@ -1,5 +1,5 @@
 package cli
 
-import "github.com/morethancoder/ideacheck/internal/pipeline"
+import "github.com/morethancoder/ideacheck/ideacheck"
 
-func ParseForTest(s string) (pipeline.Intake, error) { return pipeline.ParseIntake([]byte(s)) }
+func ParseForTest(s string) (ideacheck.Intake, error) { return ideacheck.ParseIntake([]byte(s)) }

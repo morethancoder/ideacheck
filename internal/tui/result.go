@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/ideacheck"
 )
 
 // CalibrationNote says how far to trust the probabilities, per answer method.
@@ -30,7 +30,7 @@ func CalibrationNote(method string) string {
 // can reuse it without a running program, and it carries the same left margin
 // as every other thing ideacheck prints, so a result left in the scrollback
 // lines up with the steps above it.
-func RenderResult(res *pipeline.Result) string {
+func RenderResult(res *ideacheck.Result) string {
 	var b strings.Builder
 	for _, line := range strings.Split(strings.TrimRight(result(res), "\n"), "\n") {
 		if line = strings.TrimRight(line, " "); line == "" {
@@ -42,7 +42,7 @@ func RenderResult(res *pipeline.Result) string {
 	return b.String()
 }
 
-func result(res *pipeline.Result) string {
+func result(res *ideacheck.Result) string {
 	var b strings.Builder
 	b.WriteString(headline(res) + "\n")
 	if res.Summary != "" {
@@ -73,14 +73,14 @@ func summaryView(text string, width int) string {
 
 // costLine is the one-line cost summary; costDetails shows the working. Both
 // are empty for results saved before costs were recorded.
-func costLine(c pipeline.Cost) string {
+func costLine(c ideacheck.Cost) string {
 	head := heading.Render("Cost") + "  "
 	switch c.Basis {
 	case "":
 		return ""
-	case pipeline.CostFree:
+	case ideacheck.CostFree:
 		return head + good.Render("free") + dim.Render(" · "+c.Note)
-	case pipeline.CostUnpriced:
+	case ideacheck.CostUnpriced:
 		return head + "unknown" + dim.Render(" · "+c.Note)
 	}
 	line := head + bold.Render(usd(c.USD))
@@ -94,15 +94,15 @@ func costLine(c pipeline.Cost) string {
 	return line
 }
 
-func costDetails(c pipeline.Cost) string {
+func costDetails(c ideacheck.Cost) string {
 	if c.Basis == "" {
 		return ""
 	}
 	rows := [][2]string{{"Total", usd(c.USD)}, {"How", map[string]string{
-		pipeline.CostReported: "reported by the provider",
-		pipeline.CostPriced:   "tokens × the pricing table in config.yaml",
-		pipeline.CostFree:     "free",
-		pipeline.CostUnpriced: "not priced",
+		ideacheck.CostReported: "reported by the provider",
+		ideacheck.CostPriced:   "tokens × the pricing table in config.yaml",
+		ideacheck.CostFree:     "free",
+		ideacheck.CostUnpriced: "not priced",
 	}[c.Basis]}}
 	if c.Model != "" {
 		rows = append(rows, [2]string{"Model", c.Model})
@@ -137,7 +137,7 @@ func usd(v float64) string {
 	return fmt.Sprintf("$%.2f", v)
 }
 
-func tokens(c pipeline.Cost) string {
+func tokens(c ideacheck.Cost) string {
 	in := count(c.TokensIn) + " in"
 	if c.TokensCached > 0 {
 		in += " (" + count(c.TokensCached) + " cached)"
@@ -156,11 +156,11 @@ func count(n int) string {
 	return fmt.Sprint(n)
 }
 
-func headline(res *pipeline.Result) string {
+func headline(res *ideacheck.Result) string {
 	switch res.Status {
-	case pipeline.StatusNeedsInput:
+	case ideacheck.StatusNeedsInput:
 		return warnSty.Bold(true).Render("NEEDS INPUT") + "  more information is needed before this idea can be judged"
-	case pipeline.StatusError:
+	case ideacheck.StatusError:
 		return bad.Bold(true).Render("ERROR") + "  " + res.Error
 	}
 	color := lipgloss.NewStyle().Bold(true).Foreground(verdictColors[res.Verdict])
@@ -169,7 +169,7 @@ func headline(res *pipeline.Result) string {
 		dim.Render("confidence"), bold.Render(strings.TrimSpace(pct(res.CompositeConfidence))), res.VerdictReason)
 }
 
-func missingPanel(missing []pipeline.Missing) string {
+func missingPanel(missing []ideacheck.Missing) string {
 	lines := []string{warnSty.Bold(true).Render("Missing information")}
 	for _, m := range missing {
 		lines = append(lines, fmt.Sprintf("%s %s %s", warnSty.Bold(true).Render("?"), m.Ask, dim.Render(fmt.Sprintf("(p=%.2f)", m.Probability))))
@@ -180,7 +180,7 @@ func missingPanel(missing []pipeline.Missing) string {
 // EvidenceView lists what the web lookup found, each with its source: a verdict
 // that leans on a search has to show the search. A finding the judge typed as
 // unrelated is shown struck from the evidence rather than hidden.
-func EvidenceView(r *pipeline.ResearchReport) string {
+func EvidenceView(r *ideacheck.ResearchReport) string {
 	head := heading.Render("Found on the web") + dim.Render("  by "+r.By)
 	if n := len(r.Queries); n > 0 {
 		head += dim.Render(fmt.Sprintf(" · %d searches", n))
@@ -220,7 +220,7 @@ func EvidenceView(r *pipeline.ResearchReport) string {
 
 // contributions lists the dimensions that moved the score most, their title,
 // mark and bar in the one color that says which way they moved it.
-func contributions(title string, color lipgloss.Style, mark string, cs []pipeline.Contribution) string {
+func contributions(title string, color lipgloss.Style, mark string, cs []ideacheck.Contribution) string {
 	if len(cs) == 0 {
 		return ""
 	}
@@ -235,7 +235,7 @@ func contributions(title string, color lipgloss.Style, mark string, cs []pipelin
 	return b.String()
 }
 
-func footer(res *pipeline.Result) string {
+func footer(res *ideacheck.Result) string {
 	parts := []string{}
 	if res.Rubric != nil {
 		parts = append(parts, "rubric "+res.Rubric.Name)

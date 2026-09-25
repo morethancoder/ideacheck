@@ -7,7 +7,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/ideacheck"
 )
 
 const (
@@ -16,10 +16,10 @@ const (
 	id   = "https://ideacheck.dev/schemas/check_result.schema.json"
 )
 
-// CheckResult returns the JSON Schema of pipeline.Result, indented, newline-terminated.
+// CheckResult returns the JSON Schema of ideacheck.Result, indented, newline-terminated.
 func CheckResult() ([]byte, error) {
 	r := jsonschema.Reflector{ExpandedStruct: true}
-	s := r.Reflect(&pipeline.Result{})
+	s := r.Reflect(&ideacheck.Result{})
 	s.ID = id
 	s.Title = "ideacheck check result"
 	s.Description = "Output of `ideacheck -o json` and POST /v1/check. top_strengths/top_risks values are polarity-adjusted: 1 is always good."

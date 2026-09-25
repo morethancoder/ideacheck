@@ -10,11 +10,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/rubric"
 	"github.com/morethancoder/ideacheck/internal/tui"
 	"github.com/morethancoder/ideacheck/internal/ui"
+	"github.com/morethancoder/ideacheck/rubric"
 )
 
 func (a *app) rubricsCmd() *cobra.Command {
@@ -60,7 +60,7 @@ func (a *app) fieldsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use: "fields", Short: "what you can tell ideacheck about an idea, and what each field means", Args: cobra.NoArgs,
 		RunE: func(*cobra.Command, []string) error {
-			fields, err := pipeline.LoadFields(a.files())
+			fields, err := ideacheck.LoadFields(a.files())
 			if err != nil {
 				return err
 			}
@@ -81,7 +81,7 @@ func (a *app) fieldsCmd() *cobra.Command {
 	return cmd
 }
 
-func (a *app) printFields(f *pipeline.Fields) error {
+func (a *app) printFields(f *ideacheck.Fields) error {
 	p := a.printer(a.stdout)
 	defer p.Stop()
 	p.Title("ideacheck", "fields")
@@ -99,7 +99,7 @@ func (a *app) printFields(f *pipeline.Fields) error {
 	return nil
 }
 
-func writeFields(p *ui.Printer, fields []pipeline.Field) {
+func writeFields(p *ui.Printer, fields []ideacheck.Field) {
 	for _, f := range fields {
 		p.Line("%s\"...\"", f.Flag)
 		p.Wrap(4, f.Description)
@@ -160,7 +160,7 @@ func (a *app) showProfile() error {
 		return nil
 	}
 	p.Title("ideacheck", "profile")
-	for _, field := range pipeline.ProfileFields() {
+	for _, field := range ideacheck.ProfileFields() {
 		if v := saved[field]; v != "" {
 			p.Value(field, v)
 		}
@@ -185,8 +185,8 @@ func (a *app) setProfile(args []string) error {
 		if !ok || field == "" {
 			return fmt.Errorf("%q: want field=value", kv)
 		}
-		if !pipeline.KnownField(profileField(field)) {
-			return fmt.Errorf("%q is not a profile field (allowed: %s)", field, strings.Join(pipeline.ProfileFields(), ", "))
+		if !ideacheck.KnownField(profileField(field)) {
+			return fmt.Errorf("%q is not a profile field (allowed: %s)", field, strings.Join(ideacheck.ProfileFields(), ", "))
 		}
 		if value = strings.TrimSpace(value); value == "" {
 			delete(saved, field)
