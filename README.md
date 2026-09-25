@@ -343,7 +343,9 @@ says the evidence is thinner.
 
 `research.yaml` lists the topics (competitors, prior attempts, market, recent
 changes) and `prompts/research_system.md` + `prompts/research.tmpl` what the researcher is told. The findings become
-`evidence` state; a rubric question reads it by listing `evidence` in `uses:`, and
+`evidence` state; a rubric question reads one topic by listing `evidence.<topic>`
+(or all of them with `evidence`) in `uses:` — only topics the chosen rubric reads
+are searched — and
 one that cannot be judged without it sets `requires: [evidence]` and is skipped —
 not guessed — when nothing was searched (`differentiation_holds`: does the claimed
 difference survive the list of what exists?). Research never produces a score.

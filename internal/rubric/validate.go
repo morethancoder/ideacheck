@@ -3,6 +3,7 @@ package rubric
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/morethancoder/ideacheck/internal/judge"
 )
@@ -19,6 +20,10 @@ const (
 var stateFields = map[string]bool{"idea": true, "profile": true, "evidence": true, "finding": true}
 
 const stateNames = "idea, profile, evidence, finding"
+
+// evidencePrefix reads one research topic: evidence.competitors is the
+// competitors topic alone, and only the topics a rubric reads are searched.
+const evidencePrefix = "evidence."
 
 // Validate enforces the question-writing rules shared by every rubric file.
 // All problems are reported at once so a rubric author fixes them in one pass.
@@ -143,11 +148,27 @@ func validateUses(uses []string) []error {
 	}
 	var errs []error
 	for _, u := range uses {
+		if topic, ok := strings.CutPrefix(u, evidencePrefix); ok {
+			if topic == "" || strings.Contains(topic, ".") {
+				errs = append(errs, fmt.Errorf("uses %q must name one research topic, as evidence.<topic id>", u))
+			}
+			continue
+		}
 		if !stateFields[u] {
-			errs = append(errs, fmt.Errorf("uses %q is not one of %s", u, stateNames))
+			errs = append(errs, fmt.Errorf("uses %q is not one of %s, or evidence.<topic id>", u, stateNames))
 		}
 	}
 	return errs
+}
+
+// reads reports whether uses includes the field, whole or one key of it.
+func reads(uses []string, field string) bool {
+	for _, u := range uses {
+		if u == field || strings.HasPrefix(u, field+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // validateRequires: a question cannot require state it does not even look at,
@@ -159,7 +180,7 @@ func validateRequires(q judge.Question) []error {
 			errs = append(errs, fmt.Errorf("requires %q is not one of %s", r, stateNames))
 			continue
 		}
-		if !contains(q.Uses, r) {
+		if !reads(q.Uses, r) {
 			errs = append(errs, fmt.Errorf("requires %q but does not use it", r))
 		}
 	}

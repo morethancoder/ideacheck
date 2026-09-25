@@ -151,6 +151,22 @@ func Names(r Reader, dir string) ([]string, error) {
 	return out, nil
 }
 
+// Evidence names the research topics the rubric's questions read: all of them
+// when a question uses `evidence` whole, none when no question reads it.
+func (rb *Rubric) Evidence() (all bool, topics []string) {
+	for _, q := range rb.Questions {
+		for _, u := range q.Uses {
+			if u == "evidence" {
+				all = true
+			}
+			if t, ok := strings.CutPrefix(u, evidencePrefix); ok && !contains(topics, t) {
+				topics = append(topics, t)
+			}
+		}
+	}
+	return all, topics
+}
+
 // Question returns the question with the given id.
 func (rb *Rubric) Question(id string) (judge.Question, bool) {
 	for _, q := range rb.Questions {

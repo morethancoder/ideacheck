@@ -55,7 +55,7 @@ intake → extract → gaps + router (one batch) → research + sift → score (
 | extract | `extract.go` | one optional model call that pulls idea fields out of free prose, filling only fields the user left empty (`extract: true`) |
 | gaps | `engine.go` + `rubrics/_gaps.yaml` | nouls "does the description state X"; below `threshold` and the field is still empty → `missing[]` |
 | route | `engine.go` + `rubrics/_router.yaml` | one `choice` over idea types → picks `rubrics/<type>.yaml` (`other` → the router's `fallback:`) |
-| research | `research.go`, `lookup.go` + `research.yaml` + `prompts/research*` | findings (with URLs) about the topics in `research.yaml` land in `result.research` and, grouped by topic, in `evidence` state. `lookup.go` is the default path and has no model in the loop: writer **plans** queries (`Planner`; else the topic's own `queries:`) → Go **searches** (`Engine.Search`: SearXNG / Tavily / Brave) → Go **reads** pages to text (`Engine.Pages`) → writer **digests** (`Digester`; else results are the findings; a finding whose URL was not among the results is dropped). `research.search: llm`, or nothing to search with, falls back to the writer's own web tool (`Researcher`). Cached per idea-as-given (`Engine.Cache`, the history DB). Every step degrades, none fails the check |
+| research | `research.go`, `lookup.go` + `research.yaml` + `prompts/research*` | the rubric is picked first, so only the `research.yaml` topics its questions read (`uses: [evidence.<topic>]`) are looked up. Findings (with URLs) land in `result.research` and, grouped by topic, in `evidence` state. `lookup.go` is the default path and has no model in the loop: writer **plans** queries (`Planner`; else the topic's own `queries:`) → Go **searches** (`Engine.Search`: SearXNG / Tavily / Brave) → Go **reads** pages to text (`Engine.Pages`) → writer **digests** (`Digester`; else results are the findings; a finding whose URL was not among the results is dropped). `research.search: llm`, or nothing to search with, falls back to the writer's own web tool (`Researcher`). Cached per idea-as-given (`Engine.Cache`, the history DB). Every step degrades, none fails the check |
 | sift | `research.go` + `rubrics/_evidence.yaml` | the judge types each finding (one `choice` over `idea` + `finding`); options under `drop:` remove it from `evidence`. `research.sift: auto` = only when judge ≠ writer. The cache keeps each finding's relation and who typed it, so the same judge never sifts a cached search twice |
 | score | `engine.go`, `judge/fanout.go` | every rubric question at once, one goroutine each |
 | aggregate | `aggregate.go` | normalize to [0,1], apply polarity, weight, divide by the weights **answered** |
@@ -164,7 +164,10 @@ includes `other`; `score` has 2–10 concrete levels, low → high; weights ≥ 
 every weighted question sets polarity; `uses` lists only the state the question
 needs, and a question about the person sets `requires: [profile]`; state names are
 `idea`, `profile`, `evidence` (research findings by topic; an empty list means
-"searched, found none") and `finding` (`_evidence.yaml` only); name the state
+"searched, found none") and `finding` (`_evidence.yaml` only). Prefer
+`evidence.<topic>` to the whole of `evidence`: the question sees only that topic,
+and a topic no question of the chosen rubric reads is neither searched nor
+sifted (`requires: [evidence]` is met by any topic read); name the state
 the question reads (`idea`, `profile`, `evidence.competitors`) — Jev reads literally; gate expressions may
 reference real question ids only, and see normalized values in [0,1]. After
 changing a question, `make bench ARGS='-b jev'` and compare (`bench --compare`).

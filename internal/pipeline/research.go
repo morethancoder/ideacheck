@@ -150,24 +150,56 @@ func (p *researchPlan) via(writer string) string {
 	return writer
 }
 
-// plan decides, before anything is asked, whether this check will research.
+// plan decides, before anything is asked, whether this check will research,
+// and what: only the topics rb's questions read (all of them when rb is nil).
 // A writer that cannot search is not a fault: the check scores the description.
-func (e *Engine) plan(in Intake, res *Result) *researchPlan {
+// The error is a rubric reading a topic research.yaml does not have.
+func (e *Engine) plan(in Intake, res *Result, rb *rubric.Rubric) (*researchPlan, error) {
 	by, _ := e.writer().(judge.Researcher)
 	if by != nil && !by.CanResearch() {
 		by = nil
 	}
 	if !e.Config.Research.Enabled || in.Empty() || (e.Search == nil && by == nil) {
-		return nil
+		return nil, nil
 	}
 	topics, raw, err := LoadTopics(e.Files)
 	if err != nil {
 		if res != nil {
 			res.Warnings = append(res.Warnings, "not researched: "+err.Error())
 		}
-		return nil
+		return nil, nil
 	}
-	return &researchPlan{topics: topics, raw: raw, search: e.Search, by: by}
+	if rb != nil {
+		if topics, err = topics.readBy(rb); topics == nil || err != nil {
+			return nil, err
+		}
+	}
+	return &researchPlan{topics: topics, raw: raw, search: e.Search, by: by}, nil
+}
+
+// readBy narrows the topics to the ones rb's questions read; nil when it reads
+// none, so a rubric that never looks at evidence costs no search at all.
+func (t *Topics) readBy(rb *rubric.Rubric) (*Topics, error) {
+	all, names := rb.Evidence()
+	if all {
+		return t, nil
+	}
+	for _, n := range names {
+		if !contains(t.ids(), n) {
+			return nil, fmt.Errorf("rubric %s reads evidence.%s, a topic %s does not look up", rb.Name, n, ResearchFile)
+		}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	out := *t
+	out.Topics = nil
+	for _, topic := range t.Topics {
+		if contains(names, topic.ID) {
+			out.Topics = append(out.Topics, topic)
+		}
+	}
+	return &out, nil
 }
 
 func (p *researchPlan) covers() []string {
@@ -303,7 +335,7 @@ func (e *Engine) cacheKey(p *researchPlan, about judge.State) (string, error) {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00%s\x00%s\x00", p.via(""), e.writer().Name(), e.Config.Backends[e.Config.WriterName()].Model)
 	h.Write(p.raw)
-	h.Write([]byte{0})
+	fmt.Fprintf(h, "\x00%s\x00", strings.Join(p.topics.ids(), ",")) // a rubric that reads fewer topics searches less
 	h.Write([]byte(idea))
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

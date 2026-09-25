@@ -78,6 +78,8 @@ func TestValidationRejectsBrokenRubrics(t *testing.T) {
 		{"weight without polarity", q("    kind: noul\n    weight: 1\n"), "polarity"},
 		{"bad polarity", q("    kind: noul\n    weight: 1\n    polarity: 2\n"), "polarity"},
 		{"unknown state field", "questions:\n  - id: a\n    kind: noul\n    instructions: x\n    weight: 1\n    polarity: 1\n    uses: [secrets]\n" + scoringTail, "uses"},
+		{"evidence without a topic", "questions:\n  - {id: a, kind: noul, instructions: x, weight: 1, polarity: 1, uses: [idea, evidence.]}\n" + scoringTail, "one research topic"},
+		{"requires a field it reads no part of", "questions:\n  - {id: a, kind: noul, instructions: x, weight: 1, polarity: 1, uses: [idea], requires: [evidence]}\n" + scoringTail, "does not use"},
 		{"no uses", "questions:\n  - id: a\n    kind: noul\n    instructions: x\n    weight: 1\n    polarity: 1\n" + scoringTail, "uses"},
 		{"nothing weighted", q("    kind: noul\n"), "no weighted"},
 		{"weighted choice without values", q("    kind: choice\n    weight: 1\n    polarity: 1\n    options: {x: X, other: O}\n"), "values"},

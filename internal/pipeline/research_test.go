@@ -158,8 +158,8 @@ func TestSiftIsCachedWithTheFindings(t *testing.T) {
 		return n
 	}
 
-	first, _ := e.Check(context.Background(), idea, Options{Proceed: true})
-	second, _ := e.Check(context.Background(), idea, Options{Proceed: true})
+	first, _ := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
+	second, _ := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
 	if sifted(first) != 3 || sifted(second) != 0 || !second.Research.Cached {
 		t.Fatalf("sift questions = %d then %d, want 3 then none", sifted(first), sifted(second))
 	}
@@ -171,9 +171,47 @@ func TestSiftIsCachedWithTheFindings(t *testing.T) {
 	for k := range cache.m {
 		cache.m[k] = old
 	}
-	third, _ := e.Check(context.Background(), idea, Options{Proceed: true})
+	third, _ := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
 	if sifted(third) != 3 || third.Research.Findings[1].Used {
 		t.Errorf("an old cache entry: %d sift questions, findings %+v", sifted(third), third.Research.Findings)
+	}
+}
+
+// The rubric is known before research, so only the topics its questions read
+// are searched; a rubric that reads no evidence costs no search, and one that
+// reads a topic research.yaml does not have is a config error.
+func TestOnlyTheTopicsTheRubricReadsAreSearched(t *testing.T) {
+	dir := t.TempDir()
+	findingsFixture(t, dir)
+	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
+	res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "side_project"})
+	if err != nil || res.Research == nil || len(res.Research.Findings) != 2 {
+		t.Fatalf("side_project research = %+v, %v; want the two competitors only", res.Research, err)
+	}
+	for _, f := range res.Research.Findings {
+		if f.Topic != "competitors" {
+			t.Errorf("searched %q, which no side_project question reads", f.Topic)
+		}
+	}
+
+	user := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(user, "rubrics"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rubricFile := func(name, uses string) {
+		body := "questions:\n  - {id: a, kind: noul, instructions: x, uses: " + uses + ", weight: 1, polarity: 1}\nverdict:\n  thresholds: {build: 0.7, explore: 0.5, park: 0.3}\n"
+		if err := os.WriteFile(filepath.Join(user, "rubrics", name+".yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rubricFile("quiet", "[idea]")
+	rubricFile("odd", "[idea, evidence.weather]")
+	e.Files = config.NewFiles(user)
+	if res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "quiet"}); err != nil || res.Research != nil {
+		t.Errorf("a rubric that reads no evidence: research = %+v, %v", res.Research, err)
+	}
+	if _, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "odd"}); err == nil || !strings.Contains(err.Error(), "evidence.weather") {
+		t.Errorf("a topic research.yaml does not have: %v", err)
 	}
 }
 

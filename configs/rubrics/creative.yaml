@@ -3,6 +3,7 @@
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
 #  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence.<topic>` reads one research topic; only topics some question reads are searched.
 #    `evidence` is what a web search found (research.yaml lists the topics); it is
 #    only there when the check could research. A question that merely benefits
 #    from it lists it in `uses`; one that cannot be judged without it also sets
@@ -16,7 +17,7 @@ questions:
     kind: score
     weight: 1.5
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.competitors]
     instructions: How original is the concept as described? When `evidence` is present, `evidence.competitors` lists similar existing works a web search found.
     levels:
       - A direct copy of a familiar work or formula

@@ -3,6 +3,7 @@
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
 #  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence.<topic>` reads one research topic; only topics some question reads are searched.
 #    `evidence` is what a web search found (research.yaml lists the topics); it is
 #    only there when the check could research. A question that merely benefits
 #    from it lists it in `uses`; one that cannot be judged without it also sets
@@ -33,7 +34,7 @@ questions:
     kind: noul
     weight: 1.0
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.competitors, evidence.prior_attempts]
     # Whether the question is still open can only be judged against what a
     # search for existing work turned up.
     requires: [evidence]
@@ -63,7 +64,7 @@ questions:
     kind: score
     weight: 0.5
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.recent_changes]
     instructions: How strong is the reason this is newly possible or newly needed? When `evidence` is present, `evidence.recent_changes` lists recent changes a web search found.
     levels:
       - Nothing has changed; this could have been done years ago

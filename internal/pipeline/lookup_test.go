@@ -80,7 +80,7 @@ func TestLookupWithoutAWriter(t *testing.T) {
 	fs, fp := &fakeSearch{}, &fakePages{}
 	e.Search, e.Pages = fs, fp
 
-	res, err := e.Check(context.Background(), Intake{Idea: "x", Fields: map[string]string{"solution": "dental recall texting"}}, Options{Proceed: true})
+	res, err := e.Check(context.Background(), Intake{Idea: "x", Fields: map[string]string{"solution": "dental recall texting"}}, Options{Proceed: true, Rubric: "business"})
 	if err != nil || res.Research == nil {
 		t.Fatalf("research = %+v, %v", res.Research, err)
 	}
@@ -122,7 +122,7 @@ func TestLookupPlansSearchesAndDigests(t *testing.T) {
 	fs := &fakeSearch{}
 	e.Writer, e.Search, e.Pages = w, fs, &fakePages{}
 
-	res, err := e.Check(context.Background(), idea, Options{Proceed: true})
+	res, err := e.Check(context.Background(), idea, Options{Proceed: true, Rubric: "business"})
 	if err != nil || res.Research == nil {
 		t.Fatalf("research = %+v, %v", res.Research, err)
 	}

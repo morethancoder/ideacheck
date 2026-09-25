@@ -5,6 +5,8 @@ package judge
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -67,14 +69,33 @@ func (a Answer) Failed() bool { return a.Err != "" }
 // string | object | array). Keep it minimal per question (see Question.Uses).
 type State map[string]any
 
-// Sub returns only the named top-level fields: the context-rot rule says a
-// question must not see state it does not need. Unknown names are skipped.
+// Sub returns only the named fields: the context-rot rule says a question must
+// not see state it does not need. "evidence.market" is one key of an object
+// field, kept under its parent. Unknown names are skipped.
 func (s State) Sub(uses []string) State {
 	out := make(State, len(uses))
 	for _, k := range uses {
-		if v, ok := s[k]; ok {
-			out[k] = v
+		parent, key, dotted := strings.Cut(k, ".")
+		if !dotted {
+			if v, ok := s[k]; ok {
+				out[k] = v
+			}
+			continue
 		}
+		if slices.Contains(uses, parent) {
+			continue // the whole field is asked for anyway
+		}
+		from, _ := s[parent].(map[string]any)
+		v, ok := from[key]
+		if !ok {
+			continue
+		}
+		part, _ := out[parent].(map[string]any)
+		if part == nil {
+			part = map[string]any{}
+			out[parent] = part
+		}
+		part[key] = v
 	}
 	return out
 }

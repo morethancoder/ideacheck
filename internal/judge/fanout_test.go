@@ -307,6 +307,22 @@ func TestQuestionSeesOnlyTheStateItUses(t *testing.T) {
 	}
 }
 
+// A question that reads one research topic sees that topic, not the others.
+func TestSubKeepsOnlyTheTopicsNamed(t *testing.T) {
+	s := State{"idea": "i", "evidence": map[string]any{"market": []any{"m"}, "competitors": []any{}, "prior_attempts": []any{"p"}}}
+	got := s.Sub([]string{"idea", "evidence.market", "evidence.competitors", "evidence.nope"})
+	ev, _ := got["evidence"].(map[string]any)
+	if len(got) != 2 || len(ev) != 2 || ev["market"] == nil || ev["competitors"] == nil {
+		t.Errorf("Sub = %v, want market and competitors only", got)
+	}
+	if whole := s.Sub([]string{"evidence", "evidence.market"}); len(whole["evidence"].(map[string]any)) != 3 {
+		t.Errorf("asking for the whole field and one key must give the whole field: %v", whole)
+	}
+	if none := s.Sub([]string{"idea.text"}); len(none) != 0 {
+		t.Errorf("a key of a field that is not an object: %v", none)
+	}
+}
+
 func TestEvents(t *testing.T) {
 	j := &fakeJudge{fn: func(_ context.Context, _ State, q Question, _ int) (Answer, error) {
 		if q.ID == "q1" {

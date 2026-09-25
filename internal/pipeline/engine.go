@@ -90,8 +90,17 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 		res.IdeaType = ideaType(routeAnswer)
 	}
 
+	// The rubric is known before research, so only what it reads is looked up.
+	name, warnings := e.pickRubric(o.Rubric, router.Fallback, routeAnswer)
+	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, name)
+	if err != nil {
+		return nil, err
+	}
 	// A fact the web can answer is not worth stopping to ask a person for.
-	plan := e.plan(in, res)
+	plan, err := e.plan(in, res, rb)
+	if err != nil {
+		return nil, err
+	}
 	if open := Unanswered(res.Missing, in, append(plan.covers(), o.Answered...)); len(open) > 0 && !o.Proceed {
 		res.Status = StatusNeedsInput
 		return e.finish(res, start, extra...), nil
@@ -102,12 +111,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	open := Unanswered(res.Missing, in, o.Answered)
 	res.Partial = len(open) > 0
 
-	name, warnings := e.pickRubric(o.Rubric, router.Fallback, routeAnswer)
 	res.Warnings = append(res.Warnings, warnings...)
-	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, name)
-	if err != nil {
-		return nil, err
-	}
 	res.Rubric = &RubricRef{Name: rb.Name, Hash: rb.Hash}
 
 	ask, held := withheld(rb.Questions, state)
@@ -139,12 +143,29 @@ func (e *Engine) writer() judge.Judge {
 // and no more than the gaps rubric's ask_limit. Asking for everything at once
 // is how a one-line idea turns into a form.
 func (e *Engine) FollowUps(res *Result, in Intake, answered []string) []Missing {
-	open := Unanswered(res.Missing, in, append(e.plan(in, nil).covers(), answered...))
+	plan, _ := e.plan(in, nil, e.chosen(res))
+	open := Unanswered(res.Missing, in, append(plan.covers(), answered...))
 	gaps, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.GapsName)
 	if err == nil && gaps.AskLimit > 0 && len(open) > gaps.AskLimit {
 		open = open[:gaps.AskLimit]
 	}
 	return open
+}
+
+// chosen is the rubric a result was, or will be, scored with: the idea type's
+// own, else the router's fallback; nil when neither loads.
+func (e *Engine) chosen(res *Result) *rubric.Rubric {
+	if res.IdeaType != nil {
+		if rb, err := rubric.Load(e.Files, e.Config.RubricsDir, res.IdeaType.Choice); err == nil {
+			return rb
+		}
+	}
+	router, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.RouterName)
+	if err != nil {
+		return nil
+	}
+	rb, _ := rubric.Load(e.Files, e.Config.RubricsDir, router.Fallback)
+	return rb
 }
 
 func (e *Engine) now() time.Time {

@@ -59,7 +59,7 @@ func TestJudgeCallsPerCheck(t *testing.T) {
 		o    Options
 		want int64
 	}{
-		{"routed, researched and sifted", routed, Options{Proceed: true}, 13},
+		{"routed, researched and sifted", routed, Options{Proceed: true}, 10},
 		{"the same idea again, research cached", routed, Options{Proceed: true}, 9},
 		{"rubric forced, with a profile", forced, Options{Proceed: true, Rubric: "business"}, 26},
 	}
