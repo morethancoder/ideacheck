@@ -200,8 +200,16 @@ pricing:
 #   models:   offered as a list (plus "Other…" to type any id); the first is the default.
 #             Each label gets its in/out price from `pricing` above — don't write prices here
 #   efforts:  effort levels offered after the model; a model with no_effort skips the step
-#   discover: codex | ollama — list the models actually available instead of `models`;
-#             `model` stays the default only when it is in that list, else the first one is
+#   discover: list the models the provider serves today instead of `models`, so a
+#             new release shows up without editing this file: codex (`codex debug
+#             models`), claude (the aliases `claude --help` names), ollama (/api/tags),
+#             openai (GET <base_url>/models, OpenRouter's shape too), anthropic,
+#             typesafe (GET /v1/models, with the key) or huggingface (discover_url).
+#             `models` then only lends labels. `model` stays the default only when
+#             it is in the list, else the newest one is. Unreachable = `models`.
+#   discover_url / discover_match / discover_skip / discover_needs: the list to
+#             read, regexps an id must / must not match, and the OpenRouter
+#             supported_parameters a model must have to be offered
 #   live_prices: label models with current prices from prices_url (no key needed),
 #             falling back to `pricing`. Off for Ollama: local is free, and Ollama
 #             Cloud bills its own rates, which the pricing table carries.
@@ -227,6 +235,10 @@ setup:
       model: aac6fef/laya-typed-decisions-mlx
       needs_cli: uv
       billing: local
+      # laya-mlx loads the MLX checkpoints; the Core ML ones are for apps.
+      discover: huggingface
+      discover_url: https://huggingface.co/api/models?author=aac6fef&search=laya
+      discover_match: -mlx$
       models:
         - { id: aac6fef/laya-typed-decisions-mlx, label: "laya-typed-decisions — 1,024-token context (recommended)", no_effort: true }
         - { id: aac6fef/laya-mlx, label: "laya — the original English model, 512-token context", no_effort: true }
@@ -238,6 +250,7 @@ setup:
       needs_cli: claude
       billing: subscription
       live_prices: true
+      discover: claude
       efforts: [low, medium, high, xhigh, max]
       models:
         - { id: sonnet, label: "Sonnet — balanced" }
@@ -259,19 +272,22 @@ setup:
         - { id: gpt-5.5, label: "gpt-5.5" }
     # Jev answers each question as calibrated probabilities (no sampling, no
     # voting) and takes a whole rubric in one request. No effort levels: it
-    # does not reason. Pinned rather than jev-latest, which moves.
+    # does not reason. Setup offers what TypeSafe lists today (jev-latest first).
     - id: jev
       label: TypeSafe Jev API key (built for typed judgments; judges only)
       needs_writer: true
       backend: jev
       base_url: https://api.typesafe.ai
-      model: jev-1.13.0
+      model: jev-latest
       key_env: TYPESAFE_API_KEY
       key_url: https://typesafe.ai
       billing: api
+      discover: typesafe
       models:
-        - { id: jev-1.13.0, label: "jev-1.13.0", no_effort: true }
-        - { id: jev-latest, label: "jev-latest — moves with each release", no_effort: true }
+        - { id: jev-latest, label: "jev-latest — the current release (recommended)", no_effort: true }
+        - { id: jev-preview, label: "jev-preview — the next release, early", no_effort: true }
+        # Not listed by TypeSafe any more; kept so a saved pin stays selected.
+        - { id: jev-1.13.0, label: "jev-1.13.0 — pinned", no_effort: true }
     - id: anthropic
       label: Anthropic API key
       backend: structured
@@ -281,6 +297,7 @@ setup:
       key_url: https://console.anthropic.com/settings/keys
       billing: api
       live_prices: true
+      discover: anthropic
       efforts: [low, medium, high, xhigh, max]
       models:
         - { id: claude-sonnet-5, label: "claude-sonnet-5" }
@@ -297,6 +314,10 @@ setup:
       key_url: https://platform.openai.com/api-keys
       billing: api
       live_prices: true
+      # /models lists every OpenAI model; offer the chat ones structured output runs on.
+      discover: openai
+      discover_match: ^(gpt-\d|o\d)
+      discover_skip: (audio|realtime|tts|transcribe|search|image|embedding|instruct|codex)
       efforts: [low, medium, high]
       models:
         - { id: gpt-5-mini, label: "gpt-5-mini" }
@@ -313,6 +334,8 @@ setup:
       key_url: https://openrouter.ai/keys
       billing: api
       live_prices: true
+      discover: openai
+      discover_needs: [structured_outputs]
       models:
         - { id: anthropic/claude-sonnet-5, label: "anthropic/claude-sonnet-5" }
         - { id: anthropic/claude-opus-5, label: "anthropic/claude-opus-5" }

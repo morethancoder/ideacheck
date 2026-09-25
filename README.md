@@ -128,10 +128,15 @@ the first choice is **Off — no thinking**, the default: every question is one
 narrow judgment, and thinking multiplies the wait (Haiku spent 128 output tokens
 to answer "no" with it on, 4 with it off). A local Ollama model never thinks
 before answering either: the probability is read from the first token's logits,
-so there would be nothing to read. Codex and Ollama
-list the models your login or server actually has (and default to one that is
-installed); the others list common models with their API price. "Other…" takes any
-model id.
+so there would be nothing to read. Every provider's list is read live, so a new
+release shows up without an ideacheck update: Codex and Ollama list the models your
+login or server actually has (and default to one that is installed), the Claude CLI
+the aliases its `--help` names (each moves to the newest model of its family), and
+Anthropic, OpenAI, OpenRouter, TypeSafe and Laya's Hugging Face page what they serve
+today, newest first, each with the effort levels that model takes and its price.
+OpenRouter offers only models that support structured output (type `/` to filter).
+A list that needs a key waits for it, and one that cannot be reached falls back to
+the presets in `config.yaml`. "Other…" takes any model id.
 
 Before every check ideacheck makes sure a local Ollama is running and has the model,
 and that a Laya checkpoint is downloaded. If not, it says so in one line (start

@@ -260,6 +260,11 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
 - An agent loop is the expensive way to do anything here: each turn re-sends all
   earlier tool output. Before adding a tool to a model call, ask whether Go can
   fetch the material and hand it over in one call instead.
+- Setup's model lists are read live (`discover:` per provider, `internal/cli/models.go`):
+  a model id or effort level written into Go or a preset list goes stale with the
+  next release, so `models:` in `config.yaml` only lends labels and is the fallback
+  when a list cannot be reached. `claude` has no list command; its aliases come from
+  `--help` (verified on 2.1.282).
 - The search flags were verified against the installed CLIs (`claude` 2.1.278,
   `codex` 0.153.4) — re-verify them, as the comments beside them say, when bumping.
 - `-b mock` is the offline backend: use it for anything that is not about a real

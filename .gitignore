@@ -4,3 +4,4 @@ bench/results/*
 .env
 .playwright/
 *.db
+.claude/worktrees/

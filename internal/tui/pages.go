@@ -207,7 +207,8 @@ func (a *App) loadModels(d *setupDraft, p config.Provider, role string) *pick {
 	if role == roleWriter {
 		effort = ""
 	}
-	if model, e, ok := d.was(p); ok {
+	model, e, saved := d.was(p)
+	if saved {
 		want, effort = model, e
 	}
 	k.model, k.custom, k.effort = otherModel, want, effort
@@ -216,10 +217,18 @@ func (a *App) loadModels(d *setupDraft, p config.Provider, role string) *pick {
 			k.model, k.custom = want, ""
 		}
 	}
-	// A discovered list is what is actually installed: never default to a model
-	// that is not in it (enter-enter-enter would save one that cannot run).
-	if discovered && k.model == otherModel {
+	// A discovered list is what the provider serves today: never default to a
+	// preset it no longer lists (enter-enter-enter would save one that cannot
+	// run). A saved model this provider's presets name stays, typed under
+	// "Other…": a pinned version may still answer after the list stopped
+	// naming it. (was matches by backend, so a saved id from another provider
+	// on the same backend is not kept.)
+	pinned := saved && slices.ContainsFunc(p.Models, func(m config.ModelChoice) bool { return m.ID == want })
+	if discovered && k.model == otherModel && !pinned {
 		k.model, k.custom = k.models[0].ID, ""
+	}
+	if len(k.models) > 15 {
+		k.note = strings.TrimSpace(k.note + " Type / to filter.")
 	}
 	if !slices.Contains(k.efforts(p), k.effort) {
 		k.effort = ""

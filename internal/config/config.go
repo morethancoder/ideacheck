@@ -150,11 +150,19 @@ type Provider struct {
 	KeyURL      string `koanf:"key_url"`   // where to get one
 	NeedsCLI    string `koanf:"needs_cli"` // executable that must be on PATH
 	Billing     string `koanf:"billing"`   // copied to backends.<backend>.billing
-	// Discover names a live model list to offer instead of Models: "codex"
-	// (`codex debug models`) or "ollama" (the server's /api/tags).
-	Discover string        `koanf:"discover"`
-	Models   []ModelChoice `koanf:"models"`  // offered in setup; "Other" lets the user type any id
-	Efforts  []string      `koanf:"efforts"` // effort levels for models that do not list their own
+	// Discover names a live model list to offer instead of Models, so setup
+	// follows what the provider serves today: codex (`codex debug models`),
+	// claude (the aliases `claude --help` advertises), ollama (/api/tags),
+	// openai (GET <base_url>/models; OpenRouter's richer shape included),
+	// anthropic (GET /v1/models), typesafe (GET /v1/models) or huggingface
+	// (a Hub search, DiscoverURL). Models then only lend their labels.
+	Discover      string        `koanf:"discover"`
+	DiscoverURL   string        `koanf:"discover_url"`   // the list to read instead of the default for Discover
+	DiscoverMatch string        `koanf:"discover_match"` // regexp a listed id must match to be offered
+	DiscoverSkip  string        `koanf:"discover_skip"`  // regexp a listed id must not match
+	DiscoverNeeds []string      `koanf:"discover_needs"` // supported_parameters a listed model must have (OpenRouter)
+	Models        []ModelChoice `koanf:"models"`         // offered in setup; "Other" lets the user type any id
+	Efforts       []string      `koanf:"efforts"`        // effort levels for models that do not list their own
 	// LivePrices labels models with prices from Setup.PricesURL, falling back
 	// to the pricing table. Off for a provider that bills at its own rates.
 	LivePrices bool `koanf:"live_prices"`

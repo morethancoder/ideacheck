@@ -29,6 +29,7 @@ type fakeHost struct {
 	providers []config.Provider
 	persists  []*pipeline.Result
 	profile   map[string]string
+	current   [3]string // backend, model, effort the judge runs now; zero = mock
 	writer    [3]string // backend, model, effort of the writer in effect
 	notReady  string    // Engine fails with *NotReady until setup is saved
 	models    []config.ModelChoice
@@ -48,7 +49,12 @@ func (h *fakeHost) Providers() []config.Provider {
 	}
 	return []config.Provider{{ID: "claude-cli", Backend: "claude-cli", Model: "sonnet"}, {ID: "openai", Backend: "structured", Provider: "openai", Model: "gpt-x", KeyEnv: "OPENAI_API_KEY"}}
 }
-func (h *fakeHost) Current() (string, string, string) { return "mock", "mock", "" }
+func (h *fakeHost) Current() (string, string, string) {
+	if h.current != [3]string{} {
+		return h.current[0], h.current[1], h.current[2]
+	}
+	return "mock", "mock", ""
+}
 func (h *fakeHost) Models(p config.Provider, _ string) ([]config.ModelChoice, error) {
 	if h.models != nil {
 		return h.models, nil
@@ -316,6 +322,23 @@ func TestSetupNeverDefaultsToAModelThatIsNotInstalled(t *testing.T) {
 	a.open(pageSetup)
 	if got := loadChosen(a).modelID(); got != "qwen3:8b" {
 		t.Errorf("default model = %q, want the preset when it is installed", got)
+	}
+}
+
+func TestSetupKeepsAPinnedModelTheLiveListNoLongerNames(t *testing.T) {
+	jev := config.Provider{ID: "jev", Backend: "jev", Model: "jev-latest", Discover: "typesafe",
+		Models: []config.ModelChoice{{ID: "jev-latest"}, {ID: "jev-1.13.0"}}}
+	h := &fakeHost{t: t, providers: []config.Provider{jev}, models: []config.ModelChoice{{ID: "jev-preview"}, {ID: "jev-latest"}},
+		current: [3]string{"jev", "jev-1.13.0", ""}}
+	a := newApp(h, Start{Page: pageMenu})
+	a.open(pageSetup)
+	if got := loadChosen(a).modelID(); got != "jev-1.13.0" {
+		t.Errorf("model = %q, want the saved pin kept", got)
+	}
+	h.current = [3]string{"jev", "retired-model", ""}
+	a.open(pageSetup)
+	if got := loadChosen(a).modelID(); got != "jev-preview" {
+		t.Errorf("model = %q, want the newest listed: a saved id the presets do not name is not a pin", got)
 	}
 }
 
