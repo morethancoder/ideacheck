@@ -1,0 +1,12 @@
+// Build settings shared by Debug and Release. Secrets do not live here.
+//
+// REVENUECAT_API_KEY is RevenueCat's public iOS SDK key (appl_…). Put it in
+// Config/Secrets.xcconfig, which git ignores:
+//
+//   REVENUECAT_API_KEY = appl_xxxxxxxxxxxxxxxxxxxxxxxx
+//
+// Left empty, the app runs without RevenueCat: the paywall lists the StoreKit
+// products (from StoreKit/Sparkjudge.storekit in the simulator) and says
+// purchases are not connected to an account.
+REVENUECAT_API_KEY =
+#include? "Secrets.xcconfig"

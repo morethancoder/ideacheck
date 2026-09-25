@@ -7,8 +7,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.vadSensitivity) private var vad = 1
     @AppStorage(SettingsKey.autoCheck) private var autoCheck = false
     @AppStorage(SettingsKey.checker) private var checkerRaw = CheckerKind.remote.rawValue
-    @AppStorage(SettingsKey.serverURL) private var serverURL = AppSettings.defaultServerURL
-    @AppStorage(SettingsKey.proPreview) private var proPreview = false
+    @AppStorage(SettingsKey.serverURL) private var serverURL = ""
     @Environment(Entitlements.self) private var entitlements
     @Environment(\.ideaSuggester) private var writer
     @State private var catalog = TranscriberCatalog()
@@ -19,20 +18,27 @@ struct SettingsView: View {
     }
 
     private var engine: TranscriberEngineID { TranscriberEngineID(rawValue: engineRaw) ?? .appleSpeech }
+    private var checker: CheckerKind { CheckerKind(rawValue: checkerRaw) ?? .remote }
 
     var body: some View {
         NavigationStack {
             Form {
+                judge
+                plan
                 transcription
                 capture
                 review
-                checking
                 cardStyles
+                #if DEBUG
+                developer
+                #endif
                 about
             }
             .scrollContentBackground(.hidden)
             .background(Color.sjInk)
             .navigationTitle("Settings")
+            .refreshable { await entitlements.refreshPlan() }
+            .task { await entitlements.refreshPlan() }
             .task(id: "\(engineRaw)|\(localeID)") {
                 await catalog.refresh(engine: engine, localeIdentifier: localeID.isEmpty ? nil : localeID)
                 // The choice must be one this device can run: fall back to the first that is.
@@ -40,6 +46,81 @@ struct SettingsView: View {
                    let usable = catalog.options.first(where: { $0.availability.isSelectable }) {
                     engineRaw = usable.engine.rawValue
                 }
+            }
+        }
+    }
+
+    // MARK: - Judge and plan
+
+    /// Who checks an idea: the model on this iPhone (free, private) or
+    /// Sparkjudge Cloud (Pro: Jev judging, with web research).
+    private var judge: some View {
+        Section {
+            JudgeRow(title: "On this iPhone", badge: "Free · private", symbol: "iphone",
+                     detail: OnDeviceChecker.isAvailable
+                        ? "Apple's on-device model judges. Nothing leaves your phone."
+                        : "Apple's on-device model judges and nothing leaves your phone. Coming in a later version.",
+                     selected: checker == .onDevice, locked: false, available: OnDeviceChecker.isAvailable) {
+                checkerRaw = CheckerKind.onDevice.rawValue
+            }
+            JudgeRow(title: "Sparkjudge Cloud", badge: entitlements.isPro ? "Pro" : "Pro · try free", symbol: "cloud",
+                     detail: "Jev, a judge built for these questions, scores the idea after searching the web for competitors and demand. More accurate, with sources.",
+                     selected: checker == .remote, locked: !entitlements.isPro, available: true) {
+                checkerRaw = CheckerKind.remote.rawValue
+            }
+        } header: {
+            Text("Judge")
+        } footer: {
+            if checker == .remote, !entitlements.isPro, let plan = entitlements.plan {
+                Text("Free accounts get \(plan.limit) hosted checks a month to try Sparkjudge Cloud; \(plan.remaining) left, renewing \(plan.resetsAt.formatted(.dateTime.month(.wide).day())).")
+            } else if checker == .preview {
+                Text(CheckerKind.preview.detail)
+            }
+        }
+    }
+
+    private var plan: some View {
+        Section {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entitlements.isPro ? "Sparkjudge Pro" : "Free").font(.headline)
+                    if let plan = entitlements.plan {
+                        Text(plan.usageLine).font(.subheadline).foregroundStyle(Color.sjMuted)
+                    } else if entitlements.loadingPlan {
+                        Text("Asking Sparkjudge Cloud…").font(.subheadline).foregroundStyle(Color.sjMuted)
+                    } else if let problem = entitlements.planProblem {
+                        Text(problem).font(.subheadline).foregroundStyle(Color.sjMuted)
+                    }
+                }
+                Spacer()
+                if let plan = entitlements.plan {
+                    UsageRing(used: plan.used, limit: plan.limit)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            if entitlements.isPro {
+                if let until = entitlements.plan?.proUntil {
+                    LabeledContent("Renews or ends", value: until.formatted(date: .abbreviated, time: .omitted))
+                }
+                Link("Manage subscription", destination: URL(string: "https://apps.apple.com/account/subscriptions")!)
+            } else {
+                Button {
+                    entitlements.paywall = .browse
+                } label: {
+                    Label("See what Pro adds", systemImage: "sparkles")
+                }
+                .tint(Color.sjSpark)
+            }
+            Button("Restore purchases") { Task { await entitlements.restore() } }
+                .disabled(entitlements.restoring)
+            if let notice = entitlements.notice {
+                Text(notice).font(.footnote).foregroundStyle(Color.sjMuted)
+            }
+        } header: {
+            Text("Plan")
+        } footer: {
+            if let plan = entitlements.plan {
+                Text("Hosted checks reset on \(plan.resetsAt.formatted(.dateTime.month(.wide).day())). A check that ends without a score is given back.")
             }
         }
     }
@@ -120,47 +201,6 @@ struct SettingsView: View {
         }
     }
 
-    private var checking: some View {
-        Section {
-            Picker("Check with", selection: $checkerRaw) {
-                ForEach(CheckerKind.allCases) { k in
-                    Text(k == .onDevice ? "\(k.title) (later)" : k.title)
-                        .tag(k.rawValue)
-                        .selectionDisabled(k == .onDevice && !OnDeviceChecker.isAvailable)
-                }
-            }
-            if checkerRaw == CheckerKind.remote.rawValue {
-                TextField("Server URL", text: $serverURL)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: serverURL) { connection = .unknown }
-                HStack {
-                    Button("Test connection") { Task { await test() } }
-                        .disabled(connection == .testing)
-                    Spacer()
-                    switch connection {
-                    case .unknown: EmptyView()
-                    case .testing: ProgressView().controlSize(.small)
-                    case .ok: Label("Reachable", systemImage: "checkmark.circle.fill").foregroundStyle(Verdict.build.color)
-                    case .failed: Label("Not reachable", systemImage: "xmark.circle.fill").foregroundStyle(Verdict.kill.color)
-                    }
-                }
-            }
-        } header: {
-            Text("Checking")
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text((CheckerKind(rawValue: checkerRaw) ?? .remote).detail)
-                if checkerRaw == CheckerKind.remote.rawValue {
-                    Text("Run `ideacheck serve` on your Mac. From a phone, use the Mac's address on your network instead of 127.0.0.1.")
-                }
-                if case .failed(let why) = connection { Text(why).foregroundStyle(Verdict.kill.color) }
-            }
-        }
-    }
-
     private var cardStyles: some View {
         Section {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 10)], spacing: 10) {
@@ -183,20 +223,73 @@ struct SettingsView: View {
                             }
                         }
                         .saturation(locked ? 0.3 : 1)
+                        .onTapGesture { if locked { entitlements.paywall = .styles } }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(family.name) style\(locked ? ", Pro, locked" : "")")
+                        .accessibilityAddTraits(locked ? .isButton : [])
                 }
             }
             .padding(.vertical, 6)
-            Toggle("Pro preview (developer)", isOn: $proPreview)
-                .tint(Color.sjViolet)
-                .onChange(of: proPreview) { _, on in entitlements.isPro = on }
         } header: {
             Text("Card styles")
         } footer: {
-            Text("Every checked idea gets its own background, rolled from the idea itself. Free ideas draw from three families; Pro unlocks all six. Purchases aren't wired up yet.")
+            Text(entitlements.isPro
+                 ? "Every checked idea gets its own background, rolled from the idea itself, from all six families."
+                 : "Every checked idea gets its own background, rolled from the idea itself. Free ideas draw from three families; Pro unlocks all six.")
         }
     }
+
+    #if DEBUG
+    /// Debug builds only: the server, the offline preview and a Pro switch.
+    private var developer: some View {
+        @Bindable var entitlements = entitlements
+        return Section {
+            Picker("Check with", selection: $checkerRaw) {
+                Text("Sparkjudge Cloud").tag(CheckerKind.remote.rawValue)
+                Text(CheckerKind.preview.title).tag(CheckerKind.preview.rawValue)
+            }
+            TextField(AppSettings.hostedURL.absoluteString, text: $serverURL)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(.body, design: .monospaced))
+                .onChange(of: serverURL) { connection = .unknown }
+                .onSubmit { Task { await entitlements.refreshPlan() } }
+            HStack {
+                Button("Test connection") { Task { await test() } }
+                    .disabled(connection == .testing)
+                Spacer()
+                switch connection {
+                case .unknown: EmptyView()
+                case .testing: ProgressView().controlSize(.small)
+                case .ok: Label("Reachable", systemImage: "checkmark.circle.fill").foregroundStyle(Verdict.build.color)
+                case .failed: Label("Not reachable", systemImage: "xmark.circle.fill").foregroundStyle(Verdict.kill.color)
+                }
+            }
+            LabeledContent("Signing", value: HostedAuth.resolve(baseURL: AppSettings.serverURL) == .appAttest ? "App Attest" : "user id only (attest off)")
+            LabeledContent("User id") {
+                Text(entitlements.userID).font(.caption2.monospaced()).textSelection(.enabled)
+            }
+            Toggle("Pro preview", isOn: $entitlements.previewPro)
+                .tint(Color.sjViolet)
+        } header: {
+            Text("Developer")
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Empty = this build's server (\(AppSettings.hostedURL.absoluteString)); run `make api` on the Mac. `ideacheck serve` works too. From a phone, use the Mac's address on your network. Pro preview unlocks card styles on this phone only.")
+                if case .failed(let why) = connection { Text(why).foregroundStyle(Verdict.kill.color) }
+            }
+        }
+    }
+
+    private func test() async {
+        connection = .testing
+        switch await SparkjudgeAPI.shared(baseURL: AppSettings.serverURL).health() {
+        case .success: connection = .ok
+        case .failure(let error): connection = .failed(error.localizedDescription)
+        }
+    }
+    #endif
 
     private var about: some View {
         Section {
@@ -210,18 +303,6 @@ struct SettingsView: View {
                 .background(Color.sjInk)
                 .navigationTitle("About checks")
             }
-        }
-    }
-
-    private func test() async {
-        connection = .testing
-        guard let url = URL(string: serverURL.trimmingCharacters(in: .whitespaces)), url.scheme != nil else {
-            connection = .failed("That isn't a URL.")
-            return
-        }
-        switch await RemoteChecker(baseURL: url).health() {
-        case .success: connection = .ok
-        case .failure(let error): connection = .failed(error.localizedDescription)
         }
     }
 }
@@ -278,5 +359,61 @@ struct EngineRow: View {
             }
         }
         .accessibilityLabel("\(label) \(value) of 3")
+    }
+}
+
+/// One judge in the Judge section: what it is, whether it is Pro, and
+/// whether this build can run it.
+struct JudgeRow: View {
+    var title: String
+    var badge: String
+    var symbol: String
+    var detail: String
+    var selected: Bool
+    var locked: Bool
+    var available: Bool
+    var choose: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                .foregroundStyle(selected ? Color.sjSpark : Color.sjMuted)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: symbol).foregroundStyle(Color.sjMuted)
+                    Text(title).font(.headline)
+                    Spacer()
+                    if locked { Image(systemName: "lock.fill").font(.caption).foregroundStyle(Color.sjViolet) }
+                    Text(badge).font(.sjLabel(.caption2)).foregroundStyle(locked ? Color.sjViolet : Verdict.build.color)
+                }
+                Text(detail).font(.caption).foregroundStyle(Color.sjMuted)
+            }
+        }
+        .opacity(available ? 1 : 0.55)
+        .contentShape(.rect)
+        .onTapGesture { if available { choose() } }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// Hosted checks used this month, as a ring.
+struct UsageRing: View {
+    var used: Int
+    var limit: Int
+
+    private var fraction: Double { limit == 0 ? 1 : min(1, Double(used) / Double(limit)) }
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.sjRaised, lineWidth: 5)
+            Circle().trim(from: 0, to: fraction)
+                .stroke(fraction >= 1 ? Verdict.park.color : Color.sjSpark, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(max(0, limit - used))").font(.system(.caption, design: .rounded, weight: .bold))
+        }
+        .frame(width: 40, height: 40)
+        .accessibilityHidden(true)
     }
 }

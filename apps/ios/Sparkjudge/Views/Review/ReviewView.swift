@@ -168,6 +168,7 @@ struct ReviewView: View {
             .tint(Color.sjSpark)
             .foregroundStyle(.black)
             .disabled(idea.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && idea.title.isEmpty)
+            HostedAllowanceNote()
             if autoCheck {
                 Text("Done checks it too — “Check automatically after review” is on.")
                     .font(.caption2)

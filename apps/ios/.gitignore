@@ -19,3 +19,6 @@ xcuserdata/
 
 .DS_Store
 .playwright/
+
+# Local secrets (RevenueCat SDK key)
+Config/Secrets.xcconfig

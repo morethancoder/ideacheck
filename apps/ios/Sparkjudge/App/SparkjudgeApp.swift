@@ -6,7 +6,7 @@ struct SparkjudgeApp: App {
     private let container: ModelContainer
     private let launch = LaunchOptions.current
     @State private var coordinator = CheckCoordinator()
-    @State private var entitlements = Entitlements()
+    @State private var entitlements = Entitlements.live()
     @State private var appState: AppState
 
     init() {

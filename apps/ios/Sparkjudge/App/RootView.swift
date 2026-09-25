@@ -23,6 +23,7 @@ struct RootView: View {
             }
         }
         .tint(Color.sjSpark)
+        .paywallSheet()
         .sheet(item: $appState.reviewing) { idea in
             ReviewView(idea: idea) { checkNow in
                 finishReview(idea, check: checkNow)

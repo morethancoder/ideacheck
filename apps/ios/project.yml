@@ -8,6 +8,15 @@ options:
   createIntermediateGroups: true
   developmentLanguage: en
 
+packages:
+  # RevenueCat: purchases, and the entitlement the hosted API's webhook reads
+  # (entitlement `pro`, appUserID = the app's user id). Pinned exactly.
+  # purchases-ios-spm is RevenueCat's SPM-only mirror of purchases-ios: the same
+  # sources in ~40 MB, where the main repo's history is well over a gigabyte.
+  RevenueCat:
+    url: https://github.com/RevenueCat/purchases-ios-spm
+    exactVersion: 5.91.0
+
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -17,6 +26,13 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+  configs:
+    # Where hosted checks go. Debug talks to `make api` on this Mac (attest off,
+    # mock judge); Release always to the hosted API, and always attests.
+    Debug:
+      SPARKJUDGE_API_URL: http://127.0.0.1:8787
+    Release:
+      SPARKJUDGE_API_URL: https://sparkjudge-api.fly.dev
 
 targets:
   Sparkjudge:
@@ -24,6 +40,14 @@ targets:
     platform: iOS
     sources:
       - path: Sparkjudge
+    dependencies:
+      - package: RevenueCat
+    # REVENUECAT_API_KEY comes from Config/Secrets.xcconfig (not committed; see
+    # Config/Sparkjudge.xcconfig). Without it the paywall shows StoreKit's own
+    # products and says purchases are not connected.
+    configFiles:
+      Debug: Config/Sparkjudge.xcconfig
+      Release: Config/Sparkjudge.xcconfig
     info:
       path: Sparkjudge/Info.plist
       properties:
@@ -37,6 +61,8 @@ targets:
         NSLocalNetworkUsageDescription: Sparkjudge can check ideas with an ideacheck server running on your own network.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        SparkjudgeAPIURL: $(SPARKJUDGE_API_URL)
+        RevenueCatAPIKey: $(REVENUECAT_API_KEY)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.morethancoder.sparkjudge
@@ -44,6 +70,11 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
+      configs:
+        # App Attest's production environment. Needs a team id and the App
+        # Attest capability on the App ID; simulator Debug builds skip it.
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Sparkjudge/Sparkjudge.entitlements
 
   SparkjudgeTests:
     type: bundle.unit-test
@@ -68,3 +99,5 @@ schemes:
         - SparkjudgeTests
     run:
       config: Debug
+      # Local StoreKit testing: the monthly and yearly Pro subscriptions.
+      storeKitConfiguration: StoreKit/Sparkjudge.storekit
