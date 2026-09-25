@@ -192,6 +192,9 @@ pricing:
   glm-5.3: { in: 1.4, out: 4.4, cached_in: 0.26 }
   qwen3.5:397b: { in: 0.6, out: 3.6 }
   deepseek-v4.1-flash: { in: 0.15, out: 0.6, cached_in: 0.003 }
+  # OpenRouter, found without the provider prefix (z-ai/glm-5.3-flash). Checked
+  # 2026-09-25 against openrouter.ai/api/v1/models
+  glm-5.3-flash: { in: 0.045, out: 0.14, cached_in: 0.01 }
 
 # Choices offered by `ideacheck setup` (first run, and Settings in the TUI).
 # Picking one writes backend/provider/base_url/model/effort/billing into your

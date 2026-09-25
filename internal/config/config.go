@@ -214,6 +214,10 @@ type Log struct {
 // LoadOptions are the non-file layers. Overrides keys use "." for nesting
 // ("backends.structured.model"); only set keys the user actually passed as flags.
 type LoadOptions struct {
+	// Layers are YAML documents in config.yaml's shape, applied in order over
+	// the files and under the environment: a host's own defaults (the hosted
+	// API's engine: section) without a second config.yaml.
+	Layers    [][]byte
 	Environ   func() []string
 	Overrides map[string]any
 }
@@ -224,6 +228,11 @@ func Load(files Files, o LoadOptions) (Config, error) {
 	for _, layer := range fileLayers(files) {
 		if err := k.Load(rawbytes.Provider(layer), yaml.Parser()); err != nil {
 			return Config{}, fmt.Errorf("parse %s: %w", mainFile, err)
+		}
+	}
+	for i, layer := range o.Layers {
+		if err := k.Load(rawbytes.Provider(layer), yaml.Parser()); err != nil {
+			return Config{}, fmt.Errorf("parse config layer %d: %w", i+1, err)
 		}
 	}
 	envOpt := env.Opt{Prefix: envPrefix, TransformFunc: envKey, EnvironFunc: o.Environ}

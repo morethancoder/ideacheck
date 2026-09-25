@@ -105,6 +105,25 @@ func TestPrecedenceFlagsOverEnvOverUserDirOverDefaults(t *testing.T) {
 	}
 }
 
+// A host's layer sits over the files and under the environment, and merges
+// rather than replaces.
+func TestLayersSitBetweenFilesAndEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "config.yaml", "backend: jev\nbackends:\n  jev:\n    model: from-file\n")
+	layer := []byte("writer: structured\nbackends:\n  jev:\n    model: from-layer\n  structured:\n    provider: openrouter\n")
+	c, err := Load(NewFiles(dir), LoadOptions{Environ: noEnv, Layers: [][]byte{layer}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Active().Model != "from-layer" || c.Writer != "structured" || c.Backends["structured"].Provider != "openrouter" || c.Backends["structured"].Mode != "vote" {
+		t.Errorf("layer: judge %+v, writer %q %+v", c.Active(), c.Writer, c.Backends["structured"])
+	}
+	env := func() []string { return []string{"IDEACHECK_BACKENDS__JEV__MODEL=from-env"} }
+	if c, _ = Load(NewFiles(dir), LoadOptions{Environ: env, Layers: [][]byte{layer}}); c.Active().Model != "from-env" {
+		t.Errorf("the environment must beat a layer: %q", c.Active().Model)
+	}
+}
+
 func TestMaxConcurrentFallsBackToDefault(t *testing.T) {
 	c := Config{Backend: "x", Backends: map[string]Backend{"x": {}}, Concurrency: Concurrency{DefaultMax: 16}}
 	if got := c.MaxConcurrent(); got != 16 {
@@ -238,7 +257,7 @@ func TestEmbeddedShipsUnderscoreFilesAndAllSkipsGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := 3 + 8 + 13 + 1; len(all) != want { // config.yaml + fields.yaml + research.yaml, 8 rubrics, 13 prompts, searxng/settings.yml
+	if want := 4 + 8 + 13 + 1; len(all) != want { // config.yaml + fields.yaml + research.yaml + sparkjudge.yaml, 8 rubrics, 13 prompts, searxng/settings.yml
 		t.Errorf("All() = %d files %v, want %d", len(all), all, want)
 	}
 	for _, p := range all {
