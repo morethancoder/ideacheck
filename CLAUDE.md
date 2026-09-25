@@ -124,8 +124,9 @@ server/                HTTP API + SSE; takes any Store (owner-scoped), logs thro
                        Errors are {"status","error":code,"message"}; *server.Error sets both
 mobile/                package sparkcore: the core as a gomobile library (make mobile →
                        build/Sparkcore.xcframework) for the Sparkjudge iOS app
-  swift/               FoundationJudge/FoundationWriter (Apple's on-device model) and
-                       the throwing Swift overloads; the app compiles these in
+  swift/               FoundationJudge/FoundationWriter (Apple's on-device model),
+                       LayaDeviceJudge (Laya on Core ML, via LayaKit) and the
+                       throwing Swift overloads; the app compiles these in
   swiftcheck/          xcodegen test bundle: the proof it runs in an iOS process
 configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-embedded
                        reader. Kept at this path (not defaults/): it is what CLAUDE.md,
@@ -252,6 +253,18 @@ no store: evidence questions are skipped, the app keeps its own history.
 - The judge's `Name()` picks the verdict cuts (`verdict.backends.<name>`); the
   on-device judge is `foundation` and has none yet — tune them on bench, do not
   guess. It answers with one greedy pick, so run it with `max_concurrent: 1`.
+- `apps/ios/Packages/LayaKit` runs Laya typed-decision checkpoints (the Core ML
+  exports of github.com/mizorewww/laya-coreml) with no Python: its own BPE
+  tokenizer (ModernBERT byte-level and Gemma Metaspace, byte-exact against the
+  Python `tokenizers`), laya's prompt and calibration, and `LayaDownloader`
+  (the Hub's live list, never a list in code; resumable, SHA-256 checked).
+  `LayaDeviceJudge` is named `laya`, like the desktop backend, and reads the
+  request's question and state the way the desktop sends them. On iOS/macOS 26
+  Core ML runs an enumerated-shape model on the CPU only (E5RT: "tensor_buffer
+  has known strides…"), so `FixedShape` makes a fixed-length copy of the graph
+  per length bucket for the GPU (weights hard-linked, not copied). Its tests
+  compare against fixtures from `scripts/fixtures.py` and skip a checkpoint
+  that `scripts/fetch-model.sh` has not downloaded.
 - The bind runs from a throwaway module in `build/bind` that requires
   `golang.org/x/mobile`: in go.mod it would drag x/net and x/tools forward for
   the CLI, and gomobile cannot bind inside a go.work.

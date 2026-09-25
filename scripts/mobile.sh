@@ -51,11 +51,14 @@ done
 
 # `make mobile ARGS=test` then runs the Swift proof (mobile/swiftcheck) in the
 # simulator: a check from Swift with a stub judge, and on the on-device model
-# when the simulator's host has Apple Intelligence (skipped otherwise).
+# when the simulator's host has Apple Intelligence (skipped otherwise), and on
+# Laya when LAYAKIT_CHECKPOINT names a downloaded checkpoint
+# (apps/ios/Packages/LayaKit/scripts/fetch-model.sh; skipped otherwise).
 if [ "${1:-}" = test ]; then
   require_cli xcodegen "brew install xcodegen"
   step "swiftcheck on ${SIMULATOR:=iPhone 16 Pro}"
   (cd mobile/swiftcheck && xcodegen generate --quiet &&
+    TEST_RUNNER_LAYAKIT_CHECKPOINT="${LAYAKIT_CHECKPOINT:-}" \
     xcodebuild test -quiet -project SwiftCheck.xcodeproj -scheme SwiftCheck \
       -destination "platform=iOS Simulator,name=$SIMULATOR,OS=latest")
   ok "swiftcheck passed"

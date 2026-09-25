@@ -4,6 +4,9 @@
 #   xcodebuild test -project SwiftCheck.xcodeproj -scheme SwiftCheck \
 #     -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
 name: SwiftCheck
+packages:
+  LayaKit:
+    path: ../../apps/ios/Packages/LayaKit
 options:
   deploymentTarget:
     iOS: "26.0"
@@ -21,6 +24,7 @@ targets:
     dependencies:
       - framework: ../../build/Sparkcore.xcframework
         embed: false
+      - package: LayaKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.morethancoder.sparkcore.swiftcheck
