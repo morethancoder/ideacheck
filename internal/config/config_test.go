@@ -280,3 +280,52 @@ func TestSummaryIsOnByDefault(t *testing.T) {
 		t.Errorf("the plain-language summary should be on by default (err=%v)", err)
 	}
 }
+
+// pinnedConfig exercises every part of Config that goes into the hash.
+const pinnedConfig = `
+backend: jev
+writer: structured
+explain: true
+extract: true
+research:
+  enabled: true
+  search: auto
+  endpoints: { searxng: "http://localhost:8080" }
+  searxng: { image: searxng/searxng:latest, container: ideacheck-searxng }
+  queries_per_topic: 2
+  results_per_query: 5
+  read_pages: 2
+  page_chars: 2500
+  page_timeout: 8s
+  sift: auto
+  max_searches: 6
+  max_tokens: 16000
+  timeout: 240s
+  cache_ttl: 168h
+timeouts: { question: 30s, batch: 90s }
+retries: { max_attempts: 4, base_backoff: 500ms, max_backoff: 5s }
+concurrency: { default_max: 16 }
+backends:
+  jev: { base_url: "https://api.typesafe.ai", model: jev-1.13.0, batch: true, max_concurrent: 32 }
+  structured: { provider: anthropic, model: claude-sonnet-5, mode: vote, vote_k: 5, max_tokens: 1024, thinking: disabled, billing: api, seed: 3 }
+pricing:
+  jev-1.13.0: { in: 0.042, out: 0 }
+  claude-sonnet-5: { in: 2.0, out: 10.0, cached_in: 0.2 }
+setup: { prices_url: "https://example.com/models" }
+rubrics_dir: rubrics
+prompts_dir: prompts
+store: { path: ~/.local/share/ideacheck/history.db }
+log: { level: info, format: console }
+`
+
+// Every result stores the hash of the config it ran under, and history and
+// bench baselines compare them: the same config must keep the same hash.
+func TestHashIsPinned(t *testing.T) {
+	c, err := Load(Files{Embedded: fstest.MapFS{mainFile: {Data: []byte(pinnedConfig)}}}, LoadOptions{Environ: noEnv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := c.Hash(), "sha256:0f2ab4b4fce957bc6830712c23221f1699a4c598f01a648ea224089b037045d9"; got != want {
+		t.Errorf("Hash() = %q, want %q", got, want)
+	}
+}
