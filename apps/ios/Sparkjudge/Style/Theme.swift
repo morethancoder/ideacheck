@@ -69,6 +69,7 @@ struct Badge: View {
         }
         .font(.sjLabel(.caption2))
         .textCase(.uppercase)
+        .lineLimit(1)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .foregroundStyle(tint)

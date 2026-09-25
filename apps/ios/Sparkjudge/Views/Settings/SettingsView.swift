@@ -35,6 +35,11 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .task(id: "\(engineRaw)|\(localeID)") {
                 await catalog.refresh(engine: engine, localeIdentifier: localeID.isEmpty ? nil : localeID)
+                // The choice must be one this device can run: fall back to the first that is.
+                if catalog.options.first(where: { $0.engine == engine })?.availability.isSelectable == false,
+                   let usable = catalog.options.first(where: { $0.availability.isSelectable }) {
+                    engineRaw = usable.engine.rawValue
+                }
             }
         }
     }

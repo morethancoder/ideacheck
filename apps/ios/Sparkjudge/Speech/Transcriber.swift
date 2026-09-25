@@ -1,4 +1,5 @@
 import Foundation
+import Speech
 
 /// What a transcriber reports while it listens.
 enum TranscriberEvent: Sendable, Equatable {
@@ -115,6 +116,10 @@ enum TranscriberEngineID: String, CaseIterable, Codable, Sendable, Identifiable 
     @MainActor
     func make(vadSensitivity: Int) -> any Transcriber {
         switch self {
+        // SpeechTranscriber needs newer hardware; where the device says it can't
+        // run, the dictation model (same analyzer, broader hardware) stands in.
+        case .appleSpeech where !SpeechTranscriber.isAvailable:
+            AppleSpeechTranscriber(model: .dictation, vadSensitivity: vadSensitivity)
         case .appleSpeech: AppleSpeechTranscriber(model: .speech, vadSensitivity: vadSensitivity)
         case .appleDictation: AppleSpeechTranscriber(model: .dictation, vadSensitivity: vadSensitivity)
         default: UnavailableTranscriber(error: .notImplemented(name))

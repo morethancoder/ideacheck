@@ -79,7 +79,6 @@ struct DictateView: View {
                         .font(.system(.title3, design: .serif))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
-                        .animation(.easeOut(duration: 0.15), value: model.text)
                         .id("end")
                 }
                 .frame(maxHeight: 180)

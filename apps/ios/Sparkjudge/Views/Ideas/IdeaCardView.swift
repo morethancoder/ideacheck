@@ -54,7 +54,16 @@ struct IdeaCardView: View {
     @ViewBuilder private var content: some View {
         VStack(alignment: .leading, spacing: size == .small ? 6 : 10) {
             HStack(spacing: 6) {
-                if size != .small { Badge(text: idea.category.badge, symbol: idea.category.symbol) }
+                if size == .hero {
+                    Badge(text: idea.category.badge, symbol: idea.category.symbol).fixedSize()
+                } else if size == .regular {
+                    Image(systemName: idea.category.symbol)
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .accessibilityHidden(true)
+                }
                 Spacer(minLength: 0)
                 statusBadge
             }
@@ -81,6 +90,10 @@ struct IdeaCardView: View {
             .background(.ultraThinMaterial, in: Capsule())
         } else if idea.status == .failed {
             Badge(text: size == .small ? "!" : "Check failed", symbol: "exclamationmark.triangle.fill", tint: Verdict.park.color)
+        } else if let verdict = idea.verdict {
+            VerdictPill(verdict: verdict, compact: size == .small).fixedSize()
+        } else if let raw = idea.verdictRaw {
+            Badge(text: raw)
         } else if idea.composite == nil, size != .small {
             Badge(text: "Draft", symbol: "sparkle")
         }
@@ -95,13 +108,10 @@ struct IdeaCardView: View {
                 .lineLimit(1)
                 .fixedSize()
                 .foregroundStyle(.white)
-            Text("/10").font(.sjLabel(.caption)).foregroundStyle(.white.opacity(0.7))
+            Text("/10").font(.sjLabel(.caption)).foregroundStyle(.white.opacity(0.7)).fixedSize()
             Spacer(minLength: 0)
-            if let verdict {
-                VerdictPill(verdict: verdict, compact: size == .small)
-                    .fixedSize()
-            } else if let raw = idea.verdictRaw {
-                Badge(text: raw)
+            if size == .hero, let verdict {
+                Text(verdict.blurb).font(.subheadline.weight(.semibold)).foregroundStyle(verdict.color).lineLimit(1)
             }
         }
     }

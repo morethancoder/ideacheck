@@ -32,6 +32,8 @@ using namespace metal;
     float inside = 1.0 - smoothstep(-aa, aa, d);
     float g = exp(-max(d, 0.0) * (22.0 - 10.0 * lv)) * (0.28 + 0.75 * lv);
     g *= 0.85 + 0.15 * snoise(p * 6.0 + time);
+    // Fade out before the frame's edge so the glow never shows a square.
+    g *= 1.0 - smoothstep(0.36, 0.5, length(p));
 
     // Premultiplied: body over glow.
     half3 rgb = body * half(inside) + glow.rgb * half(g * (1.0 - inside));

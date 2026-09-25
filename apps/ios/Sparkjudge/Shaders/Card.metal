@@ -36,11 +36,11 @@ static inline float3 voronoi(float2 p, thread float2 &cellId) {
 
     if (fam == 0) {
         // Nebula: domain-warped fbm (Inigo Quilez's warp, twice).
-        p *= 0.55;
+        p = (p - offset) * 0.3 + offset;
         float2 q = float2(fbm(p + float2(0.0, t)), fbm(p + float2(5.2, 1.3) - t));
-        float2 r = float2(fbm(p + warp * 2.0 * q + float2(1.7, 9.2) + t * 0.7),
-                          fbm(p + warp * 2.0 * q + float2(8.3, 2.8) - t * 0.5));
-        float v = fbm(p + warp * 2.5 * r) * 0.5 + 0.5;
+        float2 r = float2(fbm(p + warp * 1.3 * q + float2(1.7, 9.2) + t * 0.7),
+                          fbm(p + warp * 1.3 * q + float2(8.3, 2.8) - t * 0.5));
+        float v = fbm(p + warp * 1.6 * r) * 0.5 + 0.5;
         col = ramp4(v * 1.15 - 0.05, c0.rgb, c1.rgb, c2.rgb, c3.rgb);
         col = mix(col, c3.rgb, half(saturate(length(q) * 0.35 - 0.1)));
     } else if (fam == 1) {
