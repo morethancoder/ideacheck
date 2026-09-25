@@ -128,6 +128,34 @@ func (s *Store) KeepFindings(ctx context.Context, key string, findings []byte) e
 	return err
 }
 
+// FindingsCache is an ideacheck.ResearchCache over the history database at
+// Path. It opens the store per call, as the CLI saves a check: a check holds
+// no database handle while a model is thinking, and a store that cannot be
+// opened only costs a search.
+type FindingsCache struct {
+	Path string
+}
+
+func (c FindingsCache) Get(ctx context.Context, key string, maxAge time.Duration) ([]byte, bool) {
+	s, err := Open(c.Path)
+	if err != nil {
+		return nil, false
+	}
+	defer s.Close()
+	return s.Findings(ctx, key, maxAge)
+}
+
+func (c FindingsCache) Put(ctx context.Context, key string, findings []byte) error {
+	s, err := Open(c.Path)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	return s.KeepFindings(ctx, key, findings)
+}
+
+var _ ideacheck.ResearchCache = FindingsCache{}
+
 // summary is the one-line idea shown in history.
 func summary(in ideacheck.Intake) string {
 	text := in.Fields["title"]

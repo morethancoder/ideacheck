@@ -195,7 +195,7 @@ func (a *app) newEngine(cfg config.Config) (*ideacheck.Engine, error) {
 		return nil, err
 	}
 	o := ideacheck.Options{Settings: cfg.Settings(), Files: a.files(), Judge: judge, Writer: writer,
-		Cache: findingsCache{path: store.ExpandHome(cfg.Store.Path, a.home)}}
+		Cache: store.FindingsCache{Path: store.ExpandHome(cfg.Store.Path, a.home)}}
 	if cfg.Research.Enabled {
 		// A nil provider is not an error: the writer's own web tool searches, or
 		// nothing does and the description is scored as it is.

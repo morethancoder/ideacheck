@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/morethancoder/ideacheck/ideacheck"
 )
@@ -74,5 +75,24 @@ func TestExpandHome(t *testing.T) {
 	}
 	if got := ExpandHome("/abs/x.db", "/home/u"); got != "/abs/x.db" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// Findings a check kept come back for the next check of the same idea, until
+// they are older than it will take.
+func TestFindingsCacheKeepsFindingsUntilTheyAreTooOld(t *testing.T) {
+	ctx := context.Background()
+	var c ideacheck.ResearchCache = FindingsCache{Path: filepath.Join(t.TempDir(), "history.db")}
+	if _, ok := c.Get(ctx, "k", time.Hour); ok {
+		t.Fatal("an empty cache returned findings")
+	}
+	if err := c.Put(ctx, "k", []byte(`[{"title":"Weave"}]`)); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := c.Get(ctx, "k", time.Hour); !ok || string(b) != `[{"title":"Weave"}]` {
+		t.Errorf("Get = %s, %v", b, ok)
+	}
+	if _, ok := c.Get(ctx, "k", -time.Second); ok {
+		t.Error("findings older than the limit were returned")
 	}
 }
