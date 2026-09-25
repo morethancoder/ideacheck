@@ -74,11 +74,21 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	}
 	state := in.State()
 	unknown := unstated(gaps.Questions, in)
-	pre := e.fanout(ctx, state, append(unknown, router.Questions...), o, StagePreflight)
-	gapAnswers, routeAnswer := pre[:len(unknown)], pre[len(unknown)]
+	asked := unknown
+	if o.Rubric == "" { // a forced rubric leaves nothing for the router to decide
+		asked = append(asked, router.Questions...)
+	}
+	pre := e.fanout(ctx, state, asked, o, StagePreflight)
+	gapAnswers := pre[:len(unknown)]
 	res.Answers = pre
 	res.Missing = FindMissing(gaps, gapAnswers, in)
-	res.IdeaType = ideaType(routeAnswer)
+	var routeAnswer judge.Answer
+	if o.Rubric != "" {
+		res.IdeaType = &IdeaType{Choice: o.Rubric, Confidence: 1}
+	} else {
+		routeAnswer = pre[len(unknown)]
+		res.IdeaType = ideaType(routeAnswer)
+	}
 
 	// A fact the web can answer is not worth stopping to ask a person for.
 	plan := e.plan(in, res)
@@ -185,6 +195,9 @@ func (e *Engine) loadPreflight() (gaps, router *rubric.Rubric, err error) {
 }
 
 func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Question, o Options, stage string) []judge.Answer {
+	if len(qs) == 0 {
+		return nil
+	}
 	c := e.Config
 	opts := judge.Options{
 		MaxConcurrent:   c.MaxConcurrent(),

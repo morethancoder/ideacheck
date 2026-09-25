@@ -161,6 +161,16 @@ func TestRouting(t *testing.T) {
 		if res.Rubric.Name != c.want || fellBack != c.warn {
 			t.Errorf("%s: rubric=%q warnings=%v", c.name, res.Rubric.Name, res.Warnings)
 		}
+		if c.forced != "" {
+			for _, a := range res.Answers {
+				if a.ID == "idea_type" {
+					t.Errorf("%s: the router was asked although the rubric was forced", c.name)
+				}
+			}
+			if res.IdeaType == nil || res.IdeaType.Choice != c.forced {
+				t.Errorf("%s: idea_type = %+v, want the forced rubric", c.name, res.IdeaType)
+			}
+		}
 	}
 	if _, err := engine(t, &mock.Judge{}).Check(context.Background(), idea, Options{Rubric: "nonexistent"}); err == nil {
 		t.Error("forcing a rubric that does not exist must fail")
