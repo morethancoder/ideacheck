@@ -40,6 +40,10 @@ type settings struct {
 	// Explain and Extract turn the writer's two jobs on or off (nil = config.yaml).
 	Explain *bool `json:"explain"`
 	Extract *bool `json:"extract"`
+	// VerifyExtract has the judge check each field the writer read out of the
+	// idea, dropping one the idea does not state (nil = on: the writers on a
+	// phone are small models that fill fields the idea never states).
+	VerifyExtract *bool `json:"verify_extract"`
 	// MaxConcurrent bounds the questions the judge is asked at once. An
 	// on-device model answers one at a time anyway; 0 = config.yaml's default
 	// for a local model.
@@ -118,6 +122,7 @@ func newEngine(settingsJSON string, judge Judge, batch BatchJudge, writer Writer
 	if s.Extract != nil {
 		base.Extract = *s.Extract
 	}
+	base.VerifyExtract = s.VerifyExtract == nil || *s.VerifyExtract
 	if s.MaxConcurrent > 0 {
 		base.MaxConcurrent = s.MaxConcurrent
 	}

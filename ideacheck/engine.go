@@ -101,8 +101,13 @@ func (e *Engine) Check(ctx context.Context, in Intake, o CheckOptions) (*Result,
 	if read != nil {
 		extra = append(extra, *read)
 	}
-	state := in.State()
+	state, pre := in.State(), in.State()
 	unknown := unstated(gaps.Questions, in)
+	if e.Settings.VerifyExtract && len(res.Extracted) > 0 {
+		// The gap questions judge the idea as given, so a field the writer
+		// filled is checked against the document, not against itself.
+		unknown, pre = unstated(gaps.Questions, given), given.State()
+	}
 	k := known{in: in, gaps: gaps, earlier: earlier(o.Earlier)}
 	gapAsk, held := settle(unknown, state, k)
 	route := router.Questions[0]
@@ -113,9 +118,13 @@ func (e *Engine) Check(ctx context.Context, in Intake, o CheckOptions) (*Result,
 		asked = append(asked, route)
 	}
 	announce(o.OnEvent, StagePreflight, unknown, held)
-	pre := e.fanout(ctx, state, asked, o, StagePreflight)
-	gapAnswers := restore(pre[:len(gapAsk)], held, len(unknown))
+	preAnswers := e.fanout(ctx, pre, asked, o, StagePreflight)
+	gapAnswers := restore(preAnswers[:len(gapAsk)], held, len(unknown))
 	res.Answers = append([]judge.Answer{}, gapAnswers...)
+	if e.Settings.VerifyExtract {
+		in = unverified(gaps, gapAnswers, in, res)
+		state, k.in = in.State(), in
+	}
 	res.Missing = FindMissing(gaps, gapAnswers, in)
 	switch {
 	case o.Rubric != "":
@@ -123,7 +132,7 @@ func (e *Engine) Check(ctx context.Context, in Intake, o CheckOptions) (*Result,
 	case routed:
 		announce(o.OnEvent, StagePreflight, router.Questions, map[int]judge.Answer{0: routeAnswer})
 	default:
-		routeAnswer = pre[len(gapAsk)]
+		routeAnswer = preAnswers[len(gapAsk)]
 	}
 	if o.Rubric == "" {
 		res.IdeaType = ideaType(routeAnswer)
@@ -313,6 +322,30 @@ func unstated(gaps []judge.Question, in Intake) []judge.Question {
 		}
 	}
 	return out
+}
+
+// unverified drops what the writer read out of the document but the judge
+// finds it does not state (its gap noul below the threshold): that field goes
+// back to empty, so it is reported missing rather than scored as a fact.
+func unverified(gaps *rubric.Rubric, answers []judge.Answer, in Intake, res *Result) Intake {
+	given := byID(answers)
+	var kept []string
+	for _, field := range res.Extracted {
+		stated := true
+		for _, q := range gaps.Questions {
+			if a, ok := given[q.ID]; ok && q.Fills == field && !a.Failed() && a.Noul < gaps.Threshold {
+				stated = false
+			}
+		}
+		if stated {
+			kept = append(kept, field)
+		} else {
+			in = in.With(field, "")
+			res.Warnings = append(res.Warnings, "the writer read "+field+" out of the document, but the judge found it is not stated there: left missing")
+		}
+	}
+	res.Extracted = kept
+	return in
 }
 
 // FindMissing turns gap nouls below the threshold into follow-up questions, in

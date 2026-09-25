@@ -23,8 +23,14 @@ type Settings struct {
 	PromptsDir string
 	Explain    bool // add a plain-language summary to every result
 	Extract    bool // read stated facts out of the document before looking for gaps
-	Timeouts   Timeouts
-	Retry      judge.RetryPolicy
+	// VerifyExtract has the judge check the writer's reading: a field extract
+	// filled is still asked about (against the idea as given), and dropped
+	// back to missing when the judge finds the document does not state it.
+	// Off, extraction is trusted, as a strong writer deserves; on, a small
+	// writer that fills fields the idea never states cannot hide a gap.
+	VerifyExtract bool
+	Timeouts      Timeouts
+	Retry         judge.RetryPolicy
 	// MaxConcurrent bounds the judge's questions in flight.
 	MaxConcurrent int
 	// Batch sends every question in one request when the judge can take them so.

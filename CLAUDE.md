@@ -84,6 +84,11 @@ Invariants worth keeping:
   `ask_limit` follow-ups (`Engine.FollowUps`), then re-runs with the needs_input
   result as `CheckOptions.Earlier`: its gap and router answers stand, and a gap whose
   field is now filled is never asked (nor is any gap on a filled field).
+- A field the writer extracts is trusted by default (a strong writer reads
+  well, and a gap noul would make it flicker run to run). `Settings.VerifyExtract`
+  has the judge check each one against the idea as given and drops what it does
+  not state; the mobile binding turns it on, because a phone's small writer
+  fills fields the idea never states.
 - Missing facts do not block a verdict outside the TUI: agent and server runs
   score what is known and report `missing[]` with `partial: true`. `--strict`
   restores the old "stop and ask" behaviour.

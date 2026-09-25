@@ -496,3 +496,31 @@ func TestExtractFillsOnlyEmptyFields(t *testing.T) {
 		t.Errorf("extract: false must not call the backend: asked=%v extracted=%v", j.asked, res.Extracted)
 	}
 }
+
+// With VerifyExtract a small writer's reading is checked: a field it filled
+// that the judge finds the idea does not state goes back to missing, while one
+// the judge confirms stays extracted.
+func TestVerifyExtractDropsWhatTheIdeaDoesNotState(t *testing.T) {
+	dir := t.TempDir()
+	fixture(t, dir, "has_why_now", judge.Answer{Noul: 0.1})
+	fixture(t, dir, "has_audience", judge.Answer{Noul: 0.9})
+	j := &extractingJudge{Judge: &mock.Judge{Seed: 1, FixturesDir: dir},
+		values: map[string]string{"why_now": "the models got cheap", "audience": "solo founders"}}
+	e := engine(t, j)
+	e.Settings.Extract, e.Settings.VerifyExtract = true, true
+
+	res, err := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Extracted) != 1 || res.Extracted[0] != "audience" {
+		t.Errorf("extracted = %v, want only the field the judge confirmed", res.Extracted)
+	}
+	missing := map[string]bool{}
+	for _, m := range res.Missing {
+		missing[m.Fills] = true
+	}
+	if !missing["why_now"] || missing["audience"] {
+		t.Errorf("missing = %v, want why_now (read but not stated) and not audience", res.Missing)
+	}
+}
