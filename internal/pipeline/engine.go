@@ -73,8 +73,9 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 		extra = append(extra, *read)
 	}
 	state := in.State()
-	pre := e.fanout(ctx, state, append(append([]judge.Question{}, gaps.Questions...), router.Questions...), o, StagePreflight)
-	gapAnswers, routeAnswer := pre[:len(gaps.Questions)], pre[len(gaps.Questions)]
+	unknown := unstated(gaps.Questions, in)
+	pre := e.fanout(ctx, state, append(unknown, router.Questions...), o, StagePreflight)
+	gapAnswers, routeAnswer := pre[:len(unknown)], pre[len(unknown)]
 	res.Answers = pre
 	res.Missing = FindMissing(gaps, gapAnswers, in)
 	res.IdeaType = ideaType(routeAnswer)
@@ -210,15 +211,31 @@ func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Quest
 	return answers
 }
 
-// FindMissing turns gap nouls below the threshold into follow-up questions. A gap
-// question that failed is not evidence of a gap, so it is skipped — and neither
-// is one whose field the intake already fills: that fact is not missing, however
-// the prose reads.
+// unstated are the gap questions worth asking: a field the intake already
+// fills (given, or read out of the document) is not missing, however the
+// prose reads, so asking the judge about it buys nothing.
+func unstated(gaps []judge.Question, in Intake) []judge.Question {
+	var out []judge.Question
+	for _, q := range gaps {
+		if !in.Has(q.Fills) {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// FindMissing turns gap nouls below the threshold into follow-up questions, in
+// the gaps rubric's order. A gap question that failed, or was never asked, is
+// not evidence of a gap — and neither is one whose field the intake fills.
 func FindMissing(gaps *rubric.Rubric, answers []judge.Answer, in Intake) []Missing {
+	byID := make(map[string]judge.Answer, len(answers))
+	for _, a := range answers {
+		byID[a.ID] = a
+	}
 	missing := []Missing{}
-	for i, q := range gaps.Questions {
-		a := answers[i]
-		if !a.Failed() && a.Noul < gaps.Threshold && !in.Has(q.Fills) {
+	for _, q := range gaps.Questions {
+		a, ok := byID[q.ID]
+		if ok && !a.Failed() && a.Noul < gaps.Threshold && !in.Has(q.Fills) {
 			missing = append(missing, Missing{ID: q.ID, Probability: a.Noul, Ask: q.Ask, Fills: q.Fills})
 		}
 	}

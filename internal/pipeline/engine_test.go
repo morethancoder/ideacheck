@@ -126,6 +126,11 @@ func TestGapsOnAnsweredFieldsDoNotStopTheCheck(t *testing.T) {
 	if res.Status != StatusOK || len(res.Missing) != 1 || res.Missing[0].Fills != "differentiation" {
 		t.Errorf("status=%q missing=%+v, want ok reporting only differentiation", res.Status, res.Missing)
 	}
+	for _, a := range res.Answers {
+		if a.ID == "has_why_now" {
+			t.Error("the judge was asked whether why_now is stated, although the intake fills it")
+		}
+	}
 	res, _ = e.Check(context.Background(), filled, Options{})
 	if ask := Unanswered(res.Missing, filled, nil); res.Status != StatusNeedsInput || len(ask) != 1 || ask[0].Fills != "differentiation" {
 		t.Errorf("status=%q ask=%+v, want only the never-offered differentiation", res.Status, ask)
