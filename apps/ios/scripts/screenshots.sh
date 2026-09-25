@@ -35,4 +35,15 @@ shoot pile-open 4 -sjSeed YES -sjTab ideas -sjOpen pile:creative
 shoot detail 4 -sjSeed YES -sjTab ideas -sjOpen detail
 shoot settings 5 -sjTab settings
 shoot list-light 4 -sjSeed YES -sjTab ideas -ideasLayout list -sjScheme light
+shoot lab 3 -sjSeed YES -sjTab lab
+shoot share 5 -sjSeed YES -sjTab lab -sjOpen lab:share -sjExportShare YES
+shoot share-square 5 -sjSeed YES -sjTab lab -sjOpen lab:share -sjExportShare YES -sjShareFormat square
+shoot mixer 4 -sjSeed YES -sjTab lab -sjOpen lab:mixer
+shoot mixed-review 5 -sjSeed YES -sjTab lab -sjOpen lab:mix
+shoot trends 4 -sjSeed YES -sjTab lab -sjOpen lab:trends
+# The exported share images themselves, as they would be posted.
+docs="$(xcrun simctl get_app_container "$device" "$bundle" data)/Documents"
+for f in share-story share-square; do
+  cp "$docs/$f.png" "$out/$f-export.png" && echo "  ✓ $f-export"
+done
 xcrun simctl terminate "$device" "$bundle" 2>/dev/null || true

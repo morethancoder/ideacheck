@@ -9,6 +9,14 @@ verdict: Build, Explore, Park or Kill.
 |---|---|---|---|---|---|
 | ![](screenshots/home.png) | ![](screenshots/dictating.png) | ![](screenshots/review.png) | ![](screenshots/list.png) | ![](screenshots/piles.png) | ![](screenshots/detail.png) |
 
+| Lab | Share | Mixer | Mixed, in review | Trends | Exported story | Exported square |
+|---|---|---|---|---|---|---|
+| ![](screenshots/lab.png) | ![](screenshots/share.png) | ![](screenshots/mixer.png) | ![](screenshots/mixed-on-device.png) | ![](screenshots/trends.png) | ![](screenshots/share-story-export.png) | ![](screenshots/share-square-export.png) |
+
+`mixed-on-device.png` is a real Apple Intelligence mix on the simulator;
+`trends-live.png` is the Trends screen against `make api` (real sources, mock
+judge, offline writer).
+
 ## Build
 
 The Xcode project is generated from `project.yml`. It is not committed, so there
@@ -44,8 +52,10 @@ Sparkjudge/
   Writer/     Foundation Models writer: @Generable IdeaNotes → title, category, fields
   Style/      theme, OKLCH, CardStyle (seed → palette + pattern), Entitlements
   Shaders/    Orb.metal (the dictate orb), Card.metal (six card families), SparkNoise.h
-  Views/      Dictate, Review, Ideas (list + piles), Detail, Settings, Lab (coming soon)
-  Resources/  fields.json (= `ideacheck fields -o json`), SampleResult.json, writer_instructions.md
+  Views/      Dictate, Review, Ideas (list + piles), Detail, Settings, Lab (+ IdeaPicker),
+              Share (graphic, renderer, export background), Mixer (+ OriginLine), Trends
+  Resources/  fields.json (= `ideacheck fields -o json`), SampleResult.json, SampleTrends.json,
+              writer_instructions.md, mixer_instructions.md, mixer_prompt.md
 SparkjudgeTests/  Swift Testing; Fixtures/check_result_mock.json is a real engine result
 ```
 
@@ -95,6 +105,32 @@ SparkjudgeTests/  Swift Testing; Fixtures/check_result_mock.json is a real engin
   shader clock. Cards in lists and piles freeze time and draw once through
   `.drawingGroup()`.
 
+## The Lab
+
+- **Share for feedback.** Pick one idea or two; `ShareGraphic` lays them out as
+  a story (9:16, 1080 × 1920) or a square (1:1, 1080 × 1080): each card's seeded
+  background, name, category, rating /10, verdict, one line of why (the
+  summary's first sentence, else the verdict's reason), "Which would you
+  build?" and the wordmark. `ShareRenderer` draws it with `ImageRenderer` at 3×
+  and hands it to `ShareLink`. `ImageRenderer` does draw the Metal card shader
+  (verified on the iOS 26 simulator, pinned by `imageRendererDrawsTheShader`);
+  should a device draw it flat, the renderer notices and redraws the cards with
+  `ExportBackground`, a MeshGradient over the same seed's palette. Detail's
+  menu shares one idea.
+- **Mixer.** Pick two or three ideas; a writer proposes one that combines them
+  (`MixedIdea`: title, problem, audience, solution), and it opens in Review as a
+  new draft with a "Mixed from" line (`IdeaOrigin`, stored as `Idea.originData`)
+  whose names open the parents. Writers, in order: Apple's on-device model
+  (`@Generable MixNotes`; instructions and prompt are the bundled
+  `mixer_instructions.md` / `mixer_prompt.md`), else the hosted API's
+  `POST /v1/mix` for Pro, else none. `-checker preview` stitches instead.
+- **Trends.** `GET /v1/trends` on the hosted API (at the server URL in
+  Settings): items from Show HN, Hacker News, GitHub and news searches, typed by
+  the judge into the same categories, plus a prompt per category. The last
+  report is kept in Caches and shown first, with when it was fetched; offline it
+  stays. "Start an idea" (or a prompt's "Answer this") opens Review with a draft
+  that remembers the trend.
+
 ## Launch arguments
 
 Launch arguments come in through UserDefaults' argument domain, so any settings
@@ -105,6 +141,9 @@ key works too (for example `-checker preview` or `-ideasLayout pile`).
 | `-sjSeed YES` | in-memory store with sample ideas (one of them carries the real engine result) |
 | `-sjTab ideas\|dictate\|lab\|settings` | start on a tab |
 | `-sjOpen review\|detail\|pile:<category>` | open the sample draft's review, the best idea's detail, or a pile |
+| `-sjOpen lab:share\|mixer\|trends\|mix` | open a Lab screen (with `-sjTab lab`); `mix` mixes the two best ideas and opens the result |
+| `-sjExportShare YES` / `-sjShareFormat square` | write each rendered share image to Documents; start on the square format |
+| `-labUserID <uuid>` | the `X-App-User-Id` the Lab routes send (a stand-in until the paid tier's identity) |
 | `-sjDemoDictation YES` / `-sjAutoDictate YES` | a scripted voice in place of the microphone, and start a take on launch |
 | `-sjScheme dark\|light` | force the appearance |
 

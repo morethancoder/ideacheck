@@ -1,0 +1,27 @@
+{
+  "fetched_at": "2026-09-25T19:44:42.863013Z",
+  "items": [
+    {"title": "Radius – A Meetup.com Alternative", "url": "https://radius.to/", "source": "Show HN", "idea_type": "business", "points": 412},
+    {"title": "Sigabrt.dev – cronjob monitor with an SSH TUI", "url": "https://sigabrt.dev", "source": "Show HN", "idea_type": "business", "points": 188},
+    {"title": "mikehasa/golive-skill", "url": "https://github.com/mikehasa/golive-skill", "source": "GitHub", "idea_type": "business", "summary": "Take your agent-built product live: hosting, database, domain.", "points": 1310},
+    {"title": "Koi.rest – watch some fish and regain your balance", "url": "https://koi.rest", "source": "Show HN", "idea_type": "side_project", "points": 356},
+    {"title": "Git-bug: Distributed, offline-first bug tracker embedded in Git", "url": "https://github.com/git-bug/git-bug", "source": "Hacker News", "idea_type": "side_project", "points": 290},
+    {"title": "driceroland/Search", "url": "https://github.com/driceroland/Search", "source": "GitHub", "idea_type": "side_project", "summary": "A small, fast WebKit browser for macOS.", "points": 940},
+    {"title": "Make cursed fonts like Times New Bastard", "url": "https://bastardica.mitpit.com", "source": "Show HN", "idea_type": "creative", "points": 837},
+    {"title": "A competition for small neural networks that play strategy games", "url": "https://tinybrains.dev", "source": "Show HN", "idea_type": "creative", "points": 244},
+    {"title": "2DWillNeverDie", "url": "https://2dwillneverdie.com/", "source": "Hacker News", "idea_type": "creative", "points": 198},
+    {"title": "Why is the liver so weirdly regenerative?", "url": "https://dynomight.substack.com/p/liver", "source": "Hacker News", "idea_type": "content", "points": 521},
+    {"title": "What About Rails?", "url": "https://jardo.dev/what-about-rails", "source": "Hacker News", "idea_type": "content", "points": 305},
+    {"title": "Opus 5.5 is good at explainer videos", "url": "https://launchvideo.io", "source": "Hacker News", "idea_type": "content", "points": 277},
+    {"title": "Training a model to identify AI web content from structure alone", "url": "https://arxiv.org/abs/2609.15369", "source": "Show HN", "idea_type": "research", "points": 163},
+    {"title": "JevBench, a reproducible benchmark for typed decision models", "url": "https://benchmarkheaven.com/jev-models", "source": "Show HN", "idea_type": "research", "points": 141},
+    {"title": "Platform-independent SIMD in Go", "url": "https://go.dev/blog/simd-experiment", "source": "Hacker News", "idea_type": "research", "points": 388}
+  ],
+  "sparks": [
+    {"idea_type": "business", "prompt": "Which group you belong to still organizes itself with a spreadsheet and a group chat?"},
+    {"idea_type": "side_project", "prompt": "What small tool would you keep open all day if it did exactly one thing well?"},
+    {"idea_type": "creative", "prompt": "What rule could you break in a familiar format, on purpose, to see what's left?"},
+    {"idea_type": "content", "prompt": "What everyday thing works in a way that surprised you, and who else would want to know?"},
+    {"idea_type": "research", "prompt": "What could you measure this month with data you already have?"}
+  ]
+}
