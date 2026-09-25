@@ -2,18 +2,6 @@ import Foundation
 import SwiftData
 import Observation
 
-/// Live progress of one running check, for the card and detail views.
-struct CheckRun: Sendable, Equatable {
-    var started = 0
-    var finished = 0
-    var stage = "preflight"
-    var lastQuestion: String?
-
-    /// A rough fraction for a progress ring: finished over started, which grows
-    /// as the engine announces questions.
-    var fraction: Double { started == 0 ? 0.05 : max(0.05, Double(finished) / Double(max(started, 1))) }
-}
-
 /// Runs checks and writes their results onto ideas. Main-actor, like SwiftData's
 /// main context it writes to.
 @MainActor
@@ -21,16 +9,22 @@ struct CheckRun: Sendable, Equatable {
 final class CheckCoordinator {
     private(set) var runs: [UUID: CheckRun] = [:]
     private var tasks: [UUID: Task<Void, Never>] = [:]
-    var makeChecker: () -> any IdeaChecker = { AppSettings.makeChecker() }
+    /// Makes the checker for one check. nil = the one Settings and the plan
+    /// choose (CheckRoute); the app wires in the plan and this iPhone's judge.
+    var makeChecker: @MainActor (CheckerKind?) -> any IdeaChecker = { kind in
+        AppSettings.makeChecker(kind ?? AppSettings.checker, onDevice: OnDeviceChecker(judge: nil, writer: false))
+    }
 
     func isChecking(_ idea: Idea) -> Bool { runs[idea.id] != nil }
 
-    func check(_ idea: Idea, in context: ModelContext) {
+    /// - Parameter kind: check with this checker once, whatever Settings says
+    ///   (Review's "Check with Sparkjudge Cloud"); nil = Settings' choice.
+    func check(_ idea: Idea, in context: ModelContext, with kind: CheckerKind? = nil) {
         tasks[idea.id]?.cancel()
         let id = idea.id
         let intake = idea.intake
         let rubric = idea.categoryChosen ? idea.category.rubric : nil
-        let checker = makeChecker()
+        let checker = makeChecker(kind)
         idea.status = .checking
         idea.lastError = nil
         try? context.save()
@@ -45,8 +39,7 @@ final class CheckCoordinator {
                         break
                     case .progress(let p):
                         var run = self.runs[id] ?? CheckRun()
-                        run.stage = p.stage
-                        if p.isFinished { run.finished += 1 } else { run.started += 1; run.lastQuestion = p.question.id }
+                        run.apply(p)
                         self.runs[id] = run
                     case .result(let result, let raw):
                         idea.apply(result, raw: raw)

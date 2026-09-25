@@ -8,7 +8,9 @@ struct LaunchOptions: Sendable {
     /// Use an in-memory store filled with sample ideas.
     var seed: Bool
     var tab: AppTab?
-    /// `review` (the sample draft), `detail` (the best-rated idea), `pile:<category>`,
+    /// `review` (the sample draft), `detail` (the best-rated idea), `check` (the
+    /// newest unchecked idea, checked at once), `pile:<category>`, `judge`
+    /// (Settings → On this iPhone, with `-sjTab settings`),
     /// `lab:share|mixer|trends` (a Lab screen), `lab:mix` (mix the two best ideas, then review).
     var open: String?
     /// Replace the microphone with a scripted voice.

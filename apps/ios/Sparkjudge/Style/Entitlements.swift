@@ -71,7 +71,7 @@ final class Entitlements {
     private var watchers: [Task<Void, Never>] = []
     private var observers: [any NSObjectProtocol] = []
 
-    static let cacheKey = "entitlement.pro"
+    nonisolated static let cacheKey = "entitlement.pro"
 
     /// For tests and previews: nothing starts on its own.
     init(storefront: (any Storefront)? = nil, userID: String = UUID().uuidString.lowercased(),

@@ -6,9 +6,12 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.silenceSeconds) private var silence = AppSettings.defaultSilence
     @AppStorage(SettingsKey.vadSensitivity) private var vad = 1
     @AppStorage(SettingsKey.autoCheck) private var autoCheck = false
-    @AppStorage(SettingsKey.checker) private var checkerRaw = CheckerKind.remote.rawValue
+    /// nil until chosen: CheckRoute then picks by plan.
+    @AppStorage(SettingsKey.checker) private var checkerRaw: String?
     @AppStorage(SettingsKey.serverURL) private var serverURL = ""
     @Environment(Entitlements.self) private var entitlements
+    @Environment(OnDeviceJudges.self) private var judges
+    @State private var path = NavigationPath()
     @Environment(\.ideaSuggester) private var writer
     @State private var catalog = TranscriberCatalog()
     @State private var connection: ConnectionState = .unknown
@@ -18,10 +21,15 @@ struct SettingsView: View {
     }
 
     private var engine: TranscriberEngineID { TranscriberEngineID(rawValue: engineRaw) ?? .appleSpeech }
-    private var checker: CheckerKind { CheckerKind(rawValue: checkerRaw) ?? .remote }
+    private var checker: CheckerKind {
+        CheckRoute.resolve(stored: checkerRaw.flatMap(CheckerKind.init(rawValue:)), isPro: entitlements.isPro)
+    }
+
+    /// Settings' inner pages, for `-sjOpen judge`.
+    enum Page: Hashable { case onDeviceJudge }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
                 judge
                 plan
@@ -37,8 +45,23 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Color.sjInk)
             .navigationTitle("Settings")
+            .navigationDestination(for: Page.self) { page in
+                switch page {
+                case .onDeviceJudge: OnDeviceJudgeView()
+                }
+            }
             .refreshable { await entitlements.refreshPlan() }
             .task { await entitlements.refreshPlan() }
+            .task {
+                judges.refreshDevice()
+                if LaunchOptions.current.open == "judge", path.isEmpty { path.append(Page.onDeviceJudge) }
+                #if DEBUG
+                if let id = UserDefaults.standard.string(forKey: "sjLayaDownload"), !id.isEmpty {
+                    await judges.refreshHub()
+                    judges.download(id)
+                }
+                #endif
+            }
             .task(id: "\(engineRaw)|\(localeID)") {
                 await catalog.refresh(engine: engine, localeIdentifier: localeID.isEmpty ? nil : localeID)
                 // The choice must be one this device can run: fall back to the first that is.
@@ -57,11 +80,17 @@ struct SettingsView: View {
     private var judge: some View {
         Section {
             JudgeRow(title: "On this iPhone", badge: "Free · private", symbol: "iphone",
-                     detail: OnDeviceChecker.isAvailable
-                        ? "Apple's on-device model judges. Nothing leaves your phone."
-                        : "Apple's on-device model judges and nothing leaves your phone. Coming in a later version.",
-                     selected: checker == .onDevice, locked: false, available: OnDeviceChecker.isAvailable) {
+                     detail: onDeviceDetail,
+                     selected: checker == .onDevice, locked: false, available: true) {
                 checkerRaw = CheckerKind.onDevice.rawValue
+            }
+            NavigationLink(value: Page.onDeviceJudge) {
+                LabeledContent {
+                    Text(judges.judge?.title ?? "None yet")
+                        .foregroundStyle(judges.judge == nil ? Verdict.park.color : Color.sjMuted)
+                } label: {
+                    Label("Model on this iPhone", systemImage: "cpu")
+                }
             }
             JudgeRow(title: "Sparkjudge Cloud", badge: entitlements.isPro ? "Pro" : "Pro · try free", symbol: "cloud",
                      detail: "Jev, a judge built for these questions, scores the idea after searching the web for competitors and demand. More accurate, with sources.",
@@ -76,6 +105,14 @@ struct SettingsView: View {
             } else if checker == .preview {
                 Text(CheckerKind.preview.detail)
             }
+        }
+    }
+
+    private var onDeviceDetail: String {
+        switch judges.judge {
+        case .laya: "Laya judges, in seconds, and nothing leaves your phone. No web research."
+        case .apple: "Apple Intelligence judges, about a minute a check, and nothing leaves your phone. No web research."
+        case nil: "Nothing leaves your phone. This iPhone needs a judge first: download Laya below."
         }
     }
 
@@ -245,8 +282,10 @@ struct SettingsView: View {
         @Bindable var entitlements = entitlements
         return Section {
             Picker("Check with", selection: $checkerRaw) {
-                Text("Sparkjudge Cloud").tag(CheckerKind.remote.rawValue)
-                Text(CheckerKind.preview.title).tag(CheckerKind.preview.rawValue)
+                Text("By plan").tag(String?.none)
+                Text(CheckerKind.onDevice.title).tag(String?.some(CheckerKind.onDevice.rawValue))
+                Text("Sparkjudge Cloud").tag(String?.some(CheckerKind.remote.rawValue))
+                Text(CheckerKind.preview.title).tag(String?.some(CheckerKind.preview.rawValue))
             }
             TextField(AppSettings.hostedURL.absoluteString, text: $serverURL)
                 .keyboardType(.URL)

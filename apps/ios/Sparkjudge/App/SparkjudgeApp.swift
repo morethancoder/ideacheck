@@ -5,12 +5,24 @@ import SwiftUI
 struct SparkjudgeApp: App {
     private let container: ModelContainer
     private let launch = LaunchOptions.current
-    @State private var coordinator = CheckCoordinator()
-    @State private var entitlements = Entitlements.live()
+    @State private var coordinator: CheckCoordinator
+    @State private var entitlements: Entitlements
+    @State private var judges: OnDeviceJudges
     @State private var appState: AppState
 
     init() {
         let launch = LaunchOptions.current
+        let entitlements = Entitlements.live()
+        let judges = OnDeviceJudges()
+        let coordinator = CheckCoordinator()
+        // Free users check on this iPhone unless they chose Cloud; Pro users
+        // in Cloud unless they chose the phone (CheckRoute).
+        coordinator.makeChecker = { kind in
+            AppSettings.makeChecker(kind ?? AppSettings.checker(isPro: entitlements.isPro), onDevice: judges.checker)
+        }
+        _entitlements = State(initialValue: entitlements)
+        _judges = State(initialValue: judges)
+        _coordinator = State(initialValue: coordinator)
         container = Self.makeContainer(inMemory: launch.seed)
         let state = AppState(tab: launch.tab ?? .dictate)
         if launch.seed {
@@ -25,6 +37,7 @@ struct SparkjudgeApp: App {
             RootView()
                 .environment(coordinator)
                 .environment(entitlements)
+                .environment(judges)
                 .environment(appState)
                 .preferredColorScheme(launch.colorScheme)
         }

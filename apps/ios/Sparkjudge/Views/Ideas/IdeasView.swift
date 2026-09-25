@@ -13,6 +13,8 @@ enum IdeasLayout: String, CaseIterable, Identifiable {
 struct IdeasView: View {
     @Query(sort: \Idea.createdAt, order: .reverse) private var ideas: [Idea]
     @Environment(AppState.self) private var appState
+    @Environment(CheckCoordinator.self) private var coordinator
+    @Environment(\.modelContext) private var context
     @AppStorage(SettingsKey.ideasLayout) private var layoutRaw = IdeasLayout.list.rawValue
     @State private var order: IdeaGrouping.Order = .newest
     @State private var path: [UUID] = []
@@ -175,6 +177,10 @@ struct IdeasView: View {
         let open = LaunchOptions.current.open ?? ""
         if open == "detail", let best = ideas.filter({ $0.composite != nil }).max(by: { ($0.composite ?? 0) < ($1.composite ?? 0) }) {
             path = [best.id]
+        } else if open == "check", let newest = ideas.first(where: { !$0.transcript.isEmpty && $0.resultData == nil }) ?? ideas.first {
+            // Opens the newest unchecked idea and checks it with the chosen checker.
+            path = [newest.id]
+            coordinator.check(newest, in: context)
         } else if open.hasPrefix("pile:"), let c = IdeaCategory(rawValue: String(open.dropFirst(5))) {
             layoutRaw = IdeasLayout.pile.rawValue
             openPile = c

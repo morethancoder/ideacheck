@@ -284,7 +284,7 @@ struct HostedAllowanceNote: View {
     @Environment(Entitlements.self) private var entitlements
 
     var body: some View {
-        if AppSettings.checker == .remote, let plan = entitlements.plan {
+        if AppSettings.checker(isPro: entitlements.isPro) == .remote, let plan = entitlements.plan {
             Label(Self.line(plan), systemImage: plan.isUsedUp ? "exclamationmark.circle" : "cloud")
                 .font(.caption2)
                 .foregroundStyle(plan.isUsedUp ? Verdict.park.color : Color.sjMuted)

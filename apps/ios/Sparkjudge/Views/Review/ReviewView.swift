@@ -10,11 +10,16 @@ extension EnvironmentValues {
 /// category and fields, then check it.
 struct ReviewView: View {
     @Bindable var idea: Idea
-    /// Called once when review ends; `true` when the person pressed Check.
-    var onFinish: (Bool) -> Void
+    /// Called once when review ends: `true` when the person pressed Check,
+    /// with the checker to use once (nil = Settings' choice).
+    var onFinish: (Bool, CheckerKind?) -> Void
 
     @Environment(\.ideaSuggester) private var writer
+    @Environment(Entitlements.self) private var entitlements
+    @Environment(OnDeviceJudges.self) private var judges
     @AppStorage(SettingsKey.autoCheck) private var autoCheck = false
+    @AppStorage(SettingsKey.layaOffered) private var layaOffered = false
+    @State private var offer: JudgeOfferReason?
     @State private var suggesting = false
     @State private var suggestedFields: Set<String> = []
     @State private var writerNote: String?
@@ -53,6 +58,15 @@ struct ReviewView: View {
         }
         .task { await suggest() }
         .onDisappear { if !finished { finish(check: false) } }
+        .sheet(item: $offer) { reason in
+            JudgeOfferSheet(reason: reason) { kind in
+                offer = nil
+                finish(check: true, with: kind)
+            } close: {
+                offer = nil
+            }
+            .presentationDetents([.large])
+        }
     }
 
     // MARK: - Sections
@@ -156,7 +170,7 @@ struct ReviewView: View {
 
     private var checkBar: some View {
         VStack(spacing: 6) {
-            Button { finish(check: true) } label: {
+            Button { checkTapped() } label: {
                 Label("Check this idea", systemImage: "sparkles")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
@@ -239,9 +253,29 @@ struct ReviewView: View {
         }
     }
 
-    private func finish(check: Bool) {
+    /// Checks at once, unless the check would run on this iPhone and it
+    /// has no judge (then the sheet says how to get one), or Apple
+    /// Intelligence would judge and Laya has not been offered yet (once).
+    private func checkTapped() {
+        if let reason = Self.offer(route: AppSettings.checker(isPro: entitlements.isPro), judge: judges.judge,
+                                   hasLaya: judges.local.contains { $0.problem == nil }, offered: layaOffered) {
+            if reason == .faster { layaOffered = true }
+            offer = reason
+            return
+        }
+        finish(check: true)
+    }
+
+    static func offer(route: CheckerKind, judge: OnDeviceJudge?, hasLaya: Bool, offered: Bool) -> JudgeOfferReason? {
+        guard route == .onDevice else { return nil }
+        if judge == nil { return .noJudge }
+        if judge == .apple, !hasLaya, !offered { return .faster }
+        return nil
+    }
+
+    private func finish(check: Bool, with kind: CheckerKind? = nil) {
         guard !finished else { return }
         finished = true
-        onFinish(check)
+        onFinish(check, kind)
     }
 }

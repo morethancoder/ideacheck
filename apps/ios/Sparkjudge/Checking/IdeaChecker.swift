@@ -26,6 +26,9 @@ struct CheckProgress: Codable, Sendable, Hashable {
     var question: CheckQuestion
     var answer: CheckResult.Answer?
     var value: Double?
+    /// How many questions this stage asks, when the checker can tell (the
+    /// on-device checker, from the core's rubrics). Not on the wire.
+    var expected: Int?
 
     var isFinished: Bool { type == "answered" || type == "failed" }
 }
@@ -57,7 +60,7 @@ enum CheckerKind: String, CaseIterable, Codable, Sendable, Identifiable {
         switch self {
         case .remote: "Your ideacheck server scores the idea with the judge it is configured with."
         case .preview: "A realistic sample result, made on the phone. Nothing is judged; for trying the app."
-        case .onDevice: "The ideacheck engine with Apple's on-device model as judge. Coming in a later version."
+        case .onDevice: "The ideacheck engine on this iPhone, with Laya or Apple Intelligence as the judge. Free, offline, private."
         }
     }
 }

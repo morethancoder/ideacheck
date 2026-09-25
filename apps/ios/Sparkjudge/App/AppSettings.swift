@@ -13,6 +13,10 @@ enum SettingsKey {
     static let serverURL = "serverURL"
     static let proPreview = "proPreview"
     static let ideasLayout = "ideasLayout"
+    /// The on-device judge chosen in Settings ("" = automatic; see JudgePreference).
+    static let onDeviceJudge = "onDeviceJudge"
+    /// Whether Review has offered the Laya download once already.
+    static let layaOffered = "layaOffered"
 }
 
 enum AppSettings {
@@ -38,9 +42,18 @@ enum AppSettings {
 
     static var autoCheck: Bool { defaults.bool(forKey: SettingsKey.autoCheck) }
 
-    /// Who checks: Sparkjudge Cloud (`.remote`) unless chosen otherwise.
-    static var checker: CheckerKind {
-        defaults.string(forKey: SettingsKey.checker).flatMap(CheckerKind.init(rawValue:)) ?? .remote
+    /// Who checks, as chosen in Settings; nil = not chosen (CheckRoute decides).
+    static var storedChecker: CheckerKind? {
+        defaults.string(forKey: SettingsKey.checker).flatMap(CheckerKind.init(rawValue:))
+    }
+
+    /// Who checks: the choice in Settings, else this iPhone for free users and
+    /// Sparkjudge Cloud for Pro (CheckRoute). Pro here is the store's cached
+    /// answer; views with `Entitlements` at hand use `checker(isPro:)`.
+    static var checker: CheckerKind { checker(isPro: defaults.bool(forKey: Entitlements.cacheKey)) }
+
+    static func checker(isPro: Bool) -> CheckerKind {
+        CheckRoute.resolve(stored: storedChecker, isPro: isPro)
     }
 
     /// The build's hosted API, from Info.plist's `SparkjudgeAPIURL` (the
@@ -71,11 +84,13 @@ enum AppSettings {
         return key.isEmpty || key.hasPrefix("$(") ? nil : key
     }
 
-    static func makeChecker(_ kind: CheckerKind = checker) -> any IdeaChecker {
+    /// - Parameter onDevice: the checker for this iPhone, with the judge it has
+    ///   now (`OnDeviceJudges.checker`).
+    static func makeChecker(_ kind: CheckerKind, onDevice: @autoclosure () -> OnDeviceChecker) -> any IdeaChecker {
         switch kind {
         case .remote: RemoteChecker(api: .shared(baseURL: serverURL))
         case .preview: PreviewChecker()
-        case .onDevice: OnDeviceChecker()
+        case .onDevice: onDevice()
         }
     }
 }

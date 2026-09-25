@@ -123,19 +123,23 @@ struct IdeaDetailView: View {
     private func progress(_ run: CheckRun) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(run.stage == "score" ? "Scoring" : "Reading the idea")
+                Text(run.label)
                     .font(.sjLabel(.footnote))
+                    .contentTransition(.numericText())
                 Spacer()
-                Text("\(run.finished)/\(max(run.started, run.finished)) questions").font(.sjLabel(.footnote)).foregroundStyle(Color.sjMuted)
+                Button("Stop") { coordinator.cancel(idea) }
+                    .font(.sjLabel(.footnote))
+                    .tint(Color.sjMuted)
             }
             ProgressView(value: run.fraction).tint(Color.sjSpark)
-            if let q = run.lastQuestion {
+            if let q = run.question {
                 Text(FieldSpec.humanize(q)).font(.caption).foregroundStyle(Color.sjMuted).contentTransition(.opacity)
             }
         }
         .padding(16)
         .background(Color.sjSurface, in: .rect(cornerRadius: 18))
         .animation(.smooth, value: run)
+        .accessibilityElement(children: .combine)
     }
 
     private func verdict(_ r: CheckResult) -> some View {

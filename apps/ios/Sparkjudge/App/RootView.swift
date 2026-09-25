@@ -25,8 +25,8 @@ struct RootView: View {
         .tint(Color.sjSpark)
         .paywallSheet()
         .sheet(item: $appState.reviewing) { idea in
-            ReviewView(idea: idea) { checkNow in
-                finishReview(idea, check: checkNow)
+            ReviewView(idea: idea) { checkNow, kind in
+                finishReview(idea, check: checkNow, with: kind)
             }
             .interactiveDismissDisabled(false)
         }
@@ -35,7 +35,7 @@ struct RootView: View {
     /// Leaving review always keeps the idea (it was saved when the take ended).
     /// It is checked when the person pressed Check, or on the way out when
     /// "Check automatically after review" is on.
-    private func finishReview(_ idea: Idea, check: Bool) {
+    private func finishReview(_ idea: Idea, check: Bool, with kind: CheckerKind? = nil) {
         // A "Type instead" draft left blank is not an idea; drop it.
         if idea.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
            idea.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, idea.fields.isEmpty {
@@ -49,7 +49,7 @@ struct RootView: View {
         try? context.save()
         appState.reviewing = nil
         if check || (AppSettings.autoCheck && idea.resultData == nil) {
-            coordinator.check(idea, in: context)
+            coordinator.check(idea, in: context, with: kind)
             appState.focus = idea.id
             appState.tab = .ideas
         }
