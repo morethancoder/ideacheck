@@ -133,6 +133,7 @@ configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-e
   config.yaml          backends, pricing, setup wizard choices
   sparkjudge.yaml      the hosted API: attest mode, plans, limits, spend cap, and an
                        engine: section layered over config.yaml (Jev + OpenRouter writer)
+  trends.yaml          the hosted API's GET /v1/trends: sources, refresh, sparks on or off
   fields.yaml          what a caller can send about an idea, and what each field means
   research.yaml        what the writer looks up on the web, and which gap each topic covers
   searxng/settings.yml the SearXNG `ideacheck search up` runs in Docker: the defaults + JSON output
@@ -158,7 +159,9 @@ internal/              desktop only
                        takimoto3/app-attest; Apple's root embedded, injectable in tests),
                        Accounts (SQLite now, an interface Postgres can take over): keys,
                        challenges, RevenueCat entitlements, the monthly ledger, daily
-                       spend; Meter, rate limits, /v1/me and the RevenueCat webhook
+                       spend; Meter, rate limits, /v1/me and the RevenueCat webhook; the Lab
+                       routes (lab.go, trends.go): /v1/mix (writer) and /v1/trends (judge types
+                       each item with the router question, cached per refresh)
 docs/                  sparkjudge-api.md: routes, auth flow, quotas, env, deploy
 Dockerfile, fly.toml   the hosted API's image and Fly app (make deploy; deploy/sparkjudge/)
 schemas/               check_result.schema.json, generated from the Go types

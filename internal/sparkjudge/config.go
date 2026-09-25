@@ -35,6 +35,7 @@ type Config struct {
 	Plans       map[string]Plan `yaml:"plans"`
 	Entitlement string          `yaml:"entitlement"`
 	Limits      Limits          `yaml:"limits"`
+	Lab         LabConfig       `yaml:"lab"` // the Lab routes: mix and trends (lab.go)
 	// Engine is a config.yaml layer: the check's backends, research and the rest.
 	Engine yaml.Node `yaml:"engine"`
 }

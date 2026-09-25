@@ -1,0 +1,17 @@
+{{- /* The mix call (POST /v1/mix on the hosted API). .Ideas are what the app
+sent, two or three, numbered from 1; .Fields are the fields to fill, with their
+meanings from fields.yaml. */ -}}
+Combine these ideas into one new idea.
+{{ range .Ideas }}
+IDEA {{ .N }}{{ if .Title }}: {{ .Title }}{{ end }}
+```
+{{ .Idea }}
+{{- range .Fields }}
+{{ .Name }}: {{ .Value }}
+{{- end }}
+```
+{{ end }}
+Fill these fields for the new idea:
+{{ range .Fields }}
+- {{ .Name }}: {{ .Description }}
+{{- end }}

@@ -33,6 +33,8 @@ models). The local `ideacheck serve` is unchanged.
 | `GET /v1/checks/{id}/events` | signed | Server-Sent Events: `progress` …, then `result` or `error` |
 | `GET /v1/fields` | signed | what an intake can carry (`fields.yaml`), for the idea form |
 | `GET /v1/rubrics` | signed | the rubrics and their questions |
+| `POST /v1/mix` | signed | combine two or three ideas into a new one (the writer; Pro; not a check) |
+| `GET /v1/trends` | signed | the day's trends, typed into idea types, with inspiration prompts |
 
 `POST /v1/check` takes the same intake JSON as `ideacheck serve`
 (`{"idea": "...", "fields": {...}}`) and answers the same result
@@ -60,11 +62,60 @@ Always JSON, with a matching status:
 | 401 | `stale_assertion` | the assertion was used already or a newer one arrived first: sign again and retry |
 | 401 | `bad_challenge` / `bad_attestation` | an attestation that cannot be accepted |
 | 402 | `quota_exceeded` | no checks left this month |
+| 402 | `pro_required` | (mix) the plan may not mix on the server |
 | 409 | `key_exists` | that key is already attested |
 | 413 | `too_large` | body over `limits.max_body_bytes` |
 | 429 | `rate_limited` | too many requests this minute, or checks this hour |
 | 503 | `daily_cap` | the service has spent today's budget; checks resume at 00:00 UTC |
 | 503 | `not_configured` | (webhook) `REVENUECAT_WEBHOOK_AUTH` is not set |
+| 503 | `no_writer` | (mix) the server's writer cannot write |
+| 502 | `writer_failed` | (mix) the writer's call failed; try again |
+| 502 | `trends_unavailable` | (trends) no source answered and nothing is cached |
+
+## The Lab: mix and trends
+
+Two routes the app's Lab tab calls. Neither is a check: neither takes from the
+monthly allowance. `lab:` in `sparkjudge.yaml` configures them; the code is
+`internal/sparkjudge/lab.go` and `trends.go`.
+
+**`POST /v1/mix`** combines ideas. Writing a new idea has no option list, so it
+is the **writer's** job: one `Extract` call with `prompts/mix_system.md` and
+`prompts/mix.tmpl`, filling `lab.mix.fields` (fields.yaml names; `title,
+problem, audience, solution`).
+
+```json
+{"ideas": [{"title": "Tide game", "idea": "A puzzle game about tides", "fields": {"audience": "Sailors"}},
+           {"title": "Plumber invoices", "idea": "Invoices from a photo of the job"}]}
+→ {"fields": {"title": "…", "problem": "…", "audience": "…", "solution": "…"}, "model": "z-ai/glm-5.3-flash", "cost_usd": 0.0004}
+```
+
+2 to `lab.mix.max_ideas` (3) ideas; only fields.yaml's idea fields are passed
+on. Only `lab.mix.plans` (`[pro]`) may mix here (the app mixes on the phone with
+Apple's on-device model for everyone else), at most `lab.mix.per_hour` (20) an
+hour per user. Its cost adds to the day's spend, and the daily cap stops it.
+
+**`GET /v1/trends`** is what `configs/trends.yaml` lists: HN Algolia (Show HN
+from the last week, the front page), GitHub's most-starred new repositories of
+the week, and, when research has a search service (SearXNG, Tavily, Brave), a
+few news searches. Product Hunt is left out: its API needs a token. Each item
+is typed by the **judge** with the router's own question
+(`rubrics/_router.yaml`), one item per question, all at once; the **writer**
+then writes one inspiration prompt per idea type (`prompts/trends_spark*`, one
+`Extract` call). The report is kept in `checks.db` and served from there until
+it is `refresh` (24h) old, so a request costs no model call; one request
+rebuilds while others wait for it. A failing source is a warning; when every
+source fails the last report is served again with `"stale": true`.
+
+```json
+{"fetched_at": "2026-09-25T12:00:00Z",
+ "items": [{"title": "A game about tides", "url": "https://…", "source": "Show HN", "idea_type": "creative", "points": 120}],
+ "sparks": [{"idea_type": "creative", "prompt": "…"}],
+ "warnings": ["GitHub: api.github.com answered 403"]}
+```
+
+`GITHUB_TOKEN`, when set, raises GitHub's search limit (`token_env` in
+trends.yaml); none is needed. With `-b mock` (`make api`) the judge is the mock
+and an offline writer fills every field with a note that no model wrote it.
 
 ## Identity and App Attest
 
@@ -237,8 +288,10 @@ make api                                   # mock judge, attest off, data in bin
 U=11111111-2222-4333-8444-555555555555
 curl -s localhost:8787/v1/me -H "X-App-User-Id: $U"
 curl -s -X POST 'localhost:8787/v1/check?rubric=business' -H "X-App-User-Id: $U" -d '{"idea":"A payroll tool for bakeries"}'
+curl -s localhost:8787/v1/trends -H "X-App-User-Id: $U"      # fetches the real sources once, then serves the cache
 curl -s -X POST localhost:8787/v1/webhooks/revenuecat -H 'Authorization: Bearer local' \
   -d '{"event":{"id":"e1","type":"INITIAL_PURCHASE","app_user_id":"'$U'","entitlement_ids":["pro"],"expiration_at_ms":4102444800000,"event_timestamp_ms":1758800000000}}'
+curl -s -X POST localhost:8787/v1/mix -H "X-App-User-Id: $U" -d '{"ideas":[{"idea":"A tide game"},{"idea":"Plumber invoices"}]}'   # pro, after the webhook
 ```
 
 With the real models, export `TYPESAFE_API_KEY` and `OPENROUTER_API_KEY` and run

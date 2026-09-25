@@ -42,6 +42,23 @@ limits:
   daily_spend_usd: 25
   max_body_bytes: 1048576
 
+# The Lab's routes. Neither counts as a check.
+lab:
+  # POST /v1/mix: the writer combines two or three ideas into a new draft, in
+  # one cheap call. The app mixes on the phone (Apple's on-device model) for
+  # everyone; the server mixes for these plans only. Each mix's cost adds to
+  # the day's spend, and the daily cap stops mixes too.
+  mix:
+    plans: [pro]
+    per_hour: 20              # per user, on top of requests_per_minute
+    max_ideas: 3
+    # What the writer returns, by fields.yaml's names: they become the new
+    # draft's title and fields. The prompt is prompts/mix_system.md + mix.tmpl.
+    fields: [title, problem, audience, solution]
+  # GET /v1/trends: what trends.yaml's sources list, built at most once per its
+  # refresh and served from the cache in between, so a request costs no model.
+  trends: trends.yaml
+
 # The check itself, in config.yaml's shape, over the embedded config.yaml and
 # under IDEACHECK_* environment variables (IDEACHECK_BACKEND=mock runs it with
 # no model at all). Jev judges; a cheap OpenRouter model reads, researches and

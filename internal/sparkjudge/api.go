@@ -15,6 +15,9 @@ func (s *Service) Handler(api *server.Server) http.Handler {
 	api.Meter = s.Meter
 	api.Mount = func(mux *http.ServeMux) {
 		mux.HandleFunc("GET /v1/me", s.me)
+		if s.Lab != nil {
+			s.mountLab(mux)
+		}
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/attest/challenge", s.challenge)

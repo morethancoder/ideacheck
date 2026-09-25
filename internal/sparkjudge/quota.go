@@ -24,6 +24,8 @@ type Service struct {
 	WebhookAuth string
 	Log         *slog.Logger     // nil = discard
 	Now         func() time.Time // nil = time.Now
+	// Lab, when set (and loaded), serves POST /v1/mix and GET /v1/trends.
+	Lab *Lab
 
 	requests, checks *limiter
 }

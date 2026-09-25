@@ -23,6 +23,7 @@ import (
 	"github.com/morethancoder/ideacheck/internal/backends"
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/internal/sparkjudge"
+	"github.com/morethancoder/ideacheck/judge/mock"
 	"github.com/morethancoder/ideacheck/search"
 	"github.com/morethancoder/ideacheck/server"
 	"github.com/morethancoder/ideacheck/store"
@@ -71,6 +72,9 @@ func run() error {
 		Verifier:    sparkjudge.Verifier{Roots: sparkjudge.AppleRoots(), AppID: cfg.Attest.AppID(), Development: cfg.Attest.Development},
 		WebhookAuth: os.Getenv("REVENUECAT_WEBHOOK_AUTH"),
 		Log:         log,
+	}
+	if svc.Lab, err = newLab(engine, files, cfg, checks); err != nil {
+		return err
 	}
 	api := &server.Server{Engine: engine, Store: checks, Files: files, RubricsDir: rubricsDir, Log: log}
 	if cfg.Attest.Mode == sparkjudge.AttestOff {
@@ -145,6 +149,22 @@ func newEngine(files configs.Files, cfg sparkjudge.Config, backend string) (*ide
 	}
 	engine, err := ideacheck.New(opts)
 	return engine, ecfg.RubricsDir, err
+}
+
+// newLab gives the Lab routes the engine's roles: the judge types trend
+// items, the writer mixes and writes sparks. The mock backend writes no text,
+// so with it an OfflineWriter answers in the writer's place.
+func newLab(engine *ideacheck.Engine, files configs.Files, cfg sparkjudge.Config, checks *store.Store) (*sparkjudge.Lab, error) {
+	writer := engine.Writer
+	if writer == nil {
+		writer = engine.Judge
+	}
+	if m, ok := writer.(*mock.Judge); ok {
+		writer = sparkjudge.OfflineWriter{Judge: m}
+	}
+	lab := &sparkjudge.Lab{Judge: engine.Judge, Writer: writer, Files: files, Settings: engine.Settings,
+		Search: engine.Search, Cache: findings{checks}, Getenv: os.Getenv}
+	return lab, lab.Load(cfg.Lab)
 }
 
 // findings keeps research findings in the checks database, shared by every
