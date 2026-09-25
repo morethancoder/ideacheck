@@ -2,6 +2,8 @@ package server
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,15 +12,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rs/zerolog"
-
 	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/judge/mock"
 	"github.com/morethancoder/ideacheck/store"
 )
 
-func newServer(t *testing.T) *httptest.Server {
+func newServer(t *testing.T, with ...func(*Server)) *httptest.Server {
 	t.Helper()
 	files := configs.Defaults()
 	settings, err := ideacheck.DefaultSettings("mock", "")
@@ -34,7 +34,10 @@ func newServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{Engine: engine, Store: st, Files: files, RubricsDir: settings.RubricsDir, Log: zerolog.Nop()}
+	s := &Server{Engine: engine, Store: st, Files: files, RubricsDir: settings.RubricsDir}
+	for _, f := range with {
+		f(s)
+	}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv
@@ -164,5 +167,48 @@ func TestRubricsAndHealth(t *testing.T) {
 	var health map[string]string
 	if code := getJSON(t, srv.URL+"/v1/healthz", &health); code != 200 || health["status"] != "ok" {
 		t.Errorf("healthz = %d %v", code, health)
+	}
+}
+
+// tenants records who each saved check belonged to.
+type tenants struct {
+	Store
+	saved []string
+}
+
+func (t *tenants) Save(ctx context.Context, in ideacheck.Intake, res *ideacheck.Result) error {
+	t.saved = append(t.saved, Tenant(ctx))
+	return t.Store.Save(ctx, in, res)
+}
+
+func TestAuthAdmitsOrRefusesAndNamesTheTenant(t *testing.T) {
+	var kept *tenants
+	srv := newServer(t, func(s *Server) {
+		kept = &tenants{Store: s.Store}
+		s.Store = kept
+		s.Auth = func(r *http.Request) (string, error) {
+			if r.Header.Get("Authorization") != "Bearer k1" {
+				return "", errors.New("no such key")
+			}
+			return "acme", nil
+		}
+	})
+	var health map[string]string
+	if code := getJSON(t, srv.URL+"/v1/healthz", &health); code != 200 {
+		t.Errorf("healthz without a key = %d, want 200", code)
+	}
+	var refused map[string]string
+	if code := getJSON(t, srv.URL+"/v1/rubrics", &refused); code != 401 || refused["error"] != "no such key" {
+		t.Errorf("rubrics without a key = %d %v, want 401", code, refused)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/check?rubric=business", strings.NewReader(`{"idea":"A payroll compliance tool"}`))
+	req.Header.Set("Authorization", "Bearer k1")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 || len(kept.saved) != 1 || kept.saved[0] != "acme" {
+		t.Errorf("check with a key = %d, saved for %v; want 200 for acme", res.StatusCode, kept.saved)
 	}
 }

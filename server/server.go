@@ -1,4 +1,5 @@
-// Package server is the local HTTP API. It speaks the same JSON contract as
+// Package server is the HTTP API: the local one `ideacheck serve` runs, and the
+// base of a hosted one (Store, Auth). It speaks the same JSON contract as
 // `ideacheck -o json` (schemas/check_result.schema.json).
 package server
 
@@ -8,11 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
-
-	"github.com/rs/zerolog"
 
 	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/rubric"
@@ -26,12 +26,25 @@ type Checker interface {
 	Check(ctx context.Context, in ideacheck.Intake, o ideacheck.CheckOptions) (*ideacheck.Result, error)
 }
 
+// Store keeps finished checks. *store.Store is the local SQLite history; a
+// hosted API brings its own. Get returns store.ErrNotFound for an unknown ref.
+type Store interface {
+	Save(ctx context.Context, in ideacheck.Intake, res *ideacheck.Result) error
+	Get(ctx context.Context, ref string) (*ideacheck.Result, error)
+	List(ctx context.Context, limit int) ([]store.Row, error)
+}
+
 type Server struct {
 	Engine     Checker
-	Store      *store.Store
+	Store      Store
 	Files      rubric.Reader
 	RubricsDir string
-	Log        zerolog.Logger
+	Log        *slog.Logger // nil = discard
+	// Auth, when set, admits each request (health checks aside) or refuses it
+	// with 401. The tenant it names rides on the request's context (Tenant),
+	// so a Store can keep each caller's checks apart. nil = no auth: the local
+	// API, which answers only this machine.
+	Auth func(*http.Request) (tenant string, err error)
 
 	runs *registry
 }
@@ -40,6 +53,9 @@ type Server struct {
 // to get an id before the check ends, POST /v1/check?async=1.
 func (s *Server) Handler() http.Handler {
 	s.runs = newRegistry()
+	if s.Log == nil {
+		s.Log = slog.New(slog.DiscardHandler)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/check", s.check)
 	mux.HandleFunc("GET /v1/checks", s.list)
@@ -49,7 +65,34 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	return cors(mux)
+	return cors(s.admit(mux))
+}
+
+type tenantKey struct{}
+
+// Tenant is who Auth admitted the request as; "" without Auth.
+func Tenant(ctx context.Context) string {
+	t, _ := ctx.Value(tenantKey{}).(string)
+	return t
+}
+
+// admit runs Auth before every route but the health check.
+func (s *Server) admit(next http.Handler) http.Handler {
+	if s.Auth == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		tenant, err := s.Auth(r)
+		if err != nil {
+			fail(w, http.StatusUnauthorized, err)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tenantKey{}, tenant)))
+	})
 }
 
 // cors allows browser frontends served from localhost only; this API runs checks
@@ -129,11 +172,11 @@ func (s *Server) execute(ctx context.Context, in ideacheck.Intake, opts ideachec
 	res, err := s.Engine.Check(ctx, in, opts)
 	if err == nil && s.Store != nil {
 		if serr := s.Store.Save(ctx, in, res); serr != nil {
-			s.Log.Warn().Err(serr).Str("request_id", res.ID).Msg("result was not saved to history")
+			s.Log.Warn("result was not saved to history", "error", serr, "request_id", res.ID)
 		}
 	}
 	if err != nil {
-		s.Log.Error().Err(err).Str("request_id", opts.ID).Msg("check failed")
+		s.Log.Error("check failed", "error", err, "request_id", opts.ID)
 	}
 	live.finish(res, err)
 	return res, err

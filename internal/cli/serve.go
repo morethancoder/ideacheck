@@ -44,7 +44,7 @@ func (a *app) serveCmd() *cobra.Command {
 			}
 			defer st.Close()
 			log := logging.New(a.stderr, cfg.Log.Level, cfg.Log.Format, !a.global.noColor && a.getenv("NO_COLOR") == "")
-			api := &server.Server{Engine: engine, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: log}
+			api := &server.Server{Engine: engine, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: logging.Slog(log)}
 			return listen(cmd.Context(), net.JoinHostPort(host, strconv.Itoa(port)), api.Handler(), func(addr string) {
 				// A person watching a terminal gets the step column; anything
 				// else — a supervisor, a log file — gets the structured line.
