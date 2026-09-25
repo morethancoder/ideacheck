@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
 )
 
 func serve(t *testing.T, status int, body string, seen **http.Request, sent *string) *httptest.Server {

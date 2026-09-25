@@ -12,6 +12,8 @@ unformatted="$(gofmt -l cmd internal configs ideacheck judge rubric prompt searc
 if [ -n "$unformatted" ]; then err "needs gofmt (run make fmt):"; say "$unformatted"; exit 1; fi
 ok "formatted"
 
+bash scripts/core.sh
+
 step "golangci-lint"
 if has_cli golangci-lint; then
   golangci-lint run ./...

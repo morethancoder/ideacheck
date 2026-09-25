@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help doctor setup dev build install run serve up down test race lint fmt tidy bench dry dump schema release clean
+.PHONY: help doctor setup dev build install run serve up down test race lint core fmt tidy bench dry dump schema release clean
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "; printf "\n\033[1mUsage:\033[0m make \033[36m<target>\033[0m\n\n\033[1mTargets:\033[0m\n"} \
@@ -41,6 +41,9 @@ race: ## run unit tests with the race detector
 
 lint: ## go vet, gofmt check, and golangci-lint when installed
 	@bash scripts/lint.sh
+
+core: ## check the public packages import nothing desktop-only and build for iOS and Android
+	@bash scripts/core.sh
 
 fmt: ## format all Go code
 	@gofmt -w cmd internal configs ideacheck judge rubric prompt search store server
