@@ -28,13 +28,35 @@ final class StubJudge: NSObject, SparkcoreJudgeProtocol, @unchecked Sendable {
 
 final class Events: NSObject, SparkcoreListenerProtocol, @unchecked Sendable {
     private let lock = NSLock()
+    private let start = Date()
     private(set) var all: [[String: Any]] = []
+    /// When each event arrived, in seconds since the listener was made.
+    private(set) var at: [TimeInterval] = []
 
     func onEvent(_ eventJSON: String?) {
         guard let data = eventJSON?.data(using: .utf8),
             let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }
-        lock.withLock { all.append(event) }
+        lock.withLock {
+            all.append(event)
+            at.append(Date().timeIntervalSince(start))
+        }
+    }
+
+    /// Seconds from each stage's first event to its last, in order: where a
+    /// check spends its time.
+    var stages: String {
+        lock.withLock {
+            var order: [String] = []
+            var span: [String: (TimeInterval, TimeInterval, Int)] = [:]
+            for (event, t) in zip(all, at) {
+                let stage = event["stage"] as? String ?? "?"
+                if span[stage] == nil { order.append(stage) }
+                let s = span[stage] ?? (t, t, 0)
+                span[stage] = (s.0, t, s.2 + ((event["type"] as? String) == "started" ? 1 : 0))
+            }
+            return order.map { "\($0) \(String(format: "%.1f", span[$0]!.1 - span[$0]!.0))s (\(span[$0]!.2) asked)" }.joined(separator: ", ")
+        }
     }
 }
 
@@ -131,22 +153,41 @@ final class SparkcoreTests: XCTestCase {
         XCTAssertTrue(["business", "creative", "other"].contains(answer["choice"] as? String ?? ""))
     }
 
-    /// The whole check on the on-device model, judge and writer both.
+    /// The whole check on the on-device model, judge and writer both, one
+    /// question per call.
     func testAFullCheckOnTheOnDeviceModel() throws {
+        try fullOnDeviceCheck(batch: false)
+    }
+
+    /// The same check with the questions sharing a state answered in one
+    /// response each (FoundationJudge as a BatchJudge).
+    func testAFullCheckOnTheOnDeviceModelInBatches() throws {
+        try fullOnDeviceCheck(batch: true)
+    }
+
+    func fullOnDeviceCheck(batch: Bool) throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("needs iOS 26") }
         if let problem = SystemLanguageModel.default.availability.problem {
             throw XCTSkip("Foundation Models unavailable: \(problem)")
         }
-        let engine = try SparkcoreEngine.make(
-            settingsJSON: #"{"max_concurrent": 1, "question_seconds": 60, "writer_seconds": 120}"#,
-            judge: FoundationJudge(), writer: FoundationWriter())
+        let settings = #"{"max_concurrent": 1, "question_seconds": 60, "writer_seconds": 600}"#
+        let engine = batch
+            ? try SparkcoreEngine.make(settingsJSON: settings, batchJudge: FoundationJudge(), writer: FoundationWriter())
+            : try SparkcoreEngine.make(settingsJSON: settings, judge: FoundationJudge(), writer: FoundationWriter())
+        let label = batch ? "batched" : "one by one"
         let start = Date()
-        let result = try object(try engine.check(idea, listener: nil))
+        let events = Events()
+        let result = try object(try engine.check(idea, listener: events))
         let answers = result["answers"] as? [[String: Any]] ?? []
         let failed = answers.filter { ($0["error"] as? String).map { !$0.hasPrefix("no ") } ?? false }
-        print("sparkcore: on-device check \(result["verdict"] ?? "-") in \(Int(Date().timeIntervalSince(start)))s, \(answers.count) answers, \(failed.count) failed: \(failed.map { "\($0["id"]!): \($0["error"]!)" })")
+        print("sparkcore: on-device check (\(label)) \(result["verdict"] ?? "-") \(result["composite"] ?? "-") in \(Int(Date().timeIntervalSince(start)))s, \(answers.count) answers, \(failed.count) failed: \(failed.map { "\($0["id"]!): \($0["error"]!)" })")
+        print("sparkcore: stages \(events.stages); warnings \(result["warnings"] ?? "-")")
         let judged = answers.compactMap { $0["latency_ms"] as? Int }.filter { $0 > 0 }
-        print("sparkcore: \(judged.count) model calls, mean \(judged.reduce(0, +) / max(judged.count, 1)) ms, slowest \(judged.max() ?? 0) ms")
+        print("sparkcore: \(Set(judged).count) distinct model calls, mean \(judged.reduce(0, +) / max(judged.count, 1)) ms, slowest \(judged.max() ?? 0) ms")
+        let picks = answers.map { a in
+            "\(a["id"]!)=\(a["choice"] ?? a["score"] ?? a["noul"] ?? "-")"
+        }
+        print("sparkcore: answers \(picks.joined(separator: " "))")
         print("sparkcore: extracted \(result["extracted"] ?? "-"); summary \(result["summary"] ?? "-")")
         XCTAssertEqual(result["status"] as? String, "ok")
         XCTAssertNotNil(result["verdict"])

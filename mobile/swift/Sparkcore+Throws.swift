@@ -32,6 +32,17 @@ extension SparkcoreEngine {
         guard let engine else { throw NSError(domain: "sparkcore", code: 2) }
         return engine
     }
+
+    /// Builds an engine around a judge that also answers a group of questions
+    /// in one call (settings {"batch": false} asks one at a time anyway).
+    public static func make(settingsJSON: String = "", batchJudge: any SparkcoreBatchJudgeProtocol,
+                            writer: (any SparkcoreWriterProtocol)? = nil) throws -> SparkcoreEngine {
+        var error: NSError?
+        let engine = SparkcoreNewBatchEngine(settingsJSON, batchJudge, writer, &error)
+        if let error { throw error }
+        guard let engine else { throw NSError(domain: "sparkcore", code: 2) }
+        return engine
+    }
 }
 
 extension SparkcoreCheck {

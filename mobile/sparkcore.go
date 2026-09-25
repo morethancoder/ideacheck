@@ -45,9 +45,14 @@ type settings struct {
 	// for a local model.
 	MaxConcurrent int `json:"max_concurrent"`
 	// QuestionSeconds and WriterSeconds replace the timeouts for one question
-	// and for one writer call (0 = config.yaml's).
+	// and for one writer call (0 = config.yaml's). The core's writer timeout
+	// also bounds every question of one stage together, so it must outlast a
+	// whole scoring stage.
 	QuestionSeconds float64 `json:"question_seconds"`
 	WriterSeconds   float64 `json:"writer_seconds"`
+	// Batch sends each group of questions sharing a state to a BatchJudge in
+	// one call (NewBatchEngine only; nil = on). False asks one at a time.
+	Batch *bool `json:"batch"`
 }
 
 // Engine runs checks with one judge and, optionally, one writer. It is safe to
@@ -69,6 +74,23 @@ func NewEngine(settingsJSON string, judge Judge, writer Writer) (e *Engine, err 
 	if judge == nil {
 		return nil, errors.New("sparkcore: an engine needs a judge")
 	}
+	return newEngine(settingsJSON, judge, nil, writer)
+}
+
+// NewBatchEngine is NewEngine for a judge that can also answer a group of
+// questions in one call (BatchJudge). Each group shares one state — the core
+// groups questions by what they read — and falls back to one question per
+// call wherever the batch cannot answer. Settings {"batch": false} turns
+// batches off, to compare.
+func NewBatchEngine(settingsJSON string, judge BatchJudge, writer Writer) (e *Engine, err error) {
+	defer recoverTo(&err)
+	if judge == nil {
+		return nil, errors.New("sparkcore: an engine needs a judge")
+	}
+	return newEngine(settingsJSON, judge, judge, writer)
+}
+
+func newEngine(settingsJSON string, judge Judge, batch BatchJudge, writer Writer) (*Engine, error) {
 	var s settings
 	if settingsJSON != "" {
 		if err := strictJSON(settingsJSON, &s); err != nil {
@@ -105,10 +127,15 @@ func NewEngine(settingsJSON string, judge Judge, writer Writer) (e *Engine, err 
 	if s.WriterSeconds > 0 {
 		base.Timeouts.Batch = seconds(s.WriterSeconds)
 	}
-	opts := ideacheck.Options{
-		Settings: base,
-		Judge:    &judgeAdapter{swift: judge, name: judgeName, model: base.Judge.Model, prompts: prompts},
+	adapter := &judgeAdapter{swift: judge, name: judgeName, model: base.Judge.Model, prompts: prompts, question: base.Timeouts.Question}
+	if batch != nil && (s.Batch == nil || *s.Batch) {
+		adapter.batch = batch
+		base.Batch = true
+		if base.MaxConcurrent > 0 {
+			adapter.slots = make(chan struct{}, base.MaxConcurrent)
+		}
 	}
+	opts := ideacheck.Options{Settings: base, Judge: adapter}
 	if writer != nil {
 		writerName := writer.Name()
 		opts.Settings.Writer = ideacheck.Role{Model: or(s.WriterModel, writerName), Billing: ideacheck.BillingLocal}

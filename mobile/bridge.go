@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/morethancoder/ideacheck/judge"
@@ -41,6 +42,30 @@ import (
 type Judge interface {
 	Name() string
 	Evaluate(requestJSON string) (answerJSON string, err error)
+}
+
+// BatchJudge is a Judge that can also answer several questions over one state
+// in one call — a generative model answering a whole group in one response
+// rather than one by one. Build its engine with NewBatchEngine. The core
+// groups questions by the state they read (`uses`), so a batch never shows a
+// question state it does not read.
+//
+// requestJSON is
+//
+//	{"questions": [<question>, …],  // as in Judge's request, in the core's order
+//	 "state":  {…},                 // what every one of them reads
+//	 "system": "…",
+//	 "prompt": "…"}                 // state + every question, one "Answer shape" each
+//
+// and the answer is {"answers": {"<question id>": <an answer as Evaluate
+// returns it>, …}}. An error — say the questions do not fit the model's
+// context — sends each question on its own through Evaluate instead, and so
+// does an answer that is missing or does not fit its question: a batch is
+// only ever a shortcut.
+type BatchJudge interface {
+	Name() string
+	Evaluate(requestJSON string) (answerJSON string, err error)
+	EvaluateBatch(requestJSON string) (answersJSON string, err error)
 }
 
 // Writer does the two jobs that have no option list: Extract reads the stated
@@ -110,36 +135,106 @@ type reply struct {
 	TokensOut     int                `json:"tokens_out"`
 }
 
-// judgeAdapter is a Swift Judge as a judge.Judge.
+// batchRequest is what BatchJudge.EvaluateBatch receives.
+type batchRequest struct {
+	Questions []questionView `json:"questions"`
+	State     judge.State    `json:"state"`
+	System    string         `json:"system"`
+	Prompt    string         `json:"prompt"`
+}
+
+// batchReply is what BatchJudge.EvaluateBatch returns: each answer raw, so
+// one that does not fit its question costs that question alone.
+type batchReply struct {
+	Answers map[string]json.RawMessage `json:"answers"`
+}
+
+// judgeAdapter is a Swift Judge as a judge.Judge; with batch set, also a
+// judge.BatchJudge.
 type judgeAdapter struct {
 	swift   Judge
+	batch   BatchJudge // nil: one question per call
 	name    string
 	model   string
 	prompts *prompt.Set
+	// question bounds one question asked on its own inside a batch (the
+	// fan-out's own per-question timeout does not reach into a batch).
+	question time.Duration
+	// slots holds one token per Swift call in flight: the fan-out limits
+	// single questions to max_concurrent, but runs every batch at once.
+	slots chan struct{}
+	// rounds gathers the groups of one stage that see the same state.
+	rounds rounds
+}
+
+// rounds merges batches. The core groups a stage's questions by the state
+// they declare (`uses`) and asks every group at once; on the phone nothing is
+// searched, so [idea] and [idea, evidence.market] both come out as {idea}.
+// Groups that arrive within gatherWindow with the same state share one call:
+// each question still sees exactly the state it reads.
+type rounds struct {
+	mu   sync.Mutex
+	open map[string]*round
+}
+
+type round struct {
+	qs      []judge.Question
+	answers []judge.Answer
+	err     error
+	done    chan struct{}
+}
+
+// gatherWindow is how long the first group of a round waits for the others:
+// the fan-out starts them together, so microseconds apart.
+const gatherWindow = 20 * time.Millisecond
+
+// swiftCall runs one call to the Swift judge within its slot.
+func (a *judgeAdapter) swiftCall(ctx context.Context, f func() (string, error)) (string, error) {
+	if a.slots != nil {
+		select {
+		case a.slots <- struct{}{}:
+			defer func() { <-a.slots }()
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return call(ctx, f)
 }
 
 func (a *judgeAdapter) Name() string { return a.name }
 
-// Capabilities: one question per call. Concurrency is Settings.MaxConcurrent.
-func (a *judgeAdapter) Capabilities() judge.Capabilities { return judge.Capabilities{} }
+// Capabilities: one question per call, unless the Swift judge takes batches.
+// Concurrency is Settings.MaxConcurrent.
+func (a *judgeAdapter) Capabilities() judge.Capabilities {
+	return judge.Capabilities{NativeBatch: a.batch != nil}
+}
 
-func (a *judgeAdapter) Evaluate(ctx context.Context, state judge.State, q judge.Question) (judge.Answer, error) {
+// prompt renders the state and the questions as the configs' structured
+// template has them. "vote" asks for the answer alone: one pick, the way an
+// on-device model answers best. The answer shape it names is the reply format.
+func (a *judgeAdapter) prompt(state judge.State, qs []judge.Question) (string, error) {
 	stateText, err := a.prompts.State(state)
 	if err != nil {
-		return judge.Answer{}, err
+		return "", err
 	}
-	// "vote" asks for the answer alone: one pick, the way an on-device model
-	// answers best. The answer shape it names is the reply format above.
-	ask, err := a.prompts.Questions([]judge.Question{q}, "vote")
+	ask, err := a.prompts.Questions(qs, "vote")
+	if err != nil {
+		return "", err
+	}
+	return stateText + "\n\n" + ask, nil
+}
+
+func (a *judgeAdapter) Evaluate(ctx context.Context, state judge.State, q judge.Question) (judge.Answer, error) {
+	text, err := a.prompt(state, []judge.Question{q})
 	if err != nil {
 		return judge.Answer{}, err
 	}
-	req, err := json.Marshal(request{Question: viewOf(q), State: state, System: a.prompts.System, Prompt: stateText + "\n\n" + ask})
+	req, err := json.Marshal(request{Question: viewOf(q), State: state, System: a.prompts.System, Prompt: text})
 	if err != nil {
 		return judge.Answer{}, err
 	}
 	start := time.Now()
-	out, err := call(ctx, func() (string, error) { return a.swift.Evaluate(string(req)) })
+	out, err := a.swiftCall(ctx, func() (string, error) { return a.swift.Evaluate(string(req)) })
 	if err != nil {
 		return judge.Answer{}, err
 	}
@@ -149,6 +244,122 @@ func (a *judgeAdapter) Evaluate(ctx context.Context, state judge.State, q judge.
 	}
 	ans.LatencyMS = time.Since(start).Milliseconds()
 	return ans, nil
+}
+
+// EvaluateBatch answers one group of questions, in one round with every other
+// group of the stage that sees the same state (rounds).
+func (a *judgeAdapter) EvaluateBatch(ctx context.Context, state judge.State, qs []judge.Question) ([]judge.Answer, error) {
+	key, err := json.Marshal(state)
+	if err != nil {
+		return a.answerGroup(ctx, state, qs)
+	}
+	a.rounds.mu.Lock()
+	if a.rounds.open == nil {
+		a.rounds.open = map[string]*round{}
+	}
+	r, joined := a.rounds.open[string(key)]
+	if !joined {
+		r = &round{done: make(chan struct{})}
+		a.rounds.open[string(key)] = r
+	}
+	from := len(r.qs)
+	r.qs = append(r.qs, qs...)
+	a.rounds.mu.Unlock()
+
+	if joined {
+		select {
+		case <-r.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	} else {
+		t := time.NewTimer(gatherWindow)
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+		}
+		t.Stop()
+		a.rounds.mu.Lock()
+		delete(a.rounds.open, string(key))
+		all := r.qs
+		a.rounds.mu.Unlock()
+		r.answers, r.err = a.answerGroup(ctx, state, all)
+		close(r.done)
+	}
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.answers[from : from+len(qs)], nil
+}
+
+// answerGroup asks the Swift judge every question of a group in one call.
+// A question the batch leaves out or answers badly, or every question when
+// the batch call fails, is asked on its own; only a check that is over
+// (cancelled, or out of time) fails the group.
+func (a *judgeAdapter) answerGroup(ctx context.Context, state judge.State, qs []judge.Question) ([]judge.Answer, error) {
+	answers := make([]judge.Answer, len(qs))
+	done := make([]bool, len(qs))
+	if a.batch != nil && len(qs) > 1 {
+		a.tryBatch(ctx, state, qs, answers, done)
+	}
+	for i, q := range qs {
+		if done[i] {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		qctx, cancel := ctx, context.CancelFunc(func() {})
+		if a.question > 0 {
+			qctx, cancel = context.WithTimeout(ctx, a.question)
+		}
+		ans, err := a.Evaluate(qctx, state, q)
+		cancel()
+		if err != nil {
+			ans = judge.Answer{Err: err.Error()}
+		}
+		ans.ID, ans.Kind = q.ID, q.Kind
+		answers[i] = ans
+	}
+	return answers, nil
+}
+
+// tryBatch fills answers (and done) from one batch call, where it can.
+func (a *judgeAdapter) tryBatch(ctx context.Context, state judge.State, qs []judge.Question, answers []judge.Answer, done []bool) {
+	text, err := a.prompt(state, qs)
+	if err != nil {
+		return
+	}
+	req := batchRequest{State: state, System: a.prompts.System, Prompt: text}
+	for _, q := range qs {
+		req.Questions = append(req.Questions, viewOf(q))
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	start := time.Now()
+	out, err := a.swiftCall(ctx, func() (string, error) { return a.batch.EvaluateBatch(string(body)) })
+	if err != nil {
+		return
+	}
+	var r batchReply
+	if json.Unmarshal([]byte(out), &r) != nil {
+		return
+	}
+	took := time.Since(start).Milliseconds()
+	for i, q := range qs {
+		raw, ok := r.Answers[q.ID]
+		if !ok {
+			continue
+		}
+		ans, err := a.answer(q, string(raw))
+		if err != nil {
+			continue
+		}
+		ans.ID, ans.LatencyMS = q.ID, took
+		answers[i], done[i] = ans, true
+	}
 }
 
 // answer checks the reply against the question and fills what the core needs:

@@ -35,14 +35,23 @@ struct SparkcoreRequest: Decodable {
     let prompt: String
 }
 
+/// What a Sparkcore batch request carries (see BatchJudge in mobile/bridge.go).
+struct SparkcoreBatchRequest: Decodable {
+    let questions: [SparkcoreRequest.Question]
+    let system: String
+    let prompt: String
+}
+
 enum SparkcoreSwiftError: LocalizedError {
     case badRequest(String)
     case unavailable(String)
+    case tooLong(String)
 
     var errorDescription: String? {
         switch self {
         case .badRequest(let why): "bad request: \(why)"
         case .unavailable(let why): "the on-device model is unavailable: \(why)"
+        case .tooLong(let why): "does not fit the on-device model: \(why)"
         }
     }
 }
@@ -97,8 +106,16 @@ extension SystemLanguageModel.Availability {
 /// `{"yes": bool}`. It carries no probabilities — the model exposes none — so
 /// the core counts it as a single sure vote. Verdict cuts for this judge are
 /// the rubrics' defaults until `verdict.backends.foundation` is tuned on bench.
+///
+/// It also takes batches (`SparkcoreBatchJudgeProtocol`; build the engine
+/// with `SparkcoreEngine.make(settingsJSON:batchJudge:writer:)`): every
+/// question over one state in one response, each question the same one-pick
+/// property as on its own, under a property named by its id. A batch that
+/// would not fit the model's context is refused, and the core then asks its
+/// questions one at a time. Measured on the simulator, a whole check went
+/// from about two minutes to under one.
 @available(iOS 26.0, macOS 26.0, *)
-public final class FoundationJudge: NSObject, SparkcoreJudgeProtocol, @unchecked Sendable {
+public final class FoundationJudge: NSObject, SparkcoreJudgeProtocol, SparkcoreBatchJudgeProtocol, @unchecked Sendable {
     /// The name results carry as their backend, and the key a rubric's
     /// `verdict.backends.<name>` cuts would be found under.
     public static let backendName = "foundation"
@@ -130,25 +147,33 @@ public final class FoundationJudge: NSObject, SparkcoreJudgeProtocol, @unchecked
         // question in the simulator, with max_concurrent 1).
         let response = try await session.respond(
             to: request.prompt, schema: schema, includeSchemaInPrompt: false, options: GenerationOptions(sampling: .greedy))
-        let reply: [String: Any]
-        switch request.question.kind {
-        case "choice":
-            reply = ["choice": try response.content.value(String.self, forProperty: field)]
-        case "score":
-            let level = try response.content.value(String.self, forProperty: field)
-            guard let n = Int(level) else { throw SparkcoreSwiftError.badRequest("level \(level)") }
-            reply = ["level": n]
-        default:
-            reply = ["yes": try response.content.value(Bool.self, forProperty: field)]
-        }
-        let data = try JSONSerialization.data(withJSONObject: reply)
+        let data = try JSONSerialization.data(withJSONObject: try reply(response.content, field: field, kind: request.question.kind))
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// One answer in the reply's shape: {"choice": key}, {"level": n} or {"yes": bool}.
+    static func reply(_ content: GeneratedContent, field: String, kind: String) throws -> [String: Any] {
+        switch kind {
+        case "choice":
+            return ["choice": try content.value(String.self, forProperty: field)]
+        case "score":
+            let level = try content.value(String.self, forProperty: field)
+            guard let n = Int(level) else { throw SparkcoreSwiftError.badRequest("level \(level)") }
+            return ["level": n]
+        default:
+            return ["yes": try content.value(Bool.self, forProperty: field)]
+        }
     }
 
     /// The one-property schema the answer must fit: the property name is the
     /// one the prompt's "Answer shape" line names, and its values are exactly
     /// the question's option keys or level indices.
     static func schema(for q: SparkcoreRequest.Question) throws -> (String, GenerationSchema) {
+        let (field, answer) = try answerSchema(for: q, name: "Answer")
+        return (field, try GenerationSchema(root: answer, dependencies: []))
+    }
+
+    static func answerSchema(for q: SparkcoreRequest.Question, name: String) throws -> (String, DynamicGenerationSchema) {
         let field: String
         let value: DynamicGenerationSchema
         switch q.kind {
@@ -168,9 +193,80 @@ public final class FoundationJudge: NSObject, SparkcoreJudgeProtocol, @unchecked
         default:
             throw SparkcoreSwiftError.badRequest("unknown kind \(q.kind)")
         }
-        let root = DynamicGenerationSchema(
-            name: "Answer", properties: [.init(name: field, schema: value)])
-        return (field, try GenerationSchema(root: root, dependencies: []))
+        return (field, DynamicGenerationSchema(name: name, properties: [.init(name: field, schema: value)]))
+    }
+
+    // MARK: Batches
+
+    public func evaluateBatch(_ requestJSON: String?, error: NSErrorPointer) -> String {
+        sparkcoreCatching(error) {
+            let request = try JSONDecoder().decode(SparkcoreBatchRequest.self, from: Data((requestJSON ?? "").utf8))
+            let model = self.model
+            return try blockingCall { try await Self.answerBatch(request, model: model) }
+        }
+    }
+
+    /// Every question of the batch in one guided response:
+    /// {"answers": {"<id>": {"choice"|"level"|"yes": …}, …}}.
+    static func answerBatch(_ request: SparkcoreBatchRequest, model: SystemLanguageModel) async throws -> String {
+        if let problem = model.availability.problem {
+            throw SparkcoreSwiftError.unavailable(problem)
+        }
+        guard !request.questions.isEmpty else { throw SparkcoreSwiftError.badRequest("an empty batch") }
+        var fields: [(id: String, field: String, kind: String)] = []
+        var properties: [DynamicGenerationSchema.Property] = []
+        for q in request.questions {
+            let (field, answer) = try answerSchema(for: q, name: "\(q.id)_answer")
+            fields.append((q.id, field, q.kind))
+            properties.append(.init(name: q.id, schema: answer))
+        }
+        let schema = try GenerationSchema(root: DynamicGenerationSchema(name: "Answers", properties: properties), dependencies: [])
+        try await fits(model: model, system: request.system, prompt: request.prompt, answers: fields.count)
+        let session = LanguageModelSession(model: model, instructions: request.system)
+        // As for one question, the schema constrains the decoding without
+        // being spelled out in the prompt, which names each answer's shape
+        // already (measured in the simulator: a batch of 9 in 10 s without
+        // it, 45 s with it).
+        let response: LanguageModelSession.Response<GeneratedContent>
+        do {
+            response = try await session.respond(
+                to: request.prompt, schema: schema, includeSchemaInPrompt: false, options: GenerationOptions(sampling: .greedy))
+        } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
+            throw SparkcoreSwiftError.tooLong("\(fields.count) questions at once")
+        }
+        var answers: [String: Any] = [:]
+        for f in fields {
+            // One answer that does not read is left out; the core asks it alone.
+            if let content = try? response.content.value(GeneratedContent.self, forProperty: f.id),
+                let reply = try? reply(content, field: f.field, kind: f.kind)
+            {
+                answers[f.id] = reply
+            }
+        }
+        let data = try JSONSerialization.data(withJSONObject: ["answers": answers])
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Tokens a batch answer takes at most: a small JSON object per question.
+    static func replyTokens(_ answers: Int) -> Int { 24 * answers + 32 }
+
+    /// Refuses a batch whose instructions, prompt and answers would not fit
+    /// the model's context (4096 tokens), counted by the model where the OS
+    /// can (26.4), else estimated at three characters a token.
+    static func fits(model: SystemLanguageModel, system: String, prompt: String, answers: Int) async throws {
+        let budget = model.contextSize
+        var used: Int?
+        if #available(iOS 26.4, macOS 26.4, *) {
+            if let i = try? await model.tokenCount(for: Instructions(system)),
+                let p = try? await model.tokenCount(for: prompt)
+            {
+                used = i + p
+            }
+        }
+        let need = (used ?? (system.count + prompt.count) / 3) + replyTokens(answers)
+        if need > budget {
+            throw SparkcoreSwiftError.tooLong("\(need) tokens of \(budget)")
+        }
     }
 }
 
