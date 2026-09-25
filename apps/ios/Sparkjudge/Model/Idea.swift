@@ -40,6 +40,9 @@ final class Idea {
     /// Seeds the card's generated background. Derived from `id` at creation.
     var styleSeed: Int64 = 0
 
+    /// `IdeaOrigin` as JSON: mixed from other ideas, or started from a trend.
+    var originData: Data? = nil
+
     init(transcript: String = "", title: String = "", category: IdeaCategory = .other, createdAt: Date = .now) {
         let id = UUID()
         self.id = id

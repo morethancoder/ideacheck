@@ -28,6 +28,9 @@ struct ReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     savedLine
+                    if let origin = idea.origin {
+                        OriginLine(origin: origin)
+                    }
                     titleField
                     categoryPicker
                     transcriptField
