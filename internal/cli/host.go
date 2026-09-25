@@ -7,6 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/morethancoder/ideacheck/internal/config"
+	"github.com/morethancoder/ideacheck/internal/judge/backends/laya"
 	"github.com/morethancoder/ideacheck/internal/pipeline"
 	"github.com/morethancoder/ideacheck/internal/search"
 	"github.com/morethancoder/ideacheck/internal/store"
@@ -76,7 +77,13 @@ func (h *host) livePrices(url string) map[string]config.Price {
 // MissingModel is true when p runs models locally and model is not downloaded.
 // An Ollama that is not answering says false: the readiness check explains that.
 func (h *host) MissingModel(p config.Provider, model string) bool {
-	if !localOllama(p) || model == "" {
+	if model == "" {
+		return false
+	}
+	if p.Backend == laya.Name {
+		return !laya.Downloaded(model)
+	}
+	if !localOllama(p) {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, readyTimeout)
@@ -86,6 +93,13 @@ func (h *host) MissingModel(p config.Provider, model string) bool {
 }
 
 func (h *host) Download(ctx context.Context, p config.Provider, model string, progress func(tui.Progress)) error {
+	if p.Backend == laya.Name {
+		cfg, _ := h.config()
+		j := &laya.Judge{Model: model, Python: cfg.Backends[laya.Name].Python}
+		return j.Download(ctx, func(status string, done, total int64) {
+			progress(tui.Progress{Status: status, Done: done, Total: total})
+		})
+	}
 	return pullModel(ctx, p.BaseURL, model, progress)
 }
 

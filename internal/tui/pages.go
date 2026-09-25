@@ -25,11 +25,9 @@ import (
 const otherModel = "\x00other"
 
 type setupDraft struct {
-	id, key     string
+	id, key     string // the judge's provider, and a key typed for it
 	replaceKey  bool   // a key is already set and the user chose to replace it
-	writer      string // provider id that writes next to a judge that cannot; noWriter = nobody
-	jevJudges   bool   // let Jev answer the typed questions next to the chosen model
-	judgeAsked  bool   // the Judge step was shown; until then jevJudges stays false
+	writer      string // the writer's provider id; sameWriter = the judge writes too, noWriter = nobody
 	providers   []config.Provider
 	current     [2][3]string     // backend, model, effort of the judge and the writer when setup opened
 	picks       map[string]*pick // by provider id, once that provider's models were listed
@@ -59,38 +57,25 @@ func (a *App) searching(d *setupDraft) SearchState {
 
 func (d *setupDraft) chosen() config.Provider { return providerByID(d.providers, d.id) }
 
-// noWriter is the "scores only" choice in the writer list.
-const noWriter = "\x00none"
+// The two answers in the writer list that name no other provider: the judge
+// writes as well (a chat model), or nobody does (beside a judge that cannot).
+const (
+	sameWriter = "\x00same"
+	noWriter   = "\x00none"
+)
 
-// writerChoice is the provider picked in the Writer step, zero when that step
-// does not apply or the answer was nobody.
+// writerChoice is the other provider picked in the Writer step; zero when the
+// judge writes too, or nobody does.
 func (d *setupDraft) writerChoice() config.Provider {
-	if !d.chosen().NeedsWriter || d.writer == noWriter {
+	if d.writer == noWriter || d.writer == sameWriter || d.writer == d.id {
 		return config.Provider{}
 	}
 	return providerByID(d.providers, d.writer)
 }
 
-// classifier is the provider that only classifies (Jev), if setup offers one.
-func (d *setupDraft) classifier() (config.Provider, bool) {
-	for _, p := range d.providers {
-		if p.NeedsWriter {
-			return p, true
-		}
-	}
-	return config.Provider{}, false
-}
-
 // roles is who judges and who writes, from the choices made.
 func (d *setupDraft) roles() (judge, writer config.Provider) {
-	chosen := d.chosen()
-	switch jev, ok := d.classifier(); {
-	case chosen.NeedsWriter:
-		return chosen, d.writerChoice()
-	case ok && d.jevJudges:
-		return jev, chosen
-	}
-	return chosen, config.Provider{}
+	return d.chosen(), d.writerChoice()
 }
 
 // key is the API key already set for the chosen provider, if any.
@@ -106,15 +91,24 @@ func (a *App) usable(p config.Provider) bool {
 	return (p.NeedsCLI == "" || a.host.HasCLI(p.NeedsCLI)) && (p.KeyEnv == "" || a.host.Key(p.KeyEnv).Found())
 }
 
-// writers are the providers that can write next to a classifier, ready ones only.
+// writers are the choices for who writes beside the chosen judge: the judge
+// itself when it can, every other provider that can write and is ready to use,
+// and nobody when the judge only judges.
 func (a *App) writers(d *setupDraft) []huh.Option[string] {
+	chosen := d.chosen()
 	var opts []huh.Option[string]
+	if !chosen.NeedsWriter {
+		opts = append(opts, huh.NewOption("The same model — "+chosen.ID+" judges and writes", sameWriter))
+	}
 	for _, p := range d.providers {
-		if !p.NeedsWriter && a.usable(p) {
+		if !p.NeedsWriter && p.ID != chosen.ID && a.usable(p) {
 			opts = append(opts, huh.NewOption(p.Label, p.ID))
 		}
 	}
-	return append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
+	if chosen.NeedsWriter {
+		opts = append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
+	}
+	return opts
 }
 
 // pickOf is what was chosen for p; before its models were listed, nothing.
@@ -247,17 +241,17 @@ func (a *App) openSetup() tea.Cmd {
 		if d.id == "" && p.Backend == d.current[0][0] {
 			d.id = p.ID
 		}
-		// Settings opens on what is configured, the writer included. It only
-		// counts next to a judge that cannot write, and that step is always asked.
+		// Settings opens on what is configured, the writer included; with none
+		// configured the Writer step offers its first choice.
 		if d.writer == "" && p.Backend == d.current[1][0] && !p.NeedsWriter && a.usable(p) {
 			d.writer = p.ID
 		}
 	}
 	a.setup = d
 	steps := []step{
-		{title: "Provider", build: func() *huh.Form {
-			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach a model?",
-				"You pick the model next. Change this any time from Settings or `ideacheck setup`.", options, &d.id).
+		{title: "Judge", build: func() *huh.Form {
+			return huh.NewForm(huh.NewGroup(choose("Choose the judge",
+				roleNotes[roleJudge]+"\nPick where it runs; you pick the exact model next. A provider marked “judges only” needs a writer beside it, which you choose after; a chat model can do both. Change any of this later in Settings or `ideacheck setup`.", options, &d.id).
 				Validate(func(id string) error {
 					if cli := providerByID(d.providers, id).NeedsCLI; cli != "" && !a.host.HasCLI(cli) {
 						return fmt.Errorf("the %s command is not installed; pick another provider", cli)
@@ -294,18 +288,21 @@ func (a *App) openSetup() tea.Cmd {
 					return nil
 				})))
 		}},
-		a.judgeStep(d),
 	}
-	steps = append(steps, a.modelSteps(d, [3]string{"Model", "Model id", "Effort"}, d.chosen, d.role, nil)...)
+	steps = append(steps, a.modelSteps(d, [3]string{"Judge model", "Judge model id", "Judge effort"}, d.chosen, d.role, nil)...)
+	// The writer is asked whenever there is a choice to make: another provider
+	// ready to write, or nobody, beside a judge that only judges.
 	steps = append(steps,
-		step{title: "Writer", skip: func() bool { return !d.chosen().NeedsWriter }, build: func() *huh.Form {
+		step{title: "Writer", skip: func() bool { return len(a.writers(d)) < 2 }, build: func() *huh.Form {
 			opts := a.writers(d)
 			if !slices.ContainsFunc(opts, func(o huh.Option[string]) bool { return o.Value == d.writer }) {
 				d.writer = opts[0].Value
 			}
-			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach the writer?",
-				d.chosen().ID+" only judges. "+roleNotes[roleWriter]+"\nOnly providers ready to use are listed; you pick its model next.",
-				opts, &d.writer)))
+			desc := roleNotes[roleWriter] + "\nPick where it runs; you pick the exact model next. Only providers ready to use are listed."
+			if d.chosen().NeedsWriter {
+				desc = d.chosen().ID + " only judges, so another model writes. " + desc
+			}
+			return huh.NewForm(huh.NewGroup(choose("Choose the writer", desc, opts, &d.writer)))
 		}},
 	)
 	// The writer is picked like the judge was: its model, then how hard it thinks.
@@ -406,27 +403,6 @@ func (a *App) modelSteps(d *setupDraft, titles [3]string, who func() config.Prov
 	}
 }
 
-// judgeStep offers Jev as the judge beside a model that can do everything.
-// It comes before the model is picked, so that step can say which role the
-// model it offers will play.
-func (a *App) judgeStep(d *setupDraft) step {
-	return step{title: "Judge", skip: func() bool {
-		jev, ok := d.classifier()
-		return d.chosen().NeedsWriter || !ok || !a.usable(jev)
-	}, build: func() *huh.Form {
-		jev, _ := d.classifier()
-		// Yes by default — but only once the question is really asked: a step
-		// skipped for want of a key must not make Jev the judge anyway.
-		if !d.judgeAsked {
-			d.judgeAsked, d.jevJudges = true, true
-		}
-		return huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Let " + jev.ID + " be the judge?").
-			Description("You have a key for it. The judge answers every scoring question; " + jev.ID + " returns calibrated probabilities for each yes/no, level and option. " +
-				d.chosen().ID + " is then the writer: it reads your text, looks the idea up on the web and writes the summary.").
-			Affirmative("Yes, " + jev.ID + " judges").Negative("No, " + d.chosen().ID + " does both").Value(&d.jevJudges)))
-	}}
-}
-
 // What a model being picked will do.
 const (
 	roleJudge  = "judge"
@@ -434,15 +410,12 @@ const (
 	roleBoth   = "judge and writer"
 )
 
-// role is what the provider chosen first will do, given the choices so far.
+// role is what the judge's model will do: everything, when it writes as well.
 func (d *setupDraft) role() string {
-	switch judge, writer := d.roles(); {
-	case judge.ID == d.id && writer.ID == "" && !d.chosen().NeedsWriter:
-		return roleBoth
-	case judge.ID == d.id:
+	if d.chosen().NeedsWriter || d.writerChoice().ID != "" {
 		return roleJudge
 	}
-	return roleWriter
+	return roleBoth
 }
 
 var modelQuestions = map[string]string{
@@ -451,11 +424,11 @@ var modelQuestions = map[string]string{
 	roleBoth:   "Which model should judge and write?",
 }
 
-// roleNotes say what each role means, in the same words wherever it comes up.
+// roleNotes say what each role does, in the same words wherever it comes up.
 var roleNotes = map[string]string{
-	roleJudge:  "The judge answers every scoring question.",
-	roleWriter: "The writer reads your text, looks the idea up on the web and writes the summary. It never scores.",
-	roleBoth:   "This model answers every scoring question, and also reads your text, looks the idea up on the web and writes the summary.",
+	roleJudge:  "The judge answers every scoring question: whether the description states the problem, which kind of idea this is, each line of the rubric, and whether each research finding is about this idea. Every answer is a probability over a few named options; the judge never writes a word.",
+	roleWriter: "The writer does what has no options to choose from: it reads your text for the details you did not type in, names the web searches and turns what they find into findings, and writes the summary paragraph. It never scores.",
+	roleBoth:   "This model answers every scoring question, and also reads your text, researches the idea on the web and writes the summary.",
 }
 
 // rolesLine is the header's model line for the choices made so far, where

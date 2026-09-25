@@ -23,7 +23,7 @@ for a final score.
 question — anything whose answer is one of a known set of options, including how a
 research finding relates to the idea. The *writer* (`writer:`, `Engine.Writer`)
 does what has no option list: read a document, search the web, write a paragraph.
-One backend may hold both roles; Jev can only hold the first. When you add a
+One backend may hold both roles; Jev and Laya can only hold the first. When you add a
 model call, decide which role it is: if the answer can be typed, it is a question
 in a rubric file for the judge, not a prompt for the writer.
 
@@ -96,8 +96,11 @@ internal/
   cli/                 cobra commands and flags. check.go is the default action
   pipeline/            the stages above; pure functions except the judge call
   judge/               the ONE interface all model access goes through + fanout
-    backends/          jev, logprob (OpenAI-compatible + logprobs), structured
-                       (Anthropic SDK / OpenAI-compatible), claudecli, codexcli, mock
+    backends/          jev, laya (Jev's wire format over an embedded Python worker
+                       running laya-mlx locally; one process per checkpoint, shared by
+                       every engine in the binary), logprob (OpenAI-compatible +
+                       logprobs), structured (Anthropic SDK / OpenAI-compatible),
+                       claudecli, codexcli, mock
   rubric/              YAML load, validate, hash; verdict gates
   prompt/              text/template loading of configs/prompts/*
   config/              koanf: flags > env IDEACHECK_* > user dir > embedded
@@ -228,10 +231,19 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list
   of findings), so offline runs and old tests are unchanged; `bench` never researches.
-- Setup picks every model the same way: `modelSteps` (list, typed id, effort)
-  runs once for the provider chosen first and once for the writer beside a judge
-  that cannot write. Each provider keeps its own `pick`, so no step may assume
-  "the" model.
+- Setup asks for the two roles by name: **Judge** (provider, key, model, effort),
+  then **Writer** — the judge itself when it can write (`sameWriter`), another
+  provider that is ready, or nobody beside a judge that only judges (`noWriter`).
+  The Writer step is skipped when there is only one possible answer. `modelSteps`
+  (list, typed id, effort) runs once per role; each provider keeps its own `pick`,
+  so no step may assume "the" model. A provider that only judges is `needs_writer`
+  in `config.yaml`; nothing in Go names Jev or Laya as the classifier.
+- `laya` tests run the test binary as the worker (`TestMain` + `Judge.Command`),
+  speaking worker.py's JSON lines, so no test needs Python. `laya.Downloaded`
+  reads the Hugging Face cache the way huggingface_hub lays it out, so setup can
+  say "not downloaded" without starting an interpreter; the readiness check does
+  the same before a check, because the worker would otherwise download 850 MB
+  inside a question's timeout.
 - Setup's last step (`Research`, `internal/tui/pages.go`) offers `search up` through
   `Host.Search` / `Host.StartSearch`. A wizard default belongs in the step's
   `build`, never in the draft's constructor: a skipped step must not answer yes

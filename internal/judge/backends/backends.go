@@ -14,6 +14,7 @@ import (
 	"github.com/morethancoder/ideacheck/internal/judge/backends/claudecli"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/codexcli"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/jev"
+	"github.com/morethancoder/ideacheck/internal/judge/backends/laya"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/logprob"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/mock"
 	"github.com/morethancoder/ideacheck/internal/judge/backends/openai"
@@ -22,7 +23,7 @@ import (
 )
 
 // Names lists every backend the CLI accepts for -b.
-var Names = []string{jev.Name, logprob.Name, structured.Name, claudecli.Name, codexcli.Name, mock.Name}
+var Names = []string{jev.Name, laya.Name, logprob.Name, structured.Name, claudecli.Name, codexcli.Name, mock.Name}
 
 // Deps are what model-backed judges need beyond config.
 type Deps struct {
@@ -81,6 +82,14 @@ func New(cfg config.Config, d Deps) (judge.Judge, error) {
 			return nil, fmt.Errorf("TYPESAFE_API_KEY is not set; get one at https://typesafe.ai and run `ideacheck setup` → TypeSafe Jev, or export it")
 		}
 		return &jev.Judge{BaseURL: b.BaseURL, APIKey: key, Model: b.Model, MaxConcurrent: b.MaxConcurrent}, nil
+	case laya.Name:
+		if err := laya.Supported(); err != nil {
+			return nil, err
+		}
+		if _, err := laya.Interpreter(b.Python); err != nil {
+			return nil, err
+		}
+		return &laya.Judge{Model: b.Model, Python: b.Python, MaxConcurrent: b.MaxConcurrent}, nil
 	}
 	return nil, fmt.Errorf("unknown backend %q (want one of %v)", cfg.Backend, Names)
 }
@@ -99,7 +108,7 @@ func NewWriter(cfg config.Config, d Deps) (judge.Judge, error) {
 		return nil, fmt.Errorf("writer %s: %w", cfg.Writer, err)
 	}
 	if _, ok := w.(judge.Narrator); !ok {
-		return nil, fmt.Errorf("writer %q only classifies: it cannot read, research or write. Pick a chat model (claude-cli, codex-cli, structured, logprob) as the writer", cfg.Writer)
+		return nil, fmt.Errorf("writer %q only judges: it cannot read, research or write. Pick a chat model (claude-cli, codex-cli, structured, logprob) as the writer", cfg.Writer)
 	}
 	return w, nil
 }

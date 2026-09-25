@@ -35,21 +35,24 @@ func (j *Judge) Capabilities() judge.Capabilities {
 	return judge.Capabilities{NativeBatch: true, MaxConcurrent: j.MaxConcurrent}
 }
 
-// question is the wire form. criteria is a label→description map for choice, an
-// ordered list for score, and for noul an optional {"true", "false"} pair.
-type question struct {
+// The System One wire format is shared with the laya backend: Laya keeps
+// upstream's question and answer schema, which mirrors this one.
+
+// WireQuestion is the wire form. criteria is a label→description map for
+// choice, an ordered list for score, and for noul an optional {"true", "false"} pair.
+type WireQuestion struct {
 	Type         judge.Kind `json:"type"`
 	Instructions string     `json:"instructions"`
 	Criteria     any        `json:"criteria,omitempty"`
 }
 
-type request struct {
-	State     judge.State         `json:"state"`
-	Questions map[string]question `json:"questions"`
-	Model     string              `json:"model"`
+type Request struct {
+	State     judge.State             `json:"state"`
+	Questions map[string]WireQuestion `json:"questions"`
+	Model     string                  `json:"model,omitempty"`
 }
 
-type answer struct {
+type WireAnswer struct {
 	Type          judge.Kind         `json:"type"`
 	Choice        string             `json:"choice"`
 	Score         float64            `json:"score"`
@@ -58,17 +61,27 @@ type answer struct {
 	Probabilities map[string]float64 `json:"probabilities"`
 }
 
-type response struct {
+type Response struct {
 	Model string `json:"model"`
 	Usage struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
-	Answers map[string]answer `json:"answers"`
+	Answers Answers `json:"answers"`
 }
 
-func wire(q judge.Question) question {
-	w := question{Type: q.Kind, Instructions: q.Instructions}
+// NewRequest puts every question in one request over state.
+func NewRequest(state judge.State, model string, qs []judge.Question) Request {
+	req := Request{State: state, Model: model, Questions: make(map[string]WireQuestion, len(qs))}
+	for _, q := range qs {
+		req.Questions[q.ID] = Wire(q)
+	}
+	return req
+}
+
+// Wire strips a question down to what the model sees: rubric metadata stays home.
+func Wire(q judge.Question) WireQuestion {
+	w := WireQuestion{Type: q.Kind, Instructions: q.Instructions}
 	switch q.Kind {
 	case judge.Choice:
 		w.Criteria = q.Options
@@ -95,30 +108,37 @@ func (j *Judge) Evaluate(ctx context.Context, state judge.State, q judge.Questio
 
 // EvaluateBatch sends every question in one request; Jev evaluates them in parallel.
 func (j *Judge) EvaluateBatch(ctx context.Context, state judge.State, qs []judge.Question) ([]judge.Answer, error) {
-	req := request{State: state, Model: j.Model, Questions: make(map[string]question, len(qs))}
-	for _, q := range qs {
-		req.Questions[q.ID] = wire(q)
-	}
-	res, err := j.post(ctx, req)
+	res, err := j.post(ctx, NewRequest(state, j.Model, qs))
 	if err != nil {
 		return nil, err
 	}
 	logging.From(ctx).Debug().Str("model", res.Model).Int("tokens_in", res.Usage.InputTokens).Int("questions", len(qs)).Msg("jev response")
-	var out []judge.Answer
-	for _, q := range qs {
-		a, ok := res.Answers[q.ID]
-		if !ok || a.Type != q.Kind {
-			continue // the fan-out reports a missing answer as a per-question failure
-		}
-		out = append(out, convert(q, a, res.Model))
-	}
-	if len(out) > 0 { // usage belongs to the request: book it once
-		out[0].TokensIn, out[0].TokensOut = res.Usage.InputTokens, res.Usage.OutputTokens
-	}
-	return out, nil
+	return res.Answers.Convert(qs, method, res.Model, res.Usage.InputTokens, res.Usage.OutputTokens), nil
 }
 
-func convert(q judge.Question, a answer, model string) judge.Answer {
+// Answers is a reply's answers by question id.
+type Answers map[string]WireAnswer
+
+// Convert turns the answers into ideacheck's, in question order, skipping a
+// question the reply left out or answered as another kind: the fan-out reports
+// that as a per-question failure. Usage belongs to the request, so it is booked
+// once, on the first answer.
+func (as Answers) Convert(qs []judge.Question, method, model string, tokensIn, tokensOut int) []judge.Answer {
+	var out []judge.Answer
+	for _, q := range qs {
+		a, ok := as[q.ID]
+		if !ok || a.Type != q.Kind {
+			continue
+		}
+		out = append(out, convert(q, a, method, model))
+	}
+	if len(out) > 0 {
+		out[0].TokensIn, out[0].TokensOut = tokensIn, tokensOut
+	}
+	return out
+}
+
+func convert(q judge.Question, a WireAnswer, method, model string) judge.Answer {
 	out := judge.Answer{ID: q.ID, Method: method, Model: model, Probabilities: a.Probabilities, Confidence: a.Confidence}
 	switch q.Kind {
 	case judge.Choice:
@@ -131,7 +151,7 @@ func convert(q judge.Question, a answer, model string) judge.Answer {
 	return out
 }
 
-func (j *Judge) post(ctx context.Context, body request) (*response, error) {
+func (j *Judge) post(ctx context.Context, body Request) (*Response, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -157,7 +177,7 @@ func (j *Judge) post(ctx context.Context, body request) (*response, error) {
 	if res.StatusCode != http.StatusOK {
 		return nil, judge.HTTPError(res.StatusCode, res.Header, string(data))
 	}
-	var out response
+	var out Response
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, fmt.Errorf("decode jev response: %w", err)
 	}

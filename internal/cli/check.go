@@ -50,7 +50,7 @@ func (c *checkFlags) register(cmd *cobra.Command) {
 	f := cmd.Flags()
 	f.StringVarP(&c.output, "output", "o", "", "pretty (default on a terminal), json, plain")                                                          // -o = output format (kubectl, gcc, curl)
 	f.BoolVar(&c.json, "json", false, "alias for -o json")                                                                                             // no -j: that means jobs in make/cargo/ninja
-	f.StringVarP(&c.backend, "backend", "b", "", "jev, logprob, structured, claude-cli, mock")                                                         // b = backend
+	f.StringVarP(&c.backend, "backend", "b", "", "jev, laya, logprob, structured, claude-cli, codex-cli, mock")                                        // b = backend
 	f.StringVarP(&c.model, "model", "m", "", "override the backend's model")                                                                           // -m = model in llm, ollama
 	f.StringVarP(&c.rubric, "rubric", "r", "", "force a rubric instead of auto-routing")                                                               // r = rubric
 	f.StringVarP(&c.profile, "profile", "P", "", "use a named or alternate profile file")                                                              // -P: lowercase -p is port/print nearly everywhere

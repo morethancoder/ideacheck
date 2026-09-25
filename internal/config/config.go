@@ -123,6 +123,7 @@ type Backend struct {
 	Thinking      string `koanf:"thinking" json:"thinking,omitempty"`
 	Effort        string `koanf:"effort" json:"effort,omitempty"`   // low | medium | high | xhigh | max; "" = the model's default
 	Billing       string `koanf:"billing" json:"billing,omitempty"` // api (default) | subscription | local: how the cost line reads
+	Python        string `koanf:"python" json:"python,omitempty"`   // laya: the interpreter that has laya-mlx; "" = find one
 	Seed          int64  `koanf:"seed" json:"seed,omitempty"`
 	FixturesDir   string `koanf:"fixtures_dir" json:"fixtures_dir,omitempty"`
 }
@@ -138,7 +139,7 @@ type Setup struct {
 type Provider struct {
 	ID    string `koanf:"id"`
 	Label string `koanf:"label"`
-	// NeedsWriter marks a provider that only classifies (Jev): setup then asks
+	// NeedsWriter marks a provider that only judges (Jev, Laya): setup then asks
 	// which other provider reads, researches and writes next to it.
 	NeedsWriter bool   `koanf:"needs_writer"`
 	Backend     string `koanf:"backend"`

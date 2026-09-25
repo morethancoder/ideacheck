@@ -104,17 +104,24 @@ make setup            # check tools, download modules
 make dev              # build and open the app — the first run walks you through setup
 ```
 
-The first time you run `ideacheck` it asks how to reach a model. The default,
-preselected choice is a **local Ollama model: free, no key, no login**
-(`ollama pull qwen3:8b`, or any model you already have):
+The first time you run `ideacheck` it asks two things: who **judges** (the model
+that answers every scoring question — each answer is a probability over a few
+named options) and who **writes** (the model that reads your text, names the web
+searches, turns the results into findings and writes the summary). A chat model
+can do both; a model built for typed judgments (Laya, Jev) judges only, so setup
+asks which other model writes beside it. The default, preselected judge is a
+**local Ollama model: free, no key, no login** (`ollama pull qwen3:8b`, or any
+model you already have):
 
-| Choice | Needs |
-|---|---|
-| Ollama (default) | a local Ollama server with at least one model pulled |
-| Claude CLI | the `claude` command, logged in |
-| Codex CLI | the `codex` command, logged in |
-| Anthropic / OpenAI / OpenRouter | an API key (typed once, or exported in your shell) |
-| Ollama Cloud | an `OLLAMA_API_KEY` from https://ollama.com/settings/keys |
+| Choice | Role | Needs |
+|---|---|---|
+| Ollama (default) | judge, or both | a local Ollama server with at least one model pulled |
+| Laya | judge only | Apple silicon and [uv](https://docs.astral.sh/uv/); free, local, no key. ~850 MB downloaded once |
+| Claude CLI | judge, or both | the `claude` command, logged in |
+| Codex CLI | judge, or both | the `codex` command, logged in |
+| TypeSafe Jev | judge only | a `TYPESAFE_API_KEY` |
+| Anthropic / OpenAI / OpenRouter | judge, or both | an API key (typed once, or exported in your shell) |
+| Ollama Cloud | judge, or both | an `OLLAMA_API_KEY` from https://ollama.com/settings/keys |
 
 Setup then offers a model list and an effort level. For the Claude and Codex CLIs
 the first choice is **Off — no thinking**, the default: every question is one
@@ -126,10 +133,11 @@ list the models your login or server actually has (and default to one that is
 installed); the others list common models with their API price. "Other…" takes any
 model id.
 
-Before every check ideacheck makes sure a local Ollama is running and has the model.
-If not, it says so in one line (start Ollama / `ollama pull <model>` / the models you
-do have) and, in the app, opens Settings and then carries on with your check. No
-questions are sent until the model can answer them.
+Before every check ideacheck makes sure a local Ollama is running and has the model,
+and that a Laya checkpoint is downloaded. If not, it says so in one line (start
+Ollama / `ollama pull <model>` / the models you do have) and, in the app, opens
+Settings and then carries on with your check. No questions are sent until the model
+can answer them.
 
 Change it any time with `ideacheck setup` (alias `settings`) or **Settings** inside the
 app. The choice is saved to `config.yaml`; a typed API key goes to `credentials.yaml`
@@ -161,6 +169,7 @@ ideacheck "..." -i                 # edit the idea step by step first
 ideacheck idea.md -r side_project  # read a file, force a rubric
 ideacheck "..." -b logprob -m qwen3:8b
 ideacheck "..." -b jev -w claude-cli   # Jev judges; Claude reads, researches, writes
+ideacheck "..." -b laya -w logprob     # Laya judges on this machine; a local Ollama model writes
 ideacheck "..." --no-research          # score the description alone
 ideacheck "..." -o json | jq .verdict
 cat idea.json | ideacheck --agent         # agent mode: never asks, JSON out, logs on stderr
@@ -239,6 +248,7 @@ published as [`schemas/check_result.schema.json`](schemas/check_result.schema.js
 | `codex-cli` | model-stated | `codex` CLI, logged in | Human use only, same trade-offs (~12k tokens overhead per call). Runs `codex exec` read-only and ephemeral with `--output-schema`. |
 | `logprob` | token logits over answer labels | Ollama ≥ 0.12, llama.cpp, vLLM, or an OpenRouter provider that returns logprobs | Local and free. **Raw logits, not calibrated.** Runs each choice/score question `shuffle_runs` times in shuffled order and averages, to damp position bias. Ollama Cloud returns no logprobs — use `structured` with `provider: ollama` for it. |
 | `jev` | model-native, calibrated | `TYPESAFE_API_KEY` ([typesafe.ai](https://typesafe.ai)) | TypeSafe's System One model: typed noul/score/choice answers with probabilities, no sampling. Wire format checked against docs.typesafe.ai/api (2026-09-21); one request per state group. Pinned to `jev-1.13.0` (`jev-latest` moves). Offered in `ideacheck setup`. |
+| `laya` | model-native, calibrated | Apple silicon; `uv`, or a Python with `laya-mlx` in `backends.laya.python` | [Laya](https://github.com/NandhaKishorM/laya), an open-weight typed-decision model (Convai Innovations, Apache-2.0), run locally through [laya-mlx](https://github.com/mizorewww/laya-mlx). A bidirectional encoder scores every option in one forward pass: ~15 ms a question, no sampling, no text, free. Judges only. The binary runs one worker process per checkpoint (loads once, exits after 10 idle minutes); setup downloads the checkpoint (~850 MB). Default `aac6fef/laya-typed-decisions-mlx` (1,024-token context); `aac6fef/laya-mlx` is the original 512-token English model, `aac6fef/laya-multilingual-mlx` reads any language. The state is cut to what fits — a warning is logged when it was. Verified against laya-mlx 0.1.0 and 0.2.0. **Measured on `bench/ideas.jsonl` (2026-09-22, 25 ideas, no research): label agreement 0.65, score MAE 0.84 levels, Brier 0.23 with the typed-decisions checkpoint; 0.55 / 0.90 / 0.28 with the 512-token one. Jev on the same set: 0.98 / 0.22 / 0.03.** It is a 421M-parameter encoder: free and instant, but a much weaker judge than Jev or a chat model on this rubric. |
 | `mock` | seeded / fixtures | nothing | Tests and `bench --dry-run`. |
 
 `serve` refuses the two CLI-login backends unless you pass `--allow-cli-backend`.
@@ -248,17 +258,18 @@ published as [`schemas/check_result.schema.json`](schemas/check_result.schema.js
 `backend:` (`-b`) judges: every typed question — what is stated, the idea type, the
 rubric, and how each research finding relates to the idea. `writer:` (`-w`) reads,
 researches and writes: extract, research, explain. Leave `writer` empty and the
-judging backend does both. Set it to pair a classifier that cannot write with a
-model that can:
+judging backend does both. Set it to pair a model that only judges with one that
+can write:
 
 ```yaml
-backend: jev          # calibrated probabilities for every noul / score / choice
-writer: claude-cli    # reads your text, searches the web, writes the summary
+backend: laya         # calibrated probabilities for every noul / score / choice, on this machine
+writer: logprob       # a local Ollama model reads your text, names the searches, writes the summary
 ```
 
-`ideacheck setup` asks for this: choose Jev and it asks who writes; choose a chat
-model while a TypeSafe key is available and it offers Jev as the judge beside it.
-Without a writer, Jev still scores — there is just no extraction, research or summary.
+`ideacheck setup` asks for both, in that order: **Choose the judge**, then **Choose
+the writer** — the judge itself when it is a chat model, any other provider that
+is ready to use, or nobody beside a judge that only judges (Laya, Jev). Without a
+writer, Laya and Jev still score — there is just no extraction, research or summary.
 The result's `backend` is the judge and `writer` the writer; verdict cuts
 (`verdict.backends.<name>`) follow the judge.
 
@@ -267,8 +278,8 @@ The result's `backend` is the judge and `writer` the writer; verdict cuts
 ideacheck does the searching itself, in Go, and no model drives a loop:
 
 1. **plan** — the writer names the searches, `queries_per_topic` for each topic in
-   `research.yaml` (one small call). With no writer — Jev judging alone — the
-   topic's own `queries:` run, rendered over the idea.
+   `research.yaml` (one small call). With no writer — Laya or Jev judging alone —
+   the topic's own `queries:` run, rendered over the idea.
 2. **search** — all of them at once against a search service; a page found twice is
    kept once.
 3. **read** — the first `read_pages` results of each topic are fetched and boiled
@@ -289,7 +300,7 @@ ideacheck does the searching itself, in Go, and no model drives a loop:
 | `llm` | the writer's own web tool: `claude -p --tools WebSearch`, `codex --search exec`, Anthropic's `web_search` server tool, OpenRouter's `web` plugin | a writer that has one. Slow and token-hungry: an agent loop re-reads every earlier result on every turn |
 
 Because the model never touches the web in the first four, research works with a
-local Ollama model and with Jev alone. Measured on one idea through the Claude CLI
+local Ollama model and with Laya or Jev alone. Measured on one idea through the Claude CLI
 (Haiku): the writer's own web tool spent ~146k input tokens and ~70 s on research;
 plan + digest over Go-fetched results spent ~5k tokens and a few seconds. With
 nothing to search with, the check scores the description, as before.
@@ -374,11 +385,11 @@ expressions may only reference real question ids. Gates see **normalized** value
 [0,1] and are skipped when a question they read went unanswered.
 
 - A `noul` may carry `criteria: {yes: …, no: …}` saying where the line between yes
-  and no falls. Every backend sees it (Jev as its native `criteria`).
+  and no falls. Every backend sees it (Jev and Laya as their native `criteria`).
 - `verdict.backends.<name>` replaces the gates, `thresholds` or `min_confidence`
   for one backend. Probabilities from different backends are not on one scale:
-  Jev's are calibrated, while vote counts come in steps of 1/k. Tune a cut on
-  `bench` for the backend it applies to.
+  Jev's and Laya's are calibrated, while vote counts come in steps of 1/k. Tune a
+  cut on `bench` for the backend it applies to.
 - The composite's confidence averages the **choice and score** answers only. A noul
   is already a probability: 0.25 means "probably not", which is a clear answer, not a
   doubtful one.

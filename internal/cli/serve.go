@@ -72,7 +72,7 @@ func (a *app) serveCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.IntVarP(&port, "port", "p", 8080, "port")                                                                   // here -p IS port (docker, ssh, kubectl port-forward)
 	f.StringVarP(&host, "host", "H", "127.0.0.1", "bind address")                                                 // -H = host; -h is help
-	f.StringVarP(&backend, "backend", "b", "", "jev, logprob, structured, claude-cli, mock")                      // same as the default action
+	f.StringVarP(&backend, "backend", "b", "", "jev, laya, logprob, structured, claude-cli, codex-cli, mock")     // same as the default action
 	f.BoolVar(&allowCLI, "allow-cli-backend", false, "permit the claude-cli / codex-cli backends in server mode") // long only: a deliberate opt-in
 	return cmd
 }

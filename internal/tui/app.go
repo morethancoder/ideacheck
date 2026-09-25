@@ -112,7 +112,7 @@ var menuItems = []struct {
 	{"Check an idea", "describe it once, then watch it being researched and judged", pageIdea},
 	{"History", "browse and reopen past checks", pageHistory},
 	{"Profile", "who you are — used for founder-fit questions", pageProfile},
-	{"Settings", "choose the model provider, API key and model", pageSetup},
+	{"Settings", "choose the judge and the writer: provider, model and API key", pageSetup},
 	{"Quit", "", -1},
 }
 
@@ -166,7 +166,7 @@ func Run(ctx context.Context, host Host, start Start, out io.Writer) (*pipeline.
 func (a *App) Init() tea.Cmd {
 	if a.start.NeedSetup {
 		cmd := a.open(pageSetup)
-		a.note = "Welcome! First, choose how ideacheck reaches a model. A local Ollama model is free and needs no key."
+		a.note = "Welcome! First, choose the judge — the model that answers every scoring question. A local Ollama model is free and needs no key."
 		return cmd
 	}
 	return a.open(a.start.Page)

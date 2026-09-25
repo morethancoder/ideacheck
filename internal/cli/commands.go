@@ -201,7 +201,7 @@ func (a *app) setProfile(args []string) error {
 }
 
 func (a *app) setupCmd() *cobra.Command {
-	return a.pageCmd("setup", "choose the model provider, API key and model", []string{"settings"},
+	return a.pageCmd("setup", "choose the judge and the writer: provider, model and API key", []string{"settings"},
 		func() tui.Start { return tui.Start{Page: tui.OpenSetup, ExitAfter: true} })
 }
 

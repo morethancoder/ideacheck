@@ -240,8 +240,8 @@ func TestSetupOffersToKeepAKeyAlreadySet(t *testing.T) {
 	if view := a.View(); !strings.Contains(view, "already set") || !strings.Contains(view, "ending in …abcd") || !strings.Contains(view, "Replace it") {
 		t.Fatalf("want the keep-or-replace choice, got:\n%s", view)
 	}
-	if _, total := a.wiz.position(); total != 3 {
-		t.Errorf("keeping the key: provider, key choice, model; total = %d", total)
+	if _, total := a.wiz.position(); total != 4 {
+		t.Errorf("keeping the key: judge, key choice, judge model, writer (Claude CLI is ready too); total = %d", total)
 	}
 	a.setup.key, loadChosen(a).custom = "typed-then-kept", "gpt-y"
 	a.finishSetup()
@@ -276,8 +276,8 @@ func TestFirstRunSetupThenContinuesToTheCheck(t *testing.T) {
 		t.Errorf("claude-cli needs no key: want step 1 of 2, got %d of %d", at, total)
 	}
 	a.setup.id = "openai"
-	if _, total := a.wiz.position(); total != 3 {
-		t.Errorf("a key provider adds the API key step: total = %d", total)
+	if _, total := a.wiz.position(); total != 4 {
+		t.Errorf("a key provider adds the API key step, and Claude CLI is there to write: total = %d", total)
 	}
 	a.setup.key, loadChosen(a).custom = " sk-test ", " gpt-y "
 	a.finishSetup()
@@ -471,38 +471,65 @@ func TestABlankModelIDIsNotSaved(t *testing.T) {
 	}
 }
 
-// Jev only classifies, so choosing it asks who writes; choosing a chat model
-// while holding a TypeSafe key offers Jev as the judge beside it. Either way
-// the saved roles say who judges and who writes.
-func TestSetupPairsAClassifierWithAWriter(t *testing.T) {
+// Setup asks for the judge, then for the writer. A judge that only judges
+// (Jev, Laya) needs another provider or nobody; a chat judge can write as well,
+// or hand that to another provider. The saved roles say who does what.
+func TestSetupPairsAJudgeWithAWriter(t *testing.T) {
 	providers := []config.Provider{
 		{ID: "claude-cli", Label: "Claude CLI", Backend: "claude-cli", NeedsCLI: "claude", Model: "sonnet"},
 		{ID: "jev", Label: "Jev", Backend: "jev", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true, Model: "jev-1"},
+		{ID: "laya", Label: "Laya", Backend: "laya", NeedsWriter: true, Model: "aac6fef/laya-mlx"},
 		{ID: "openai", Label: "OpenAI", Backend: "structured", KeyEnv: "OPENAI_API_KEY", Model: "gpt"},
 	}
 	h := &fakeHost{t: t, providers: providers, keys: map[string]bool{"TYPESAFE_API_KEY": true}}
 	a := newApp(h, Start{Page: pageSetup, ExitAfter: true})
 	a.Init()
-
-	a.setup.id = "jev"
-	if opts := a.writers(a.setup); len(opts) != 2 || opts[0].Value != "claude-cli" || opts[1].Value != noWriter {
-		t.Fatalf("writers = %+v, want the ready chat provider then nobody (OpenAI has no key)", opts)
-	}
-	a.setup.writer = "claude-cli"
-	a.saveSetup()
-	if h.roles != "jev+claude-cli" {
-		t.Errorf("roles = %q, want jev judging and claude-cli writing", h.roles)
+	if view := a.View(); !strings.Contains(view, "Choose the judge") || !strings.Contains(view, "every scoring question") {
+		t.Errorf("the first step names the role and what it does:\n%s", view)
 	}
 
-	a.setup.id, a.setup.jevJudges = "claude-cli", true
-	a.saveSetup()
-	if h.roles != "jev+claude-cli" {
-		t.Errorf("roles = %q, want Jev offered as the judge beside the chosen model", h.roles)
+	for _, id := range []string{"jev", "laya"} {
+		a.setup.id = id
+		if opts := a.writers(a.setup); len(opts) != 2 || opts[0].Value != "claude-cli" || opts[1].Value != noWriter {
+			t.Fatalf("%s: writers = %+v, want the ready chat provider then nobody (OpenAI has no key; a judge-only model never writes)", id, opts)
+		}
+		a.setup.writer = "claude-cli"
+		a.saveSetup()
+		if h.roles != id+"+claude-cli" {
+			t.Errorf("roles = %q, want %s judging and claude-cli writing", h.roles, id)
+		}
+		a.setup.writer = noWriter
+		a.saveSetup()
+		if h.roles != id+"+" {
+			t.Errorf("roles = %q, want %s alone", h.roles, id)
+		}
 	}
-	a.setup.jevJudges = false
+
+	a.setup.id = "claude-cli"
+	opts := a.writers(a.setup)
+	if len(opts) != 1 || opts[0].Value != sameWriter {
+		t.Fatalf("writers = %+v, want only the judge itself (nothing else is ready, and a chat judge needs nobody)", opts)
+	}
+	if _, total := a.wiz.position(); total != 2 {
+		t.Errorf("one possible writer is no choice: judge, judge model; total = %d", total)
+	}
+	a.setup.writer = sameWriter
 	a.saveSetup()
 	if h.roles != "claude-cli+" {
 		t.Errorf("roles = %q, want one model doing everything", h.roles)
+	}
+
+	h.keys["OPENAI_API_KEY"] = true
+	if opts := a.writers(a.setup); len(opts) != 2 || opts[1].Value != "openai" {
+		t.Fatalf("writers = %+v, want the judge itself, then OpenAI now that it has a key", opts)
+	}
+	if _, total := a.wiz.position(); total != 3 {
+		t.Errorf("a second possible writer adds the Writer step: total = %d", total)
+	}
+	a.setup.writer = "openai"
+	a.saveSetup()
+	if h.roles != "claude-cli+openai" {
+		t.Errorf("roles = %q, want a chat judge with another writer", h.roles)
 	}
 }
 
@@ -529,7 +556,7 @@ func TestSetupPicksTheWritersModel(t *testing.T) {
 		t.Errorf("the writer's model defaults to the one it runs now, got %q", k.modelID())
 	}
 	if _, total := a.wiz.position(); total != 5 {
-		t.Errorf("provider, key, model, writer, writer model (haiku takes no effort): total = %d", total)
+		t.Errorf("judge, key, judge model, writer, writer model (haiku takes no effort): total = %d", total)
 	}
 	k.model, k.effort = "sonnet", "high"
 	if _, total := a.wiz.position(); total != 6 {
@@ -635,18 +662,20 @@ func TestAFailedSearchEngineStartKeepsTheSetup(t *testing.T) {
 	}
 }
 
-// The Judge step is skipped when Jev has no key; its "yes" default must not
-// apply to a question that was never asked, or a first run saves a judge that
-// cannot answer.
-func TestSetupWithoutAJevKeyKeepsTheChosenModelAsJudge(t *testing.T) {
+// A first run with nothing but a local model answers the Writer step for the
+// user: the judge writes too. Nothing skipped may leave the roles unset.
+func TestFirstRunWithOneProviderSavesItAsJudgeAndWriter(t *testing.T) {
 	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
 	jev := config.Provider{ID: "jev", Backend: "jev", Model: "jev-1", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true}
 	h := &fakeHost{t: t, providers: []config.Provider{ollama, jev}}
 	a := newApp(h, Start{Page: pageSetup, NeedSetup: true})
 	a.Init()
 	a.setup.id = "ollama"
-	if judge, writer := a.setup.roles(); judge.ID != "ollama" || writer.ID != "" {
-		t.Errorf("judge=%q writer=%q, want ollama alone", judge.ID, writer.ID)
+	if _, total := a.wiz.position(); total != 2 {
+		t.Errorf("judge, judge model — Jev has no key, so no writer to choose: total = %d", total)
+	}
+	if judge, writer := a.setup.roles(); judge.ID != "ollama" || writer.ID != "" || a.setup.role() != roleBoth {
+		t.Errorf("judge=%q writer=%q role=%q, want ollama alone", judge.ID, writer.ID, a.setup.role())
 	}
 }
 

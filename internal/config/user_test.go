@@ -60,7 +60,7 @@ func TestSecretsPreferEnvAndStayPrivate(t *testing.T) {
 
 func TestSetupPresetsAreUsable(t *testing.T) {
 	c, _ := Load(NewFiles(""), LoadOptions{Environ: noEnv})
-	if len(c.Setup.Providers) != 8 {
+	if len(c.Setup.Providers) != 9 {
 		t.Fatalf("providers = %d", len(c.Setup.Providers))
 	}
 	for _, p := range c.Setup.Providers {
