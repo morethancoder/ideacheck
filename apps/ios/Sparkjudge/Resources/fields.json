@@ -1,0 +1,90 @@
+{
+  "idea": [
+    {
+      "name": "title",
+      "description": "What the thing is called.",
+      "example": "Vector Thread",
+      "flag": "--answer title="
+    },
+    {
+      "name": "problem",
+      "description": "The specific problem it solves, and for whom. Concrete beats broad.",
+      "example": "designers hand a design system to an AI coding agent and get back code that ignores it",
+      "flag": "--answer problem="
+    },
+    {
+      "name": "audience",
+      "description": "The first users, narrowly. Not \"everyone who ...\" — the ten people who would use it this month.",
+      "example": "designers who already keep a DESIGN.md and work with coding agents daily",
+      "flag": "--answer audience="
+    },
+    {
+      "name": "solution",
+      "description": "What would actually be built or made, in one or two sentences.",
+      "example": "a gallery of DESIGN.md files rendered live, with a validator, a token lab and a merge tool",
+      "flag": "--answer solution="
+    },
+    {
+      "name": "why_now",
+      "description": "What changed recently — technology, rules, behavior — that makes this newly possible or newly needed. The single fact most often left out.",
+      "example": "Google Labs published an open DESIGN.md spec and coding agents now read design files directly",
+      "flag": "--answer why_now="
+    },
+    {
+      "name": "monetization",
+      "description": "How it would make money, or that it is deliberately not meant to.",
+      "example": "free gallery, paid team workspace for shared systems",
+      "flag": "--answer monetization="
+    },
+    {
+      "name": "competitors_known",
+      "description": "What people use today instead — named alternatives, or how they cope without one.",
+      "example": "getdesign.md, Refero Styles, design.dev's token editor; most people just paste tokens into the prompt",
+      "flag": "--answer competitors_known="
+    },
+    {
+      "name": "differentiation",
+      "description": "The one thing this does that the existing options do not.",
+      "example": "one page re-skinned by the file itself, so the demo is the product",
+      "flag": "--answer differentiation="
+    }
+  ],
+  "profile": [
+    {
+      "name": "background",
+      "description": "Your relationship to this idea — what you have built, what you know, whether you have the problem yourself. Without it, founder-fit questions are left unscored rather than guessed.",
+      "example": "solo dev, ten years in design tooling, I hit this every week",
+      "flag": "--answer profile.background="
+    },
+    {
+      "name": "skills",
+      "description": "What you can build or do yourself.",
+      "example": "Go, SvelteKit, enough design to ship it alone",
+      "flag": "--answer profile.skills="
+    },
+    {
+      "name": "domains",
+      "description": "Fields you know from the inside.",
+      "example": "design systems, developer tooling",
+      "flag": "--answer profile.domains="
+    },
+    {
+      "name": "network",
+      "description": "Who you can already reach — users, buyers, distribution.",
+      "example": "4k followers who are mostly designers; two agency friends who would pilot it",
+      "flag": "--answer profile.network="
+    },
+    {
+      "name": "would_use_myself",
+      "description": "Whether you would use the finished thing yourself, and how often.",
+      "example": "yes, on every project I start",
+      "flag": "--answer profile.would_use_myself="
+    },
+    {
+      "name": "time_horizon",
+      "description": "How much time you actually have for this.",
+      "example": "evenings and weekends for about three months",
+      "flag": "--answer profile.time_horizon="
+    }
+  ]
+}
