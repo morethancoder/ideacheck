@@ -253,6 +253,21 @@ no store: evidence questions are skipped, the app keeps its own history.
 - The judge's `Name()` picks the verdict cuts (`verdict.backends.<name>`); the
   on-device judge is `foundation` and has none yet — tune them on bench, do not
   guess. It answers with one greedy pick, so run it with `max_concurrent: 1`.
+- `BatchJudge` (`NewBatchEngine`) is a judge that also answers a group in one
+  call; `FoundationJudge` is one. The core's fan-out groups by `uses`; the
+  adapter merges the groups of a stage whose states come out identical (on the
+  phone no evidence, so `[idea]` and `[idea, evidence.market]` are both
+  `{idea}`) into one round, and asks alone any question a batch misses, answers
+  badly or cannot fit (4096 tokens). Measured in the simulator: a whole check
+  123 s one by one, 36 s batched. Keep `includeSchemaInPrompt: false` — with
+  the schema spelled out a batch of 9 took 45 s instead of 10.
+- The app (`apps/ios`) links `build/Sparkcore.xcframework` and compiles
+  `mobile/swift` and LayaKit; its scheme's pre-action rebuilds the xcframework
+  when a source of the core is newer (`apps/ios/scripts/sparkcore.sh`), before
+  Xcode plans the build (the app copies the framework in before its own
+  phases). `OnDeviceChecker` runs a check per engine on its own thread;
+  `OnDeviceJudges` holds Apple Intelligence's availability and the Laya
+  checkpoints on disk and on the Hub.
 - `apps/ios/Packages/LayaKit` runs Laya typed-decision checkpoints (the Core ML
   exports of github.com/mizorewww/laya-coreml) with no Python: its own BPE
   tokenizer (ModernBERT byte-level and Gemma Metaspace, byte-exact against the

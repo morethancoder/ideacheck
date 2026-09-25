@@ -30,7 +30,16 @@ open Sparkjudge.xcodeproj
 ```
 
 You need Xcode 26 with the iOS 26 SDK, plus the Metal Toolchain
-(`xcodebuild -downloadComponent MetalToolchain`) for the shaders. The deployment
+(`xcodebuild -downloadComponent MetalToolchain`) for the shaders, and Go: the
+app links the check itself, `build/Sparkcore.xcframework` (`make mobile` at the
+repository root). The scheme's build pre-action runs `scripts/sparkcore.sh`,
+which rebuilds it when it is missing or older than any `.go`, `.yaml`, `.tmpl`
+or `.md` under `ideacheck/ judge/ rubric/ prompt/ configs/ mobile/` (about
+25 s; up to date it is one `find`), logging to `build/sparkcore.log`. It runs
+before Xcode plans the build because the app copies the framework in before its
+own phases; the `Sparkcore` target checks again and fails a build that had to
+rebuild it late (build again). The app also compiles `mobile/swift/*.swift`
+(the Swift judges) and the local package `Packages/LayaKit`. The deployment
 target is iOS 26.0, so the simulator must run iOS 26 (an iOS 18 "iPhone 16 Pro"
 will not match). There is no team id: it is set up for simulator builds. Set
 `DEVELOPMENT_TEAM` in `project.yml` to run it on a phone.
@@ -45,7 +54,10 @@ Sparkjudge/
   App/        entry point, root tabs, settings keys, launch arguments, sample data
   Model/      Idea (SwiftData), categories, the fields catalogue, grouping for list/pile views
   Checking/   IdeaChecker protocol, CheckResult (mirrors schemas/check_result.schema.json),
-              RemoteChecker (POST /v1/check?async=1 + SSE), PreviewChecker, OnDeviceChecker (seam),
+              RemoteChecker (POST /v1/check?async=1 + SSE), PreviewChecker,
+              OnDeviceChecker (the Go core on the phone), OnDeviceJudge (which judge, which route,
+              engine settings), OnDeviceJudges (Apple Intelligence, Laya on disk and on the Hub,
+              downloads), CheckProgressPlan (core events → progress, "Scoring 3 of 12"),
               CheckCoordinator (runs checks, writes results onto ideas)
   Speech/     Transcriber protocol, AppleSpeechTranscriber (SpeechAnalyzer), SilenceGate,
               LevelMeter/LevelSmoother, TranscriberCatalog (what this device supports), DictationModel
@@ -93,8 +105,7 @@ SparkjudgeTests/  Swift Testing; Fixtures/check_result_mock.json is a real engin
   address; ATS allows local networking. A category you pick in review is sent as
   `?rubric=`. "Let the check decide" leaves the choice to the router.
   `PreviewChecker` builds a deterministic result on top of a real engine result.
-  `OnDeviceChecker` is the seam for the gomobile engine with Foundation Models
-  as its judge, and for now it reports itself unavailable.
+  `OnDeviceChecker` runs the check on the phone (below).
 - **Cards.** `CardStyle.make(seed:allowed:)` works as follows: the seed is
   FNV-1a over the idea's UUID, and SplitMix64 rolls the family, an OKLCH palette
   (a base hue plus a harmony), the warp, offset, scale, angle and a frozen phase.
@@ -104,6 +115,56 @@ SparkjudgeTests/  Swift Testing; Fixtures/check_result_mock.json is a real engin
   get their colors when they are checked. Only the Detail hero card runs the
   shader clock. Cards in lists and piles freeze time and draw once through
   `.drawingGroup()`.
+
+## On this iPhone
+
+| Checking | Result | Judge settings | Downloading Laya |
+|---|---|---|---|
+| ![](screenshots/on-device-progress.png) | ![](screenshots/on-device-result.png) | ![](screenshots/settings-judge.png) | ![](screenshots/laya-download.png) |
+
+Real checks in the simulator: progress with Laya, the result with Apple
+Intelligence judging (`on-device-result-laya.png` is Laya's, on the same idea).
+
+The free tier checks on the phone, offline. `OnDeviceChecker` builds a
+`SparkcoreEngine` (the Go core, `mobile/`) per check on a thread of its own and
+maps its events onto `CheckEvent.progress` and its result JSON onto
+`CheckResult`; cancelling the check's task calls `SparkcoreCheck.cancel`. The
+category chosen in Review goes in as `rubric`, as for Cloud.
+
+- **Judge.** Laya on Core ML (`LayaDeviceJudge`, via `Packages/LayaKit`) or
+  Apple Intelligence (`FoundationJudge`), from what the phone has
+  (`JudgeResolver`): the one picked in Settings while it is usable; else a
+  downloaded typed-decisions checkpoint, then Apple Intelligence, then any other
+  downloaded checkpoint that can hold an idea; else none, and Review's Check
+  explains how to get one (download Laya, or check with Cloud). Laya is loaded
+  (the first time compiled) before the first question, as the "Loading the
+  judge" step. `FoundationJudge` answers each stage's questions in one guided
+  response (the core's `BatchJudge`), falling back to one at a time.
+- **Writer.** Apple Intelligence reads the idea for stated facts and writes the
+  summary when it is available; otherwise both steps are off.
+- **Settings → Model on this iPhone** lists Apple Intelligence (with why it is
+  unavailable, when it is) and the Laya checkpoints the Hugging Face Hub lists
+  now (`LayaDownloader.available()`), each with its download size, context and
+  answers from its manifest. Checkpoints too small for an idea (the Neural Engine
+  exports read 96 tokens, "snake" 64 with 4 answers) are listed apart, never
+  offered. A download shows its progress, pauses and resumes, checks free space,
+  and ends by loading the model; a downloaded one shows its size on disk and can
+  be removed. Review offers Laya once, when Apple Intelligence is about to judge.
+- **Routing.** No choice stored: free users check on the phone, Pro users in
+  Sparkjudge Cloud (`CheckRoute`). A free user who picks Cloud spends the
+  monthly free hosted checks, as before.
+- **Memory.** Both configurations carry
+  `com.apple.developer.kernel.increased-memory-limit` (Laya holds ~1 GB); on a
+  device the App ID needs the Increased Memory Limit capability.
+
+Measured in the iPhone 16 Pro simulator on this Mac (Core ML on the CPU there;
+a phone runs Laya on the GPU in milliseconds a question):
+
+| Judge | Whole check | Of which |
+|---|---|---|
+| Laya (typed decisions) + Apple writer | 56 s | load 2.5 s, extract 7.6 s, gaps 5.3 s, 13 questions 25.7 s, summary 14.9 s |
+| Apple Intelligence, judge and writer | 54 s | extract 26.6 s, gaps 7.7 s, 13 questions 8.7 s, summary 11.1 s |
+| Apple Intelligence, one question per call | 123 s | 13 questions 85.6 s (mobile/swiftcheck) |
 
 ## The Lab
 
@@ -175,13 +236,20 @@ key works too (for example `-checker preview` or `-ideasLayout pile`).
 | `-labUserID <uuid>` | the `X-App-User-Id` the Lab routes send (a stand-in until the paid tier's identity) |
 | `-sjDemoDictation YES` / `-sjAutoDictate YES` | a scripted voice in place of the microphone, and start a take on launch |
 | `-sjScheme dark\|light` | force the appearance |
+| `-sjOpen check` | open the newest unchecked idea and check it with the chosen checker |
+| `-sjOpen judge` | with `-sjTab settings`: the Model on this iPhone page |
+| `-checker on_device\|remote\|preview` / `-onDeviceJudge apple\|laya:<hub id>` | who checks, and which judge on the phone |
+| `-sjLayaDir <path>` | Debug: a Laya checkpoint directory on the Mac, read in place of a download (the simulator reads host paths), e.g. `Packages/LayaKit/.models/laya-typed-decisions-coreml` |
+| `-sjLayaDownload <hub id>` | Debug: start downloading that checkpoint on launch |
 
 ## What needs a device
 
 The simulator runs everything except real dictation. It has no on-device
 `SpeechTranscriber` (the picker says so and falls back to Dictation), its
-microphone depends on the Mac, and Apple Intelligence is usually unavailable
-there, so review shows no suggestions. A denied or missing microphone shows a
+microphone depends on the Mac, and Apple Intelligence is there only when the
+Mac has it on (this Mac does: on-device checks with it run in the simulator).
+Laya runs in the simulator on the CPU only; its speed on the GPU, the memory
+limit and the download on a cellular connection need a phone. A denied or missing microphone shows a
 calm message and offers "Type instead". To test live transcription, the orb's
 response to a real voice, haptics and Foundation Models suggestions, use an
 iPhone that supports Apple Intelligence.
