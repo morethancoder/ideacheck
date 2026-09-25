@@ -60,7 +60,7 @@ struct PaywallView: View {
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
             CardBackground(style: CardStyle.make(seed: 0xA11_0E4A, allowed: [.aurora]), animated: true)
-                .frame(height: 260)
+                .frame(height: 210)
                 .mask(LinearGradient(colors: [.black, .black, .black.opacity(0)], startPoint: .top, endPoint: .bottom))
             VStack(alignment: .leading, spacing: 8) {
                 Text("SPARKJUDGE PRO")
@@ -100,15 +100,15 @@ struct PaywallView: View {
     // MARK: - Benefits
 
     private var benefits: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
             Benefit(symbol: "scope", tint: Verdict.build.color, title: "A sharper judge",
-                    detail: "Jev answers every question of a check. It is built for exactly these typed judgments, and it's more accurate than the model on your phone.")
+                    detail: "Jev, built for exactly these judgments, answers every question. More accurate than the model on your phone.")
             Benefit(symbol: "globe", tint: Verdict.explore.color, title: "It looks your idea up first",
-                    detail: "Before scoring, the check searches the web for competitors and demand, and shows its sources beside the verdict.")
+                    detail: "Competitors and demand from the web, with sources beside the verdict.")
             Benefit(symbol: "square.stack.3d.up.fill", tint: Color.sjViolet, title: "Every card style",
-                    detail: "Contour, Ripple and Aurora join Nebula, Cells and Mesh, so each checked idea can roll any of six looks.")
+                    detail: "Contour, Ripple and Aurora join the three free looks.")
             Benefit(symbol: "gauge.with.dots.needle.67percent", tint: Color.sjSpark, title: "100 hosted checks a month",
-                    detail: "Instead of 3. Checks that fail to produce a score are given back.")
+                    detail: "Instead of 3. A check that fails to score is given back.")
         }
     }
 
@@ -269,7 +269,13 @@ struct PaywallPresenter: ViewModifier {
 }
 
 extension View {
-    func paywallSheet() -> some View { modifier(PaywallPresenter()) }
+    func paywallSheet() -> some View {
+        #if DEBUG
+        modifier(PaywallPresenter()).modifier(DebugLaunchHooks())
+        #else
+        modifier(PaywallPresenter())
+        #endif
+    }
 }
 
 /// One line for the hosted plan: "2 of 3 free hosted checks left this month".

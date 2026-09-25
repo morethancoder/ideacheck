@@ -89,9 +89,10 @@ final class Entitlements {
     /// the plan from the configured server.
     static func live() -> Entitlements {
         let user = AppUserID.current()
-        let store: any Storefront = AppSettings.revenueCatAPIKey.map { RevenueCatStorefront(apiKey: $0, userID: user) }
+        var store: any Storefront = AppSettings.revenueCatAPIKey.map { RevenueCatStorefront(apiKey: $0, userID: user) }
             ?? StoreKitStorefront(userID: user)
         #if DEBUG
+        if DebugLaunch.demoPlans { store = DemoStorefront() }
         let preview = UserDefaults.standard.bool(forKey: SettingsKey.proPreview)
         #else
         let preview = false
