@@ -9,13 +9,13 @@ enum SettingsKey {
     static let vadSensitivity = "vadSensitivity"
     static let autoCheck = "autoCheck"
     static let checker = "checker"
+    /// A server other than the build's own hosted API, for development (Debug only).
     static let serverURL = "serverURL"
     static let proPreview = "proPreview"
     static let ideasLayout = "ideasLayout"
 }
 
 enum AppSettings {
-    static let defaultServerURL = "http://127.0.0.1:8080"
     static let defaultSilence: Double = 2.0
     static let silenceRange: ClosedRange<Double> = 0.8...6.0
 
@@ -38,18 +38,42 @@ enum AppSettings {
 
     static var autoCheck: Bool { defaults.bool(forKey: SettingsKey.autoCheck) }
 
+    /// Who checks: Sparkjudge Cloud (`.remote`) unless chosen otherwise.
     static var checker: CheckerKind {
         defaults.string(forKey: SettingsKey.checker).flatMap(CheckerKind.init(rawValue:)) ?? .remote
     }
 
+    /// The build's hosted API, from Info.plist's `SparkjudgeAPIURL` (the
+    /// `SPARKJUDGE_API_URL` build setting in project.yml): `make api` on this
+    /// Mac for Debug, the hosted service for Release.
+    static let hostedURL: URL = {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "SparkjudgeAPIURL") as? String) ?? ""
+        return URL(string: raw).flatMap { $0.scheme == nil ? nil : $0 } ?? URL(string: "https://sparkjudge-api.fly.dev")!
+    }()
+
+    /// Where checks go. A Debug build may point anywhere (Settings → Developer),
+    /// e.g. at `ideacheck serve`; a Release build always uses its hosted API.
     static var serverURL: URL {
-        let raw = defaults.string(forKey: SettingsKey.serverURL) ?? defaultServerURL
-        return URL(string: raw.trimmingCharacters(in: .whitespaces)) ?? URL(string: defaultServerURL)!
+        #if DEBUG
+        if let raw = defaults.string(forKey: SettingsKey.serverURL)?.trimmingCharacters(in: .whitespaces),
+           !raw.isEmpty, let url = URL(string: raw), url.scheme != nil {
+            return url
+        }
+        #endif
+        return hostedURL
+    }
+
+    /// RevenueCat's public SDK key from Info.plist (`REVENUECAT_API_KEY`, set in
+    /// Config/Secrets.xcconfig); nil when this build has none.
+    static var revenueCatAPIKey: String? {
+        let key = (Bundle.main.object(forInfoDictionaryKey: "RevenueCatAPIKey") as? String)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        return key.isEmpty || key.hasPrefix("$(") ? nil : key
     }
 
     static func makeChecker(_ kind: CheckerKind = checker) -> any IdeaChecker {
         switch kind {
-        case .remote: RemoteChecker(baseURL: serverURL)
+        case .remote: RemoteChecker(api: .shared(baseURL: serverURL))
         case .preview: PreviewChecker()
         case .onDevice: OnDeviceChecker()
         }

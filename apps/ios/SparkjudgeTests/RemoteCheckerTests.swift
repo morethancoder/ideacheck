@@ -64,6 +64,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
 @Suite(.serialized)
 struct RemoteCheckerTests {
     let base = URL(string: "http://127.0.0.1:8080")!
+    let user = "11111111-2222-4333-8444-555555555555"
 
     private func accepted(_ id: String = "chk_1") -> StubProtocol.Route {
         .init(status: 202, body: Data(#"{"id":"\#(id)","events":"/v1/checks/\#(id)/events"}"#.utf8))
@@ -95,7 +96,7 @@ struct RemoteCheckerTests {
             "/v1/check": accepted(),
             "/v1/checks/chk_1/events": .init(status: 200, body: sse(result: fixture), contentType: "text/event-stream"),
         ])
-        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session())
+        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session(), user: user)
         let intake = Intake(idea: "a to-do app for dentists", fields: ["title": "Chairside"])
         let events = try await collect(checker, intake, rubric: "side_project")
 
@@ -110,6 +111,9 @@ struct RemoteCheckerTests {
 
         let (post, body) = try #require(StubProtocol.requests.first)
         #expect(post.httpMethod == "POST")
+        // A Debug build talking to a server on this machine sends the user id alone.
+        #expect(post.value(forHTTPHeaderField: HostedHeader.user) == user)
+        #expect(post.value(forHTTPHeaderField: HostedHeader.assertion) == nil)
         let query = URLComponents(url: post.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         #expect(query.contains(URLQueryItem(name: "async", value: "1")))
         #expect(query.contains(URLQueryItem(name: "rubric", value: "side_project")))
@@ -121,7 +125,7 @@ struct RemoteCheckerTests {
             "/v1/check": accepted("chk_2"),
             "/v1/checks/chk_2/events": .init(status: 200, body: Data("event: error\ndata: {\"error\":\"judge unreachable\"}\n\n".utf8), contentType: "text/event-stream"),
         ])
-        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session())
+        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session(), user: user)
         await #expect(throws: CheckError.server("judge unreachable")) {
             _ = try await collect(checker, Intake(idea: "x"))
         }
@@ -129,8 +133,8 @@ struct RemoteCheckerTests {
 
     @Test func aRejectedPostSurfacesTheServersError() async throws {
         StubProtocol.install(["/v1/check": .init(status: 400, body: Data(#"{"status":"error","error":"intake JSON: unknown field"}"#.utf8))])
-        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session())
-        await #expect(throws: CheckError.badResponse(status: 400, message: "intake JSON: unknown field")) {
+        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session(), user: user)
+        await #expect(throws: HostedError.http(status: 400, code: "intake JSON: unknown field", message: "intake JSON: unknown field")) {
             _ = try await collect(checker, Intake(idea: "x"))
         }
     }
@@ -140,7 +144,7 @@ struct RemoteCheckerTests {
             "/v1/check": accepted("chk_3"),
             "/v1/checks/chk_3/events": .init(status: 200, body: Data("event: progress\ndata: {}\n\n".utf8), contentType: "text/event-stream"),
         ])
-        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session())
+        let checker = RemoteChecker(baseURL: base, session: StubProtocol.session(), user: user)
         await #expect(throws: CheckError.streamEnded) {
             _ = try await collect(checker, Intake(idea: "x"))
         }
