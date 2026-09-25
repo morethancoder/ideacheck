@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/morethancoder/ideacheck/internal/logging"
 	"github.com/morethancoder/ideacheck/judge"
 )
 
@@ -112,7 +111,7 @@ func (j *Judge) EvaluateBatch(ctx context.Context, state judge.State, qs []judge
 	if err != nil {
 		return nil, err
 	}
-	logging.From(ctx).Debug().Str("model", res.Model).Int("tokens_in", res.Usage.InputTokens).Int("questions", len(qs)).Msg("jev response")
+	judge.Logger(ctx).Debug("jev response", "model", res.Model, "tokens_in", res.Usage.InputTokens, "questions", len(qs))
 	return res.Answers.Convert(qs, method, res.Model, res.Usage.InputTokens, res.Usage.OutputTokens), nil
 }
 

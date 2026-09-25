@@ -28,7 +28,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/morethancoder/ideacheck/internal/logging"
 	"github.com/morethancoder/ideacheck/judge"
 	"github.com/morethancoder/ideacheck/judge/jev"
 )
@@ -140,12 +139,12 @@ func (j *Judge) EvaluateBatch(ctx context.Context, state judge.State, qs []judge
 	if err != nil {
 		return nil, err
 	}
-	log := logging.From(ctx)
-	log.Debug().Str("model", res.Model).Int("tokens_in", res.Usage.InputTokens).Int("questions", len(qs)).Msg("laya response")
+	log := judge.Logger(ctx)
+	log.Debug("laya response", "model", res.Model, "tokens_in", res.Usage.InputTokens, "questions", len(qs))
 	if len(res.AtLimit) > 0 {
 		// The model reads whatever fits and says nothing: without this the check
 		// silently scores a shortened idea.
-		log.Warn().Strs("questions", res.AtLimit).Int("max_len", w.maxLen).Msg("laya: the state filled the model's context and was cut to fit; a checkpoint with a longer context (aac6fef/laya-typed-decisions-mlx) reads more of it")
+		log.Warn("laya: the state filled the model's context and was cut to fit; a checkpoint with a longer context (aac6fef/laya-typed-decisions-mlx) reads more of it", "questions", res.AtLimit, "max_len", w.maxLen)
 	}
 	return res.Answers.Convert(qs, method, res.Model, res.Usage.InputTokens, res.Usage.OutputTokens), nil
 }
