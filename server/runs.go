@@ -75,12 +75,17 @@ type registry struct {
 
 func newRegistry() *registry { return &registry{runs: map[string]*run{}} }
 
-func (g *registry) start(id string) *run {
+// key keeps runs apart by tenant: an id alone never reaches another
+// tenant's live check.
+func key(tenant, id string) string { return tenant + "\x00" + id }
+
+func (g *registry) start(tenant, id string) *run {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	r := newRun()
-	g.runs[id] = r
-	g.order = append(g.order, id)
+	k := key(tenant, id)
+	g.runs[k] = r
+	g.order = append(g.order, k)
 	if len(g.order) > maxRuns {
 		delete(g.runs, g.order[0])
 		g.order = g.order[1:]
@@ -88,9 +93,9 @@ func (g *registry) start(id string) *run {
 	return r
 }
 
-func (g *registry) get(id string) (*run, bool) {
+func (g *registry) get(tenant, id string) (*run, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	r, ok := g.runs[id]
+	r, ok := g.runs[key(tenant, id)]
 	return r, ok
 }

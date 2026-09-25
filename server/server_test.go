@@ -176,9 +176,9 @@ type tenants struct {
 	saved []string
 }
 
-func (t *tenants) Save(ctx context.Context, in ideacheck.Intake, res *ideacheck.Result) error {
-	t.saved = append(t.saved, Tenant(ctx))
-	return t.Store.Save(ctx, in, res)
+func (t *tenants) Save(ctx context.Context, owner string, in ideacheck.Intake, res *ideacheck.Result) error {
+	t.saved = append(t.saved, owner)
+	return t.Store.Save(ctx, owner, in, res)
 }
 
 func TestAuthAdmitsOrRefusesAndNamesTheTenant(t *testing.T) {
@@ -198,7 +198,7 @@ func TestAuthAdmitsOrRefusesAndNamesTheTenant(t *testing.T) {
 		t.Errorf("healthz without a key = %d, want 200", code)
 	}
 	var refused map[string]string
-	if code := getJSON(t, srv.URL+"/v1/rubrics", &refused); code != 401 || refused["error"] != "no such key" {
+	if code := getJSON(t, srv.URL+"/v1/rubrics", &refused); code != 401 || refused["error"] != "unauthorized" || refused["message"] != "no such key" {
 		t.Errorf("rubrics without a key = %d %v, want 401", code, refused)
 	}
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/check?rubric=business", strings.NewReader(`{"idea":"A payroll compliance tool"}`))
@@ -210,5 +210,87 @@ func TestAuthAdmitsOrRefusesAndNamesTheTenant(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != 200 || len(kept.saved) != 1 || kept.saved[0] != "acme" {
 		t.Errorf("check with a key = %d, saved for %v; want 200 for acme", res.StatusCode, kept.saved)
+	}
+}
+
+// as sends a request as the tenant named in X-Tenant (see byHeader).
+func as(t *testing.T, tenant, method, url, body string) (int, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(method, url, strings.NewReader(body))
+	req.Header.Set("X-Tenant", tenant)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return res.StatusCode, b
+}
+
+func byHeader(s *Server) {
+	s.Auth = func(r *http.Request) (string, error) { return r.Header.Get("X-Tenant"), nil }
+}
+
+// A tenant never sees another tenant's check: not in the list, not by id, not
+// its live events.
+func TestTenantsSeeOnlyTheirOwnChecks(t *testing.T) {
+	srv := newServer(t, byHeader)
+	code, body := as(t, "ann", http.MethodPost, srv.URL+"/v1/check?async=1&rubric=creative", `{"idea":"A puzzle game"}`)
+	var accepted struct{ ID string }
+	_ = json.Unmarshal(body, &accepted)
+	if code != 202 {
+		t.Fatalf("async POST = %d %s", code, body)
+	}
+	if code, _ := as(t, "bob", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID+"/events", ""); code != 404 {
+		t.Errorf("bob's view of ann's live events = %d, want 404", code)
+	}
+	// ann's stream ends when her check does, and it is then in her history.
+	if code, _ := as(t, "ann", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID+"/events", ""); code != 200 {
+		t.Fatalf("ann's events = %d", code)
+	}
+	if code, _ := as(t, "bob", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID, ""); code != 404 {
+		t.Errorf("bob's GET of ann's check = %d, want 404", code)
+	}
+	if code, _ := as(t, "ann", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID, ""); code != 200 {
+		t.Errorf("ann's GET of her check = %d", code)
+	}
+	var list struct{ Checks []store.Row }
+	_, body = as(t, "bob", http.MethodGet, srv.URL+"/v1/checks", "")
+	if _ = json.Unmarshal(body, &list); len(list.Checks) != 0 {
+		t.Errorf("bob's list = %+v, want empty", list.Checks)
+	}
+}
+
+// A meter that refuses stops the check before it runs, with its own status and
+// code; one that admits hears how the check ended.
+func TestMeterRefusesOrSettles(t *testing.T) {
+	var settled []string
+	srv := newServer(t, byHeader, func(s *Server) {
+		s.Meter = func(_ context.Context, tenant string) (func(*ideacheck.Result, error), error) {
+			if tenant == "broke" {
+				return nil, &Error{Status: http.StatusPaymentRequired, Code: "quota_exceeded", Message: "no checks left this month"}
+			}
+			return func(res *ideacheck.Result, err error) { settled = append(settled, res.Status) }, nil
+		}
+	})
+	code, body := as(t, "broke", http.MethodPost, srv.URL+"/v1/check", `{"idea":"A puzzle game"}`)
+	var refused map[string]string
+	_ = json.Unmarshal(body, &refused)
+	if code != 402 || refused["error"] != "quota_exceeded" || refused["message"] == "" {
+		t.Errorf("refused check = %d %s", code, body)
+	}
+	if code, body := as(t, "ann", http.MethodPost, srv.URL+"/v1/check?rubric=creative", `{"idea":"A puzzle game"}`); code != 200 {
+		t.Fatalf("admitted check = %d %s", code, body)
+	}
+	if len(settled) != 1 || settled[0] != ideacheck.StatusOK {
+		t.Errorf("settled = %v, want one ok", settled)
+	}
+}
+
+func TestFieldsCatalogue(t *testing.T) {
+	srv := newServer(t)
+	var f ideacheck.Fields
+	if code := getJSON(t, srv.URL+"/v1/fields", &f); code != 200 || len(f.Idea) == 0 || f.Idea[0].Name == "" {
+		t.Errorf("fields = %d %+v", code, f)
 	}
 }

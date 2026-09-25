@@ -23,6 +23,7 @@ const schema = `
 CREATE TABLE IF NOT EXISTS checks (
   seq         INTEGER PRIMARY KEY AUTOINCREMENT,
   id          TEXT NOT NULL UNIQUE,
+  owner       TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL,
   status      TEXT NOT NULL,
   verdict     TEXT NOT NULL DEFAULT '',
@@ -42,7 +43,20 @@ CREATE TABLE IF NOT EXISTS research (
   findings   TEXT NOT NULL
 );`
 
+// migrations bring a database written by an older ideacheck up to schema,
+// each guarded by the column it adds so it runs once.
+var migrations = []struct{ table, column, ddl string }{
+	{"checks", "owner", "ALTER TABLE checks ADD COLUMN owner TEXT NOT NULL DEFAULT ''"},
+}
+
+// indexes come after the migrations, since they may name a migrated column.
+const indexes = `CREATE INDEX IF NOT EXISTS checks_owner ON checks (owner, seq);`
+
 var ErrNotFound = errors.New("no such check")
+
+// Local owns every check made on this machine: the CLI's history and the local
+// API have one user. A hosted API passes each caller's own id instead.
+const Local = ""
 
 type Store struct{ db *sql.DB }
 
@@ -77,17 +91,54 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("history store: %w", err)
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("history store %s: %w", path, err)
 	}
 	return &Store{db: db}, nil
 }
 
+func migrate(db *sql.DB) error {
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	for _, m := range migrations {
+		has, err := hasColumn(db, m.table, m.column)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(m.ddl); err != nil {
+				return fmt.Errorf("add %s.%s: %w", m.table, m.column, err)
+			}
+		}
+	}
+	_, err := db.Exec(indexes)
+	return err
+}
+
+func hasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query("SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
-// Save records the full result plus the intake that produced it.
-func (s *Store) Save(ctx context.Context, in ideacheck.Intake, res *ideacheck.Result) error {
+// Save records the full result plus the intake that produced it, as owner's.
+func (s *Store) Save(ctx context.Context, owner string, in ideacheck.Intake, res *ideacheck.Result) error {
 	result, err := json.Marshal(res)
 	if err != nil {
 		return err
@@ -101,9 +152,9 @@ func (s *Store) Save(ctx context.Context, in ideacheck.Intake, res *ideacheck.Re
 		rubric, rubricHash = res.Rubric.Name, res.Rubric.Hash
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO checks
-		(id, created_at, status, verdict, composite, backend, model, rubric, rubric_hash, config_hash, idea, intake, result)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		res.ID, res.CreatedAt, res.Status, res.Verdict, res.Composite, res.Backend, res.Model,
+		(id, owner, created_at, status, verdict, composite, backend, model, rubric, rubric_hash, config_hash, idea, intake, result)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		res.ID, owner, res.CreatedAt, res.Status, res.Verdict, res.Composite, res.Backend, res.Model,
 		rubric, rubricHash, res.ConfigHash, summary(in), string(intake), string(result))
 	return err
 }
@@ -165,18 +216,20 @@ func summary(in ideacheck.Intake) string {
 	return strings.Join(strings.Fields(text), " ")
 }
 
-// Get finds a check by sequence number ("12") or id ("chk_01J…").
-func (s *Store) Get(ctx context.Context, ref string) (*ideacheck.Result, error) {
+// Get finds one of owner's checks by sequence number ("12") or id
+// ("chk_01J…"). Another owner's check is ErrNotFound, never a different error:
+// a caller learns nothing about ids that are not theirs.
+func (s *Store) Get(ctx context.Context, owner, ref string) (*ideacheck.Result, error) {
 	where, arg := "id = ?", any(ref)
 	if seq, err := strconv.ParseInt(ref, 10, 64); err == nil {
 		where, arg = "seq = ?", seq
 	}
-	return s.one(ctx, "SELECT result FROM checks WHERE "+where, arg)
+	return s.one(ctx, "SELECT result FROM checks WHERE owner = ? AND "+where, owner, arg)
 }
 
-// Last returns the most recent check.
-func (s *Store) Last(ctx context.Context) (*ideacheck.Result, error) {
-	return s.one(ctx, "SELECT result FROM checks ORDER BY seq DESC LIMIT 1")
+// Last returns owner's most recent check.
+func (s *Store) Last(ctx context.Context, owner string) (*ideacheck.Result, error) {
+	return s.one(ctx, "SELECT result FROM checks WHERE owner = ? ORDER BY seq DESC LIMIT 1", owner)
 }
 
 func (s *Store) one(ctx context.Context, query string, args ...any) (*ideacheck.Result, error) {
@@ -192,10 +245,10 @@ func (s *Store) one(ctx context.Context, query string, args ...any) (*ideacheck.
 	return &res, json.Unmarshal([]byte(raw), &res)
 }
 
-// List returns the newest checks first.
-func (s *Store) List(ctx context.Context, limit int) ([]Row, error) {
+// List returns owner's checks, newest first.
+func (s *Store) List(ctx context.Context, owner string, limit int) ([]Row, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT seq, id, created_at, status, verdict, composite, backend, model, rubric, idea
-		FROM checks ORDER BY seq DESC LIMIT ?`, limit)
+		FROM checks WHERE owner = ? ORDER BY seq DESC LIMIT ?`, owner, limit)
 	if err != nil {
 		return nil, err
 	}

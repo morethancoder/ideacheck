@@ -410,8 +410,11 @@ expressions may only reference real question ids. Gates see **normalized** value
 
 `POST /v1/check` (body = intake JSON; `?rubric=`, `?strict=1`, `?async=1`),
 `GET /v1/checks`, `GET /v1/checks/{id}`, `GET /v1/checks/{id}/events` (SSE:
-`progress` events, then `result`), `GET /v1/rubrics`, `GET /v1/healthz`.
-CORS is allowed for localhost origins only. Binds to 127.0.0.1 by default.
+`progress` events, then `result`), `GET /v1/rubrics`, `GET /v1/fields` (what an
+intake can carry, from `fields.yaml`), `GET /v1/healthz`. An error is
+`{"status":"error","error":"<code>","message":"<what went wrong>"}` with a
+matching HTTP status. CORS is allowed for localhost origins only. Binds to
+127.0.0.1 by default.
 
 ## Benchmarking
 

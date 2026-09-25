@@ -61,7 +61,7 @@ func (a *app) serveCmd() *cobra.Command {
 				p.Row("listening", "http://"+addr)
 				p.Blank()
 				p.Hint("POST /v1/check", `{"idea":"..."}`)
-				p.Hint("GET /v1/checks", "past checks · /v1/rubrics · /v1/healthz")
+				p.Hint("GET /v1/checks", "past checks · /v1/rubrics · /v1/fields · /v1/healthz")
 				p.Blank()
 				p.Note("ctrl+c stops it, draining the checks in flight")
 				p.Blank()

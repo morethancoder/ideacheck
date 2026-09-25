@@ -33,7 +33,7 @@ func (a *app) persist(ctx context.Context, path string, in ideacheck.Intake, res
 		return err
 	}
 	defer s.Close()
-	return s.Save(ctx, in, res)
+	return s.Save(ctx, store.Local, in, res)
 }
 
 // show renders a stored result the same way a fresh check would be rendered.
@@ -77,13 +77,15 @@ func (a *app) stored(use, short string, args cobra.PositionalArgs, find func(con
 
 func (a *app) lastCmd() *cobra.Command {
 	return a.stored("last", "re-show the most recent result", cobra.NoArgs,
-		func(ctx context.Context, s *store.Store, _ []string) (*ideacheck.Result, error) { return s.Last(ctx) })
+		func(ctx context.Context, s *store.Store, _ []string) (*ideacheck.Result, error) {
+			return s.Last(ctx, store.Local)
+		})
 }
 
 func (a *app) showCmd() *cobra.Command {
 	return a.stored("show <id>", "re-show one past result (history number or chk_ id)", cobra.ExactArgs(1),
 		func(ctx context.Context, s *store.Store, args []string) (*ideacheck.Result, error) {
-			res, err := s.Get(ctx, args[0])
+			res, err := s.Get(ctx, store.Local, args[0])
 			if err != nil {
 				return nil, fmt.Errorf("%w: %s (see `ideacheck history`)", err, args[0])
 			}
@@ -102,7 +104,7 @@ func (a *app) historyCmd() *cobra.Command {
 				return err
 			}
 			defer s.Close()
-			rows, err := s.List(cmd.Context(), limit)
+			rows, err := s.List(cmd.Context(), store.Local, limit)
 			if err != nil {
 				return err
 			}

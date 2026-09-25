@@ -212,7 +212,7 @@ func (h *host) History(limit int) ([]store.Row, error) {
 		return nil, err
 	}
 	defer s.Close()
-	return s.List(h.ctx, limit)
+	return s.List(h.ctx, store.Local, limit)
 }
 
 func (h *host) Stored(ref string) (*ideacheck.Result, error) {
@@ -221,7 +221,7 @@ func (h *host) Stored(ref string) (*ideacheck.Result, error) {
 		return nil, err
 	}
 	defer s.Close()
-	return s.Get(h.ctx, ref)
+	return s.Get(h.ctx, store.Local, ref)
 }
 
 // Persist is best-effort: history must never cost the user a result.
