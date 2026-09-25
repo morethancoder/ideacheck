@@ -187,7 +187,7 @@ func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, st
 	emit(o.Events, Event{Type: judge.EventStarted, Stage: StageResearch, Question: researchQuestion})
 	start := e.now()
 	report := &ResearchReport{By: p.via(e.writer().Name())}
-	found, call, cached, err := e.findings(ctx, p, given, state, report, o)
+	found, key, call, cached, err := e.findings(ctx, p, given, state, report, o)
 	a := judge.Answer{ID: researchQuestion.ID, Model: call.Model, LatencyMS: e.now().Sub(start).Milliseconds(),
 		TokensIn: call.TokensIn, TokensOut: call.TokensOut, TokensCached: call.TokensCached, CostUSD: call.CostUSD}
 	if err != nil {
@@ -204,10 +204,13 @@ func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, st
 
 	report.Model, report.Cached, report.Findings = call.Model, cached, make([]Evidence, len(found))
 	for i, f := range found {
-		report.Findings[i] = Evidence{Finding: f, Used: true}
+		report.Findings[i] = Evidence{Finding: f.Finding, Used: true}
 	}
 	if e.sifts(p) {
-		res.Answers = append(res.Answers, e.sift(ctx, state, report, res, o)...)
+		res.Answers = append(res.Answers, e.sift(ctx, state, report, found, res, o)...)
+	}
+	if !cached {
+		e.remember(ctx, key, found)
 	}
 	res.Research = report
 	out := judge.State{}
@@ -218,22 +221,32 @@ func (e *Engine) research(ctx context.Context, p *researchPlan, given Intake, st
 	return out, []judge.Answer{a}
 }
 
+// remembered is a finding as the cache keeps it: with how the judge typed it
+// and which judge that was, so checking the same idea again asks nothing the
+// judge has already answered. An entry written before sifting was remembered
+// has no relation, and is sifted as it always was.
+type remembered struct {
+	judge.Finding
+	Relation   string  `json:"relation,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	SiftedBy   string  `json:"sifted_by,omitempty"`
+}
+
 // findings returns cached findings when the same idea was researched recently,
-// else searches. Only a successful search is cached. The search reads the idea
-// with the extracted fields; it is remembered under the idea as the caller gave
-// it, because extraction words the same fact differently from run to run.
-func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, state judge.State, report *ResearchReport, o Options) ([]judge.Finding, judge.Research, bool, error) {
+// else searches. The search reads the idea with the extracted fields; it is
+// remembered under the idea as the caller gave it (key), because extraction
+// words the same fact differently from run to run.
+func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, state judge.State, report *ResearchReport, o Options) ([]remembered, string, judge.Research, bool, error) {
 	about := state.Sub([]string{ideaKey}) // who the person is has no bearing on what exists
 	key, err := e.cacheKey(p, given.State().Sub([]string{ideaKey}))
 	if err != nil {
-		return nil, judge.Research{}, false, err
+		return nil, "", judge.Research{}, false, err
 	}
-	ttl := e.Config.Research.CacheTTL
-	if e.Cache != nil && ttl > 0 {
+	if ttl := e.Config.Research.CacheTTL; e.Cache != nil && ttl > 0 {
 		if b, ok := e.Cache.Get(ctx, key, ttl); ok {
-			var found []judge.Finding
+			var found []remembered
 			if json.Unmarshal(b, &found) == nil {
-				return distinct(found), judge.Research{}, true, nil
+				return found, key, judge.Research{}, true, nil
 			}
 		}
 	}
@@ -247,15 +260,24 @@ func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, st
 		reported, call, err = e.ask(ctx, p, about)
 	}
 	if err != nil {
-		return nil, call, false, err
+		return nil, key, call, false, err
 	}
-	found := capped(distinct(reported), p.topics.MaxFindings)
-	if e.Cache != nil && ttl > 0 {
-		if b, err := json.Marshal(found); err == nil {
-			_ = e.Cache.Put(ctx, key, b) // a cache that cannot be written costs a search next time, nothing more
-		}
+	kept := capped(distinct(reported), p.topics.MaxFindings)
+	found := make([]remembered, len(kept))
+	for i, f := range kept {
+		found[i] = remembered{Finding: f}
 	}
-	return found, call, false, nil
+	return found, key, call, false, nil
+}
+
+// remember caches a successful search, typed as far as the sift got.
+func (e *Engine) remember(ctx context.Context, key string, found []remembered) {
+	if e.Cache == nil || e.Config.Research.CacheTTL <= 0 {
+		return
+	}
+	if b, err := json.Marshal(found); err == nil {
+		_ = e.Cache.Put(ctx, key, b) // a cache that cannot be written costs a search next time, nothing more
+	}
 }
 
 // ask leaves the whole lookup to the writer's own web tool.
@@ -336,18 +358,26 @@ func (e *Engine) sifts(p *researchPlan) bool {
 
 // sift asks the judge how each finding relates to the idea and marks the ones
 // the rubric says to drop. A finding the judge could not type is kept: a failed
-// question is not evidence that a finding is unrelated.
-func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchReport, res *Result, o Options) []judge.Answer {
+// question is not evidence that a finding is unrelated. A finding this judge
+// already typed with this rubric (a cached search) is not asked again, and
+// what is typed now is written back to found for the cache.
+func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchReport, found []remembered, res *Result, o Options) []judge.Answer {
 	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, rubric.EvidenceName)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "findings kept as reported: "+err.Error())
 		return nil
 	}
 	q := rb.Questions[0]
+	sifter := e.Judge.Name() + "/" + e.Config.Active().Model + "/" + rb.Hash
 	answers := make([]judge.Answer, len(report.Findings))
+	reused := make([]bool, len(report.Findings))
 	slots := make(chan struct{}, max(e.Config.MaxConcurrent(), 1))
 	var wg sync.WaitGroup
 	for i := range report.Findings {
+		if found[i].SiftedBy == sifter && found[i].Relation != "" {
+			answers[i], reused[i] = judge.Answer{Choice: found[i].Relation, Confidence: found[i].Confidence}, true
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -365,12 +395,17 @@ func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchRe
 	}
 	wg.Wait()
 	dropped := 0
+	var asked []judge.Answer
 	for i, a := range answers {
+		if !reused[i] {
+			asked = append(asked, a)
+		}
 		if a.Failed() {
 			continue
 		}
 		f := &report.Findings[i]
 		f.Relation, f.Confidence = a.Choice, a.Confidence
+		found[i].Relation, found[i].Confidence, found[i].SiftedBy = a.Choice, a.Confidence, sifter
 		if contains(rb.Drop, a.Choice) {
 			f.Used = false
 			dropped++
@@ -379,7 +414,7 @@ func (e *Engine) sift(ctx context.Context, state judge.State, report *ResearchRe
 	if dropped > 0 {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%d research finding(s) were judged %v and left out of the evidence; see research.findings", dropped, rb.Drop))
 	}
-	return answers
+	return asked
 }
 
 // fanoutAs asks one question and reports it to the live view as shown.

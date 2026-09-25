@@ -139,6 +139,44 @@ func TestResearchIsCachedPerIdea(t *testing.T) {
 	}
 }
 
+// How the judge typed a cached finding is cached with it; an entry from before
+// that was remembered carries no relation and is sifted as it always was.
+func TestSiftIsCachedWithTheFindings(t *testing.T) {
+	dir := t.TempDir()
+	findingsFixture(t, dir)
+	fixture(t, dir, "relation.2", judge.Answer{Choice: "unrelated", Confidence: 0.95})
+	e := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir})
+	e.Config.Research.Sift = config.SiftAlways
+	cache := &memCache{m: map[string][]byte{}}
+	e.Cache = cache
+	sifted := func(res *Result) (n int) {
+		for _, a := range res.Answers {
+			if strings.HasPrefix(a.ID, "relation.") {
+				n++
+			}
+		}
+		return n
+	}
+
+	first, _ := e.Check(context.Background(), idea, Options{Proceed: true})
+	second, _ := e.Check(context.Background(), idea, Options{Proceed: true})
+	if sifted(first) != 3 || sifted(second) != 0 || !second.Research.Cached {
+		t.Fatalf("sift questions = %d then %d, want 3 then none", sifted(first), sifted(second))
+	}
+	if f := second.Research.Findings; f[1].Relation != "unrelated" || f[1].Used || f[0].Relation == "" {
+		t.Errorf("cached findings = %+v, want the relations and the drop kept", f)
+	}
+
+	old, _ := json.Marshal(found) // an entry written before sifting was cached
+	for k := range cache.m {
+		cache.m[k] = old
+	}
+	third, _ := e.Check(context.Background(), idea, Options{Proceed: true})
+	if sifted(third) != 3 || third.Research.Findings[1].Used {
+		t.Errorf("an old cache entry: %d sift questions, findings %+v", sifted(third), third.Research.Findings)
+	}
+}
+
 // writer is a prose backend that cannot judge: Evaluate must never be called.
 type writer struct {
 	*mock.Judge

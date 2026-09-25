@@ -50,7 +50,8 @@ func TestJudgeCallsPerCheck(t *testing.T) {
 	e.Config.Research.Sift = config.SiftAlways
 	e.Cache = &memCache{m: map[string][]byte{}}
 	routed := Intake{Idea: "A to-do app for dentists", Fields: map[string]string{"problem": "front desks lose track of recalls", "audience": "small dental practices"}}
-	forced := routed.With("profile.skills", "Go and SvelteKit")
+	// Another idea, so its research is not the first one's cached.
+	forced := Intake{Idea: "A recall tracker for dentists", Fields: routed.Fields, Profile: map[string]string{"skills": "Go and SvelteKit"}}
 
 	cases := []struct {
 		name string
@@ -59,7 +60,7 @@ func TestJudgeCallsPerCheck(t *testing.T) {
 		want int64
 	}{
 		{"routed, researched and sifted", routed, Options{Proceed: true}, 13},
-		{"the same idea again, research cached", routed, Options{Proceed: true}, 13},
+		{"the same idea again, research cached", routed, Options{Proceed: true}, 9},
 		{"rubric forced, with a profile", forced, Options{Proceed: true, Rubric: "business"}, 26},
 	}
 	for _, c := range cases {
