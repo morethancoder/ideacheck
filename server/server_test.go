@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morethancoder/ideacheck/configs"
 	"github.com/morethancoder/ideacheck/ideacheck"
@@ -292,5 +293,38 @@ func TestFieldsCatalogue(t *testing.T) {
 	var f ideacheck.Fields
 	if code := getJSON(t, srv.URL+"/v1/fields", &f); code != 200 || len(f.Idea) == 0 || f.Idea[0].Name == "" {
 		t.Errorf("fields = %d %+v", code, f)
+	}
+}
+
+// slow holds every check until release is closed.
+type slow struct{ release chan struct{} }
+
+func (s slow) Check(ctx context.Context, _ ideacheck.Intake, o ideacheck.CheckOptions) (*ideacheck.Result, error) {
+	<-s.release
+	return &ideacheck.Result{ID: o.ID, Status: ideacheck.StatusOK}, nil
+}
+
+// A quiet check still sends bytes, so a proxy that drops idle connections
+// does not cut the stream before the result.
+func TestQuietStreamsKeepAlive(t *testing.T) {
+	held := slow{release: make(chan struct{})}
+	srv := newServer(t, func(s *Server) { s.Engine = held; s.KeepAlive = 10 * time.Millisecond })
+	res, _ := http.Post(srv.URL+"/v1/check?async=1", "application/json", strings.NewReader(`{"idea":"A puzzle game"}`))
+	var accepted struct{ Events string }
+	_ = json.NewDecoder(res.Body).Decode(&accepted)
+	res.Body.Close()
+	stream, err := http.Get(srv.URL + accepted.Events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	sc := bufio.NewScanner(stream.Body)
+	for sc.Scan() && sc.Text() != ": keep-alive" {
+	}
+	close(held.release)
+	for sc.Scan() && sc.Text() != "event: result" {
+	}
+	if sc.Text() != "event: result" {
+		t.Error("the stream ended without its result after keep-alives")
 	}
 }

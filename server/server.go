@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/rubric"
@@ -55,6 +56,10 @@ type Server struct {
 	Meter func(ctx context.Context, tenant string) (settle func(*ideacheck.Result, error), err error)
 	// Mount adds a host's own routes to the mux, behind the same Auth.
 	Mount func(*http.ServeMux)
+	// KeepAlive is how often an event stream with nothing to say sends an SSE
+	// comment, so a proxy that drops idle connections (research can be quiet
+	// for a minute) keeps it open; 0 = 15s.
+	KeepAlive time.Duration
 
 	runs *registry
 }
@@ -240,6 +245,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	wake, unsubscribe := live.subscribe()
 	defer unsubscribe()
+	keepAlive := s.KeepAlive
+	if keepAlive <= 0 {
+		keepAlive = 15 * time.Second
+	}
+	tick := time.NewTicker(keepAlive)
+	defer tick.Stop()
 	sent := 0
 	for {
 		batch, res, err, done := live.since(sent)
@@ -259,6 +270,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 		select {
 		case <-wake:
+		case <-tick.C:
+			fmt.Fprint(w, ": keep-alive\n\n")
 		case <-r.Context().Done():
 			return
 		}
