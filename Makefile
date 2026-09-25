@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help doctor setup dev build install run serve up down test race lint core fmt tidy bench dry dump schema release clean
+.PHONY: help doctor setup dev build install run serve api up down test race lint core fmt tidy bench dry dump schema release deploy clean
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "; printf "\n\033[1mUsage:\033[0m make \033[36m<target>\033[0m\n\n\033[1mTargets:\033[0m\n"} \
@@ -26,6 +26,9 @@ run: build ## check an idea: make run ARGS='"my idea" -b mock'
 
 serve: build ## run the local HTTP API
 	@bash scripts/exec.sh serve $(ARGS)
+
+api: ## run the Sparkjudge hosted API locally: mock judge, no App Attest
+	@bash scripts/api.sh $(ARGS)
 
 up: build ## start a local SearXNG in docker, so research can search the web
 	@bash scripts/exec.sh search up
@@ -65,6 +68,9 @@ schema: ## regenerate schemas/check_result.schema.json from the Go types
 
 release: ## tag a version; github actions builds and publishes it
 	@bash scripts/release.sh $(ARGS)
+
+deploy: ## deploy the Sparkjudge hosted API to Fly.io (needs the app, volume and secrets first)
+	@bash scripts/deploy.sh $(ARGS)
 
 clean: ## remove build output and bench results
 	@rm -rf bin bench/results/*.json bench/results/*.csv
