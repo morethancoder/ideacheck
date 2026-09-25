@@ -131,6 +131,35 @@ SparkjudgeTests/  Swift Testing; Fixtures/check_result_mock.json is a real engin
   stays. "Start an idea" (or a prompt's "Answer this") opens Review with a draft
   that remembers the trend.
 
+## Sparkjudge Cloud and Pro
+
+| Paywall | Plan in Settings | Quota used |
+|---|---|---|
+| ![](screenshots/paywall.png) | ![](screenshots/settings-plan.png) | ![](screenshots/quota.png) |
+
+- **Hosted checks** go to the hosted API (`docs/sparkjudge-api.md`) through
+  `SparkjudgeAPI`, an actor that sends one request at a time. The user id is a
+  UUID in the Keychain (also RevenueCat's `appUserID`). With App Attest it
+  attests a key once, then signs `METHOD\nPATH?QUERY\nhex(SHA256(body))` on every
+  request; `stale_assertion` is re-signed once, `unknown_key` re-attested once.
+  A Debug build talking to a dev server (`make api`, attest off) sends the user
+  id alone; Release always attests. The URL is `SPARKJUDGE_API_URL` in
+  `project.yml` (Debug: `http://127.0.0.1:8787`); Debug can override it in
+  Settings → Developer.
+- **Pro** is RevenueCat's `pro` entitlement, cached, or `/v1/me` saying `pro`.
+  Put the SDK key in `Config/Secrets.xcconfig` (`REVENUECAT_API_KEY = appl_…`,
+  git-ignored). Without it the paywall lists StoreKit's products
+  (`StoreKit/Sparkjudge.storekit`, attached to the scheme's Run action) and says
+  purchases are not connected.
+- **On a device** you need a team id, the App Attest capability on the App ID
+  (Release signs with `Sparkjudge.entitlements`, environment `production`), the
+  RevenueCat key and products `com.morethancoder.sparkjudge.pro.monthly|yearly`
+  in an offering.
+- Debug-only launch arguments: `-sjPaywall quota|cloud|styles|browse`,
+  `-sjDemoPlans YES` (sample plans outside Xcode), `-sjHostedChecks N` (check the
+  N newest ideas; with `make api` running, `-sjSeed YES -sjHostedChecks 4` shows
+  the free quota running out).
+
 ## Launch arguments
 
 Launch arguments come in through UserDefaults' argument domain, so any settings
