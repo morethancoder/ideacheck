@@ -416,6 +416,9 @@ intake can carry, from `fields.yaml`), `GET /v1/healthz`. An error is
 matching HTTP status. CORS is allowed for localhost origins only. Binds to
 127.0.0.1 by default.
 
+The same API, hosted for the Sparkjudge iOS app with App Attest, plans and
+quotas, is `cmd/sparkjudge-api`: see [docs/sparkjudge-api.md](docs/sparkjudge-api.md).
+
 ## Benchmarking
 
 `ideacheck bench -b structured,logprob -n 3` runs `bench/ideas.jsonl` (25 labelled

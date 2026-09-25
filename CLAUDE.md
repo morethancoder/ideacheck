@@ -37,6 +37,7 @@ Corollary: to change behaviour, first ask whether the change belongs in
 | Human | `ideacheck` / `ideacheck "idea"` | bubbletea TUI (`internal/tui`) |
 | Agent | `ideacheck --agent --answer problem=… ` or `ideacheck idea.md --agent` | JSON on stdout, logs on stderr, exit code carries the status |
 | Server | `ideacheck serve` | same JSON over HTTP (`server`) |
+| Hosted | `sparkjudge-api` (Fly.io) | the same HTTP API for the Sparkjudge iOS app, per user, behind App Attest and quotas (`docs/sparkjudge-api.md`) |
 
 All three call `ideacheck.Engine.Check`. Nothing in package `ideacheck` knows
 about a terminal, a process or a config file — see "Using the core from another
@@ -100,6 +101,8 @@ Android.
 
 ```
 cmd/ideacheck/         main; cmd/schemagen writes schemas/
+cmd/sparkjudge-api/    the hosted API for the iOS app: server + internal/sparkjudge,
+                       engine built from sparkjudge.yaml's engine: layer
 ideacheck/             THE CORE (package ideacheck): Engine, New(Options), Check(ctx,
                        Intake, CheckOptions), Settings, Result, Event — the stages above
 judge/                 the ONE interface all model access goes through + fanout,
@@ -111,14 +114,20 @@ rubric/                YAML load, validate, hash; verdict gates
 prompt/                text/template loading of configs/prompts/*
 search/                the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
                        page reader (public addresses only) that boils HTML down to text
-store/                 SQLite history (modernc.org/sqlite, pure Go) and FindingsCache,
-                       the research cache over it
-server/                HTTP API + SSE; takes any Store, logs through slog, and has an Auth
-                       hook (unset = the local API) for a hosted one
+store/                 SQLite history (modernc.org/sqlite, pure Go), each check with an
+                       owner (store.Local = this machine; a migration adds the column),
+                       and FindingsCache, the research cache over it
+server/                HTTP API + SSE; takes any Store (owner-scoped), logs through slog.
+                       Hooks for a hosted API: Auth (names the tenant that owns every
+                       check, registry run and list), Meter (may refuse a check before it
+                       runs; told how it ended), Mount (extra routes behind Auth).
+                       Errors are {"status","error":code,"message"}; *server.Error sets both
 configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-embedded
                        reader. Kept at this path (not defaults/): it is what CLAUDE.md,
                        README and every "lives in configs/" rule name
   config.yaml          backends, pricing, setup wizard choices
+  sparkjudge.yaml      the hosted API: attest mode, plans, limits, spend cap, and an
+                       engine: section layered over config.yaml (Jev + OpenRouter writer)
   fields.yaml          what a caller can send about an idea, and what each field means
   research.yaml        what the writer looks up on the web, and which gap each topic covers
   searxng/settings.yml the SearXNG `ideacheck search up` runs in Docker: the defaults + JSON output
@@ -126,8 +135,8 @@ configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-e
   prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
 internal/              desktop only
   cli/                 cobra commands and flags. check.go is the default action
-  config/              koanf: flags > env IDEACHECK_* > user dir > embedded;
-                       Config.Settings() is what the core runs with
+  config/              koanf: flags > env IDEACHECK_* > LoadOptions.Layers > user dir >
+                       embedded; Config.Settings() is what the core runs with
   backends/            the registry: config → judge, for -b and setup
   judge/               backends that start processes: laya (Jev's wire format over an
                        embedded Python worker running laya-mlx locally; one process per
@@ -140,6 +149,13 @@ internal/              desktop only
   selfupdate/          daily release check, verified self-replace
   logging/             zerolog to stderr, always; Slog bridges log/slog into it
   schema/              the JSON schema of Result
+  sparkjudge/          the hosted API's own part: App Attest (Verifier, over
+                       takimoto3/app-attest; Apple's root embedded, injectable in tests),
+                       Accounts (SQLite now, an interface Postgres can take over): keys,
+                       challenges, RevenueCat entitlements, the monthly ledger, daily
+                       spend; Meter, rate limits, /v1/me and the RevenueCat webhook
+docs/                  sparkjudge-api.md: routes, auth flow, quotas, env, deploy
+Dockerfile, fly.toml   the hosted API's image and Fly app (make deploy; deploy/sparkjudge/)
 schemas/               check_result.schema.json, generated from the Go types
 scripts/               bash for every non-trivial make target
 ```
@@ -202,7 +218,8 @@ res, err := engine.Check(ctx, ideacheck.Intake{Idea: "a to-do app for dentists"}
 The rest is optional ports on `Options`: `Writer` (a backend that can write —
 extract, research, explain), `Search` + `Pages` (`search.New`,
 `search.NewReader`), `Cache` (`store.FindingsCache`). Saving is the host's job
-(`store.Open(…).Save`). `server.Server` is the HTTP face of the same engine. A
+(`store.Open(…).Save(ctx, store.Local, …)`: every check has an owner, `""` on
+this machine). `server.Server` is the HTTP face of the same engine. A
 result's `config_hash` is `Settings.Hash`, or a hash of the Settings when the
 host leaves it empty; the CLI's is `Config.Hash()`, pinned by a test in
 `internal/config` because history and bench baselines compare it.
@@ -298,7 +315,13 @@ make run ARGS='"an idea" -b mock'      # no model needed
 make dev        # build + open the TUI
 make schema     # regenerate schemas/check_result.schema.json from the Go types
 make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so research searches for real; make down removes it
+make api        # the Sparkjudge hosted API on 127.0.0.1:8787: mock judge, attest off, X-App-User-Id alone
+make deploy     # fly deploy of the hosted API; checks login, app and secrets first, creates nothing
 ```
+
+- The hosted API's tests (`internal/sparkjudge`) play the device: a test root CA,
+  intermediate and credential certificate, hand-encoded CBOR attestation and
+  assertion objects (`device_test.go`). No test reaches Apple, RevenueCat or Fly.
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list
   of findings), so offline runs and old tests are unchanged; `bench` never researches.
