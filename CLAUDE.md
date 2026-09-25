@@ -122,6 +122,11 @@ server/                HTTP API + SSE; takes any Store (owner-scoped), logs thro
                        check, registry run and list), Meter (may refuse a check before it
                        runs; told how it ended), Mount (extra routes behind Auth).
                        Errors are {"status","error":code,"message"}; *server.Error sets both
+mobile/                package sparkcore: the core as a gomobile library (make mobile →
+                       build/Sparkcore.xcframework) for the Sparkjudge iOS app
+  swift/               FoundationJudge/FoundationWriter (Apple's on-device model) and
+                       the throwing Swift overloads; the app compiles these in
+  swiftcheck/          xcodegen test bundle: the proof it runs in an iOS process
 configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-embedded
                        reader. Kept at this path (not defaults/): it is what CLAUDE.md,
                        README and every "lives in configs/" rule name
@@ -223,6 +228,30 @@ this machine). `server.Server` is the HTTP face of the same engine. A
 result's `config_hash` is `Settings.Hash`, or a hash of the Settings when the
 host leaves it empty; the CLI's is `Config.Hash()`, pinned by a test in
 `internal/config` because history and bench baselines compare it.
+
+### Mobile (`mobile/`, package `sparkcore`)
+
+The iOS app runs the whole check on the phone: `sparkcore` wraps `ideacheck` in
+what gomobile can carry — strings (JSON), numbers, errors and interfaces of
+those. The app implements `Judge` (and optionally `Writer`) in Swift; Go renders
+the prompts from `configs/` and sends them in each request, so no prompt lives
+in Swift. `Engine.Prepare(intake, options)` → `Check.Run(listener)` /
+`Check.Cancel()`; `Fields()` and `Rubrics()` feed the app's forms. No research,
+no store: evidence questions are skipped, the app keeps its own history.
+
+- Every exported call recovers panics into errors: a Go panic kills the app. A
+  Swift call cannot be interrupted, so on cancel or timeout Go stops waiting
+  and drops its answer.
+- A gomobile `(string, error)` is not `throws` in Swift (non-null NSString +
+  NSError pointer): protocol methods take `error: NSErrorPointer`
+  (`sparkcoreCatching` adapts), and `mobile/swift/Sparkcore+Throws.swift` gives
+  the calls a throwing shape.
+- The judge's `Name()` picks the verdict cuts (`verdict.backends.<name>`); the
+  on-device judge is `foundation` and has none yet — tune them on bench, do not
+  guess. It answers with one greedy pick, so run it with `max_concurrent: 1`.
+- The bind runs from a throwaway module in `build/bind` that requires
+  `golang.org/x/mobile`: in go.mod it would drag x/net and x/tools forward for
+  the CLI, and gomobile cannot bind inside a go.work.
 
 ## Writing rubric questions (`rubric.Validate` enforces most of it)
 

@@ -429,7 +429,7 @@ and CSV; `bench --compare a.json b.json` diffs two runs.
 
 ## Development
 
-`make` lists targets: `dev build install run serve test race lint core fmt tidy bench dry dump schema release doctor setup clean`.
+`make` lists targets: `dev build install run serve test race lint core mobile fmt tidy bench dry dump schema release doctor setup clean`.
 Prompt changes are pinned by golden files: `go test ./prompt -update`.
 
 The check itself is an importable Go package, `github.com/morethancoder/ideacheck/ideacheck`,
@@ -437,6 +437,13 @@ with the judges, rubrics, prompts, search, history store and HTTP server beside 
 the CLI and the app are shells around it. `make core` checks those packages stay
 free of anything desktop-only and build for iOS and Android. CLAUDE.md has a
 minimal example of running a check from another program.
+
+`make mobile` builds `build/Sparkcore.xcframework` with gomobile (Xcode needed;
+it installs the pinned gomobile into `build/bin`): the whole check for an iOS
+app, with the models supplied in Swift. `mobile/swift/` holds a judge and a
+writer on Apple's on-device Foundation Model; `make mobile ARGS=test` runs the
+Swift proof in `mobile/swiftcheck/` on the simulator (`SIMULATOR='iPhone 17'`
+picks another; needs `brew install xcodegen`).
 
 ### Cutting a release
 
