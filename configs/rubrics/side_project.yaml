@@ -17,7 +17,8 @@ questions:
     weight: 1.5
     polarity: 1
     uses: [idea, profile]
-    instructions: How useful would the finished thing be to the person building it?
+    requires: [profile]
+    instructions: How useful would the finished thing be to the person in `profile`, who would build it?
     levels:
       - No stated personal use for it
       - Occasionally handy
@@ -28,13 +29,15 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea, profile]
-    instructions: The person would use the finished thing at least once a week.
+    requires: [profile]
+    instructions: The person in `profile` would use the finished thing at least once a week.
   - id: learning_value
     kind: score
     weight: 1.0
     polarity: 1
     uses: [idea, profile]
-    instructions: How much would building this teach the person something they want to learn?
+    requires: [profile]
+    instructions: How much would building this teach the person in `profile` something they want to learn?
     levels:
       - Nothing new; entirely familiar skills
       - Some new techniques at the edges
@@ -62,7 +65,8 @@ questions:
     weight: 0.5
     polarity: 1
     uses: [idea, profile]
-    instructions: This is a kind of project the person has not built before.
+    requires: [profile]
+    instructions: This is a kind of project the person in `profile` has not built before.
   - id: existing_tool_suffices
     kind: noul
     weight: 1.0

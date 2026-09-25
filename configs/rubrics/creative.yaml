@@ -56,7 +56,8 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea, profile]
-    instructions: The person shows a personal reason to make this particular work beyond it being marketable.
+    requires: [profile]
+    instructions: The person in `profile` shows a personal reason to make this particular work beyond it being marketable.
   - id: craft_fit
     kind: score
     weight: 1.0

@@ -118,9 +118,9 @@ func TestEventsStreamProgressThenResult(t *testing.T) {
 			}
 		}
 	}
-	// 7 gaps (the rubric is forced, so no router) + the 5 creative questions
+	// 7 gaps (the rubric is forced, so no router) + the 4 creative questions
 	// that need no profile + the summary, each started + answered.
-	if counts["progress"] != 26 || counts["result"] != 1 || final.ID != accepted.ID || final.Verdict == "" {
+	if counts["progress"] != 24 || counts["result"] != 1 || final.ID != accepted.ID || final.Verdict == "" {
 		t.Errorf("events = %v final = %+v", counts, final)
 	}
 	if code := getJSON(t, srv.URL+"/v1/checks/chk_nope/events", &struct{}{}); code != 404 {
