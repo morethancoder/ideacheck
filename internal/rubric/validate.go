@@ -58,6 +58,37 @@ func validateQuestion(q judge.Question) []error {
 	errs = append(errs, validateWeight(q)...)
 	errs = append(errs, validateUses(q.Uses)...)
 	errs = append(errs, validateRequires(q)...)
+	errs = append(errs, validateDerive(q)...)
+	return errs
+}
+
+// validateDerive: one rule, on a noul, reading evidence the question reads.
+// What the rule names in other files (gap ids, intake fields, relations) is
+// checked by the pipeline, which loads those files.
+func validateDerive(q judge.Question) []error {
+	d := q.Derive
+	if d == nil {
+		return nil
+	}
+	var errs []error
+	if d.Rules() != 1 {
+		errs = append(errs, fmt.Errorf("derive sets %d rules, want exactly one of present, same_as, evidence, zero_when_unstated", d.Rules()))
+	}
+	if q.Kind != judge.Noul {
+		errs = append(errs, errors.New("derive answers nouls only"))
+	}
+	for _, f := range d.Present {
+		if f == "" {
+			errs = append(errs, errors.New("derive present lists an empty field"))
+		}
+	}
+	if ev := d.Evidence; ev != nil {
+		if ev.Topic == "" || ev.Relation == "" {
+			errs = append(errs, errors.New("derive evidence needs topic and relation"))
+		} else if !contains(q.Uses, "evidence") && !contains(q.Uses, evidencePrefix+ev.Topic) {
+			errs = append(errs, fmt.Errorf("derive reads evidence.%s but the question does not use it", ev.Topic))
+		}
+	}
 	return errs
 }
 
@@ -212,6 +243,10 @@ func (rb *Rubric) validateGaps() error {
 		}
 		if q.Ask == "" || q.Fills == "" {
 			return fmt.Errorf("%s: gap questions must set ask and fills", q.ID)
+		}
+		// Gaps are asked first: nothing else is known yet to derive from.
+		if r := q.Derive.Rule(); r != "" && r != "present" {
+			return fmt.Errorf("%s: a gap question can derive only from present fields, not %s", q.ID, r)
 		}
 	}
 	return nil

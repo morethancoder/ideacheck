@@ -393,6 +393,11 @@ expressions may only reference real question ids. Gates see **normalized** value
 
 - A `noul` may carry `criteria: {yes: …, no: …}` saying where the line between yes
   and no falls. Every backend sees it (Jev and Laya as their native `criteria`).
+- A `noul` may carry one `derive:` rule that answers it without a model call when
+  plain code can: `present: [fields]`, `same_as: <gap id>`, `evidence: {topic,
+  relation}` or `zero_when_unstated: <field>`. When the rule cannot decide, the
+  judge is asked. A derived answer's method is `derived`, and its dimension says
+  which rule answered it.
 - `verdict.backends.<name>` replaces the gates, `thresholds` or `min_confidence`
   for one backend. Probabilities from different backends are not on one scale:
   Jev's and Laya's are calibrated, while vote counts come in steps of 1/k. Tune a

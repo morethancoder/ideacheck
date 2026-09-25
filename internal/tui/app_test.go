@@ -162,7 +162,7 @@ func TestCheckFlowAsksOnceThenShowsAndSavesTheResult(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "has_why_now.json"), []byte(`{"noul":0.2}`), 0o644)
 	h := &fakeHost{t: t, fixtures: dir}
-	a := newApp(h, Start{Page: pageLive, Intake: pipeline.Intake{Idea: "A payroll tool"}, Options: pipeline.Options{Rubric: "business"}})
+	a := newApp(h, Start{Page: pageLive, Intake: pipeline.Intake{Idea: "A payroll tool", Profile: map[string]string{"background": "ran payroll at a restaurant"}}, Options: pipeline.Options{Rubric: "business"}})
 
 	pump(t, a, a.Init(), pageLive)
 	if a.page != pageAsk || len(a.missing) != 1 || a.missing[0].ID != "has_why_now" || len(h.persists) != 0 {

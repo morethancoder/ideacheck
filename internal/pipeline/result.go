@@ -106,4 +106,7 @@ type Dimension struct {
 	Polarity   int      `json:"polarity"`
 	Confidence float64  `json:"confidence"`
 	Error      string   `json:"error,omitempty"`
+	// Derived names the rubric's derive rule that answered this without the
+	// judge (present, same_as, evidence, zero_when_unstated); "" = the judge did.
+	Derived string `json:"derived,omitempty"`
 }

@@ -39,6 +39,9 @@ questions:
     weight: 1.0
     polarity: 1
     uses: [idea]
+    # The same judgment the gaps already asked of the same description.
+    derive:
+      same_as: has_audience
     instructions: The description in `idea` names who this work is for.
   - id: scope_realism
     kind: score

@@ -151,8 +151,8 @@ works. For the `structured` family, searching is a provider capability:
 Question kinds: `noul` (probability a statement is true, with optional
 `criteria: {yes, no}` for the boundary), `score` (ordered levels), `choice` (named
 options). Rubric-only metadata on a question: `weight`, `polarity` (+1
-good-when-high, −1 bad-when-high, 0 informational), `uses`, `requires`, and for
-`_gaps.yaml` only `ask`/`fills`. A rubric's `verdict.backends.<name>` overrides
+good-when-high, −1 bad-when-high, 0 informational), `uses`, `requires`, `derive`
+(below), and for `_gaps.yaml` only `ask`/`fills`. A rubric's `verdict.backends.<name>` overrides
 gates/thresholds/min_confidence for one backend: cuts are tuned per backend on
 `bench`, never carried across. Composite confidence averages choice and score
 answers only — a noul is a probability, not a doubt.
@@ -171,6 +171,24 @@ sifted (`requires: [evidence]` is met by any topic read); name the state
 the question reads (`idea`, `profile`, `evidence.competitors`) — Jev reads literally; gate expressions may
 reference real question ids only, and see normalized values in [0,1]. After
 changing a question, `make bench ARGS='-b jev'` and compare (`bench --compare`).
+
+Only what simple code cannot decide goes to the judge. A noul may carry one
+`derive:` rule that answers it without a model call when it can, and asks the
+judge as usual when it cannot:
+
+- `present: [profile.skills, …]` — 1 when any of these intake fields is filled, else 0
+  (the only rule a `_gaps.yaml` question may use: nothing else is known yet);
+- `same_as: <gap id>` — the answer the judge gave that gap question in this check;
+- `evidence: {topic, relation}` — 1 when a finding in the topic was sifted with that
+  relation, 0 when every finding in it was sifted otherwise (or none was found);
+  the question must read that topic;
+- `zero_when_unstated: <field>` — 0 when the field is empty and its gap question
+  found it unstated; for a question whose `no` criteria say "states none".
+
+`requires:` is checked first, so a derived question is still skipped without its
+state. A derived answer has method `derived`, its dimension names the rule
+(`derived`), and it counts toward the composite like any other. Names a rule
+points at in other files are checked when the rubric loads (`derivable`).
 
 ## Look and feel
 

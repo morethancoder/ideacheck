@@ -78,6 +78,10 @@ questions:
     weight: 0
     polarity: 0
     uses: [idea, evidence.competitors]
+    # The judge already typed each competitor it found: one that addresses the
+    # same problem for the same audience is this question's yes.
+    derive:
+      evidence: {topic: competitors, relation: direct}
     instructions: Products or services already exist that address substantially the same problem for the same audience. When `evidence` is present, `evidence.competitors` lists what a web search found, and an empty list means it found none.
     criteria:
       yes: At least one existing product or service already does this job for this audience, even imperfectly.
@@ -99,6 +103,9 @@ questions:
     # Whether the claimed difference survives contact with what already exists
     # can only be judged against a list of what exists.
     requires: [evidence]
+    # No difference claimed is a "no" by the criteria below.
+    derive:
+      zero_when_unstated: differentiation
     instructions: None of the products listed in `evidence.competitors` already offers what the description in `idea` claims as its difference.
     criteria:
       yes: The description claims a specific difference, and no product listed in `evidence.competitors` is described as already offering it.
@@ -120,6 +127,9 @@ questions:
     polarity: 1
     uses: [idea, evidence.recent_changes]
     requires: [evidence]
+    # No reason given is a "no" by the criteria below.
+    derive:
+      zero_when_unstated: why_now
     instructions: A change listed in `evidence.recent_changes` supports the reason the description in `idea` gives for why this is possible or needed now.
     criteria:
       yes: The description gives a reason, and a change listed in `evidence.recent_changes` is that same change or directly supports it.

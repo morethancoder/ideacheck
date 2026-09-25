@@ -33,6 +33,58 @@ type Question struct {
 	Ask      string             `yaml:"ask,omitempty" json:"ask,omitempty"`           // gaps only: follow-up question shown to the user
 	Fills    string             `yaml:"fills,omitempty" json:"fills,omitempty"`       // gaps only: intake field the follow-up reply is stored in
 	Values   map[string]float64 `yaml:"values,omitempty" json:"values,omitempty"`     // choice only: option key -> value in [0,1] for aggregation
+	Derive   *Derive            `yaml:"derive,omitempty" json:"derive,omitempty"`     // noul only: answer without the judge when this rule can
+}
+
+// Derive answers a noul from what the check already knows, so a judgment
+// simple code can make never costs a model call. The rule is config; Go only
+// runs it. Exactly one field is set. When the rule cannot decide, the judge is
+// asked as usual.
+type Derive struct {
+	// Present is 1 when any of these intake fields ("profile.skills") has a value, else 0.
+	Present []string `yaml:"present,omitempty" json:"present,omitempty"`
+	// SameAs reuses the answer the judge gave that gap question in this check.
+	SameAs string `yaml:"same_as,omitempty" json:"same_as,omitempty"`
+	// Evidence is 1 when a finding in the topic was typed with the relation,
+	// and 0 when the topic was searched and every finding in it typed otherwise.
+	Evidence *EvidenceRule `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+	// ZeroWhenUnstated is 0 when this intake field is empty and its gap
+	// question found the description does not state it either.
+	ZeroWhenUnstated string `yaml:"zero_when_unstated,omitempty" json:"zero_when_unstated,omitempty"`
+}
+
+// EvidenceRule names a research topic and a relation from rubrics/_evidence.yaml.
+type EvidenceRule struct {
+	Topic    string `yaml:"topic" json:"topic"`
+	Relation string `yaml:"relation" json:"relation"`
+}
+
+// Rule names the one rule set, "" for none.
+func (d *Derive) Rule() string {
+	switch {
+	case d == nil:
+		return ""
+	case len(d.Present) > 0:
+		return "present"
+	case d.SameAs != "":
+		return "same_as"
+	case d.Evidence != nil:
+		return "evidence"
+	case d.ZeroWhenUnstated != "":
+		return "zero_when_unstated"
+	}
+	return ""
+}
+
+// Rules counts the rules set; a valid Derive sets exactly one.
+func (d *Derive) Rules() int {
+	n := 0
+	for _, set := range []bool{len(d.Present) > 0, d.SameAs != "", d.Evidence != nil, d.ZeroWhenUnstated != ""} {
+		if set {
+			n++
+		}
+	}
+	return n
 }
 
 // NoulCriteria says what counts as a yes and what counts as a no, for a noul

@@ -48,7 +48,13 @@ func fixture(t *testing.T, dir, id string, a judge.Answer) {
 	}
 }
 
-var idea = Intake{Idea: "A CLI that scores startup ideas"}
+var (
+	// idea states a background, so the founder-context gap is settled and only
+	// the gaps a test sets up can stop a check.
+	idea = Intake{Idea: "A CLI that scores startup ideas", Profile: map[string]string{"background": "ten years in payroll software"}}
+	// bare says nothing about the person.
+	bare = Intake{Idea: "A CLI that scores startup ideas"}
+)
 
 func TestCheckEndToEnd(t *testing.T) {
 	dir := t.TempDir()
@@ -63,8 +69,8 @@ func TestCheckEndToEnd(t *testing.T) {
 	if res.IdeaType == nil || res.IdeaType.Choice != "business" || res.IdeaType.Confidence != 0.91 {
 		t.Errorf("idea_type = %+v", res.IdeaType)
 	}
-	if len(res.Answers) != 7+1+17 {
-		t.Errorf("answers = %d, want 7 gaps + 1 router + 17 business", len(res.Answers))
+	if len(res.Answers) != 6+1+17 {
+		t.Errorf("answers = %d, want 6 gaps (the background is given) + 1 router + 17 business", len(res.Answers))
 	}
 	if res.Composite <= 0 || res.Composite >= 1 || res.Verdict == "" || res.VerdictReason == "" {
 		t.Errorf("composite=%v verdict=%q reason=%q", res.Composite, res.Verdict, res.VerdictReason)
@@ -272,7 +278,7 @@ func TestEventsCarryQuestionStageAndValue(t *testing.T) {
 	fixture(t, dir, "idea_type", judge.Answer{Choice: "business", Confidence: 0.9})
 	fixture(t, dir, "problem_acuity", judge.Answer{Score: 1.5})
 	ch := make(chan Event, 128)
-	if _, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), idea, Options{Events: ch}); err != nil {
+	if _, err := engine(t, &mock.Judge{Seed: 1, FixturesDir: dir}).Check(context.Background(), bare, Options{Events: ch, Proceed: true}); err != nil {
 		t.Fatal(err)
 	}
 	close(ch)
@@ -286,8 +292,9 @@ func TestEventsCarryQuestionStageAndValue(t *testing.T) {
 			acuity = &e
 		}
 	}
-	// 13 of the business rubric's 15: founder_market_fit and personal_want
-	// require a profile, and this idea has none, so they are never asked.
+	// 7 gaps (founder context derived, not asked, but shown) + the router; 13
+	// of the business rubric's 17: founder_market_fit and personal_want require
+	// a profile, and this idea has none, and two more require research.
 	if stages[StagePreflight] != 8 || stages[StageScore] != 13 {
 		t.Errorf("answered per stage = %v, want preflight 8, score 13", stages)
 	}
@@ -347,7 +354,7 @@ func TestFindingsPutTheBiggestPullFirstInPlainWords(t *testing.T) {
 // guessed: its weight goes to the questions that could be answered.
 func TestQuestionsRequiringAProfileAreNotGuessed(t *testing.T) {
 	e := engine(t, &mock.Judge{Seed: 1})
-	res, err := e.Check(context.Background(), idea, Options{Rubric: "business", Proceed: true})
+	res, err := e.Check(context.Background(), bare, Options{Rubric: "business", Proceed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +365,7 @@ func TestQuestionsRequiringAProfileAreNotGuessed(t *testing.T) {
 	if res.Verdict == "" || res.Composite == 0 {
 		t.Errorf("one unscored dimension must not stop the verdict: %+v", res)
 	}
-	withProfile := idea.With("profile.background", "ten years in payroll software")
+	withProfile := bare.With("profile.background", "ten years in payroll software")
 	res, err = e.Check(context.Background(), withProfile, Options{Rubric: "business", Proceed: true})
 	if err != nil {
 		t.Fatal(err)

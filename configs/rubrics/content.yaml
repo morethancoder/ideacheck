@@ -67,6 +67,10 @@ questions:
     # Whether the angle is really unoccupied can only be judged against a list
     # of what is already published.
     requires: [evidence]
+    # No angle claimed is a "no" by the criteria below; a content idea's angle
+    # is what the gaps call its differentiation.
+    derive:
+      zero_when_unstated: differentiation
     instructions: Nothing listed in `evidence.competitors` already offers the angle or format the description in `idea` claims as its own.
     criteria:
       yes: The description claims a specific angle or format, and nothing listed in `evidence.competitors` is described as already offering it.

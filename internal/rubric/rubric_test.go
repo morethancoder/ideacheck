@@ -78,6 +78,9 @@ func TestValidationRejectsBrokenRubrics(t *testing.T) {
 		{"weight without polarity", q("    kind: noul\n    weight: 1\n"), "polarity"},
 		{"bad polarity", q("    kind: noul\n    weight: 1\n    polarity: 2\n"), "polarity"},
 		{"unknown state field", "questions:\n  - id: a\n    kind: noul\n    instructions: x\n    weight: 1\n    polarity: 1\n    uses: [secrets]\n" + scoringTail, "uses"},
+		{"derive with two rules", q("    kind: noul\n    weight: 1\n    polarity: 1\n    derive: {same_as: g, zero_when_unstated: why_now}\n"), "exactly one"},
+		{"derive on a score", q("    kind: score\n    weight: 1\n    polarity: 1\n    levels: [a, b]\n    derive: {same_as: g}\n"), "nouls only"},
+		{"derive from evidence not read", q("    kind: noul\n    weight: 1\n    polarity: 1\n    derive: {evidence: {topic: market, relation: direct}}\n"), "does not use it"},
 		{"evidence without a topic", "questions:\n  - {id: a, kind: noul, instructions: x, weight: 1, polarity: 1, uses: [idea, evidence.]}\n" + scoringTail, "one research topic"},
 		{"requires a field it reads no part of", "questions:\n  - {id: a, kind: noul, instructions: x, weight: 1, polarity: 1, uses: [idea], requires: [evidence]}\n" + scoringTail, "does not use"},
 		{"no uses", "questions:\n  - id: a\n    kind: noul\n    instructions: x\n    weight: 1\n    polarity: 1\n" + scoringTail, "uses"},
@@ -111,6 +114,9 @@ func TestRoleSpecificRules(t *testing.T) {
 	}
 	if err := load(t, GapsName, "threshold: 0.5\nquestions:\n  - {id: g, kind: noul, instructions: x, uses: [idea], ask: q, fills: problem}\n"); err != nil {
 		t.Errorf("valid gaps: %v", err)
+	}
+	if err := load(t, GapsName, "threshold: 0.5\nquestions:\n  - {id: g, kind: noul, instructions: x, uses: [idea], ask: q, fills: problem, derive: {same_as: h}}\n"); err == nil || !strings.Contains(err.Error(), "present") {
+		t.Errorf("gap deriving from another answer: %v", err)
 	}
 	if err := load(t, RouterName, "questions:\n  - {id: r, kind: noul, instructions: x, uses: [idea]}\n"); err == nil || !strings.Contains(err.Error(), "router") {
 		t.Errorf("router with noul: %v", err)

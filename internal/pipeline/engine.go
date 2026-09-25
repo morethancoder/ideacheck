@@ -74,26 +74,33 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	}
 	state := in.State()
 	unknown := unstated(gaps.Questions, in)
-	asked := unknown
+	k := known{in: in, gaps: gaps}
+	gapAsk, derived := settle(unknown, state, k)
+	asked := append([]judge.Question{}, gapAsk...)
 	if o.Rubric == "" { // a forced rubric leaves nothing for the router to decide
 		asked = append(asked, router.Questions...)
 	}
+	announce(o.Events, StagePreflight, unknown, derived)
 	pre := e.fanout(ctx, state, asked, o, StagePreflight)
-	gapAnswers := pre[:len(unknown)]
-	res.Answers = pre
+	gapAnswers := restore(pre[:len(gapAsk)], derived, len(unknown))
+	res.Answers = append(append([]judge.Answer{}, gapAnswers...), pre[len(gapAsk):]...)
 	res.Missing = FindMissing(gaps, gapAnswers, in)
 	var routeAnswer judge.Answer
 	if o.Rubric != "" {
 		res.IdeaType = &IdeaType{Choice: o.Rubric, Confidence: 1}
 	} else {
-		routeAnswer = pre[len(unknown)]
+		routeAnswer = pre[len(gapAsk)]
 		res.IdeaType = ideaType(routeAnswer)
 	}
+	k.answers = byID(gapAnswers)
 
 	// The rubric is known before research, so only what it reads is looked up.
 	name, warnings := e.pickRubric(o.Rubric, router.Fallback, routeAnswer)
 	rb, err := rubric.Load(e.Files, e.Config.RubricsDir, name)
 	if err != nil {
+		return nil, err
+	}
+	if err := e.derivable(rb, gaps); err != nil {
 		return nil, err
 	}
 	// A fact the web can answer is not worth stopping to ask a person for.
@@ -114,7 +121,9 @@ func (e *Engine) Check(ctx context.Context, in Intake, o Options) (*Result, erro
 	res.Warnings = append(res.Warnings, warnings...)
 	res.Rubric = &RubricRef{Name: rb.Name, Hash: rb.Hash}
 
-	ask, held := withheld(rb.Questions, state)
+	k.research = res.Research
+	ask, held := settle(rb.Questions, state, k)
+	announce(o.Events, StageScore, rb.Questions, held)
 	answers := restore(e.fanout(ctx, state, ask, o, StageScore), held, len(rb.Questions))
 	res.Answers = append(res.Answers, answers...)
 	if err := e.conclude(res, rb, answers); err != nil {
@@ -211,8 +220,19 @@ func (e *Engine) loadPreflight() (gaps, router *rubric.Rubric, err error) {
 			return nil, nil, fmt.Errorf("%s: %s fills unknown intake field %q", rubric.GapsName, q.ID, q.Fills)
 		}
 	}
+	if err := e.derivable(gaps, gaps); err != nil {
+		return nil, nil, err
+	}
 	router, err = rubric.Load(e.Files, e.Config.RubricsDir, rubric.RouterName)
 	return gaps, router, err
+}
+
+func byID(answers []judge.Answer) map[string]judge.Answer {
+	out := make(map[string]judge.Answer, len(answers))
+	for _, a := range answers {
+		out[a.ID] = a
+	}
+	return out
 }
 
 func (e *Engine) fanout(ctx context.Context, state judge.State, qs []judge.Question, o Options, stage string) []judge.Answer {
@@ -262,13 +282,10 @@ func unstated(gaps []judge.Question, in Intake) []judge.Question {
 // the gaps rubric's order. A gap question that failed, or was never asked, is
 // not evidence of a gap — and neither is one whose field the intake fills.
 func FindMissing(gaps *rubric.Rubric, answers []judge.Answer, in Intake) []Missing {
-	byID := make(map[string]judge.Answer, len(answers))
-	for _, a := range answers {
-		byID[a.ID] = a
-	}
+	given := byID(answers)
 	missing := []Missing{}
 	for _, q := range gaps.Questions {
-		a, ok := byID[q.ID]
+		a, ok := given[q.ID]
 		if ok && !a.Failed() && a.Noul < gaps.Threshold && !in.Has(q.Fills) {
 			missing = append(missing, Missing{ID: q.ID, Probability: a.Noul, Ask: q.Ask, Fills: q.Fills})
 		}
@@ -286,14 +303,21 @@ func confidenceFactor(gaps *rubric.Rubric, open int) float64 {
 	return 1 - gaps.ConfidencePenalty*float64(open)/float64(len(gaps.Questions))
 }
 
-// withheld holds back questions whose `requires:` state was not given. Scoring a
-// dimension from material we do not have (founder fit with no profile) reads as
-// a judgment of the idea when it is really a judgment of the input.
-func withheld(qs []judge.Question, s judge.State) (ask []judge.Question, held map[int]judge.Answer) {
+// settle takes out of qs what the judge need not be asked, keyed by index for
+// restore. A question whose `requires:` state was not given is held back
+// unanswered: scoring a dimension from material we do not have (founder fit
+// with no profile) reads as a judgment of the idea when it is really a
+// judgment of the input. A question whose `derive:` rule can decide is
+// answered by the rule.
+func settle(qs []judge.Question, s judge.State, k known) (ask []judge.Question, held map[int]judge.Answer) {
 	held = map[int]judge.Answer{}
 	for i, q := range qs {
 		if absent := absentState(q, s); len(absent) > 0 {
 			held[i] = judge.Answer{ID: q.ID, Kind: q.Kind, Probabilities: map[string]float64{}, Err: "no " + strings.Join(absent, " or ") + " given"}
+			continue
+		}
+		if a, ok := derive(q, k); ok {
+			held[i] = a
 			continue
 		}
 		ask = append(ask, q)
@@ -372,6 +396,9 @@ func (e *Engine) conclude(res *Result, rb *rubric.Rubric, answers []judge.Answer
 	}
 	for i, q := range rb.Questions {
 		d := Dimension{ID: q.ID, Weight: q.Weight, Polarity: q.Polarity, Confidence: answers[i].Confidence, Error: answers[i].Err}
+		if answers[i].Method == MethodDerived {
+			d.Derived = q.Derive.Rule()
+		}
 		if v, ok := agg.Values[q.ID]; ok {
 			d.Value = &v
 		}
@@ -405,7 +432,7 @@ func (e *Engine) finish(res *Result, start time.Time, written ...judge.Answer) *
 		if a.LatencyMS > slowest {
 			slowest, res.Timing.SlowestQuestion = a.LatencyMS, a.ID
 		}
-		if res.Model == "" && !a.Failed() {
+		if res.Model == "" && !a.Failed() && a.Method != MethodDerived {
 			res.Model, res.Method = a.Model, a.Method
 		}
 	}
