@@ -90,6 +90,22 @@ func TestEvidenceState(t *testing.T) {
 	}
 }
 
+// A page reported twice under one topic, or a finding with nothing to say, is
+// dropped before any judge reads it; the same page under another topic stays.
+func TestDistinctDropsRepeatsAndBlanks(t *testing.T) {
+	got := distinct([]judge.Finding{
+		{Topic: "competitors", Summary: "Texts patients.", URL: "https://weave.example/dental"},
+		{Topic: "competitors", Summary: "Again.", URL: "http://www.weave.example/dental/#top"},
+		{Topic: "market", Summary: "Raised $100M.", URL: "https://weave.example/dental"},
+		{Topic: "competitors", Summary: "  ", URL: "https://blank.example"},
+		{Topic: "competitors", Summary: "No source given."},
+		{Topic: "competitors", Summary: "Nor here."},
+	})
+	if len(got) != 4 || got[1].Topic != "market" || got[3].Summary != "Nor here." {
+		t.Errorf("distinct = %+v", got)
+	}
+}
+
 type memCache struct {
 	m    map[string][]byte
 	puts int

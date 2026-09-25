@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -232,7 +233,7 @@ func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, st
 		if b, ok := e.Cache.Get(ctx, key, ttl); ok {
 			var found []judge.Finding
 			if json.Unmarshal(b, &found) == nil {
-				return found, judge.Research{}, true, nil
+				return distinct(found), judge.Research{}, true, nil
 			}
 		}
 	}
@@ -248,7 +249,7 @@ func (e *Engine) findings(ctx context.Context, p *researchPlan, given Intake, st
 	if err != nil {
 		return nil, call, false, err
 	}
-	found := capped(reported, p.topics.MaxFindings)
+	found := capped(distinct(reported), p.topics.MaxFindings)
 	if e.Cache != nil && ttl > 0 {
 		if b, err := json.Marshal(found); err == nil {
 			_ = e.Cache.Put(ctx, key, b) // a cache that cannot be written costs a search next time, nothing more
@@ -283,6 +284,26 @@ func (e *Engine) cacheKey(p *researchPlan, about judge.State) (string, error) {
 	h.Write([]byte{0})
 	h.Write([]byte(idea))
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// distinct drops what code can tell is not worth a judge's call: a finding
+// that says nothing, and a page already reported under the same topic.
+func distinct(found []judge.Finding) []judge.Finding {
+	seen := map[string]bool{}
+	out := []judge.Finding{}
+	for _, f := range found {
+		if strings.TrimSpace(f.Summary) == "" {
+			continue
+		}
+		if key := pageKey(f.URL); key != "" {
+			if seen[f.Topic+"\x00"+key] {
+				continue
+			}
+			seen[f.Topic+"\x00"+key] = true
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // capped keeps the first n findings of each topic, in the order reported.
