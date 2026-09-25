@@ -235,7 +235,7 @@ func TestEmbeddedShipsUnderscoreFilesAndAllSkipsGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := 3 + 8 + 14 + 1; len(all) != want { // config.yaml + fields.yaml + research.yaml, 8 rubrics, 14 prompts, searxng/settings.yml
+	if want := 3 + 8 + 13 + 1; len(all) != want { // config.yaml + fields.yaml + research.yaml, 8 rubrics, 13 prompts, searxng/settings.yml
 		t.Errorf("All() = %d files %v, want %d", len(all), all, want)
 	}
 	for _, p := range all {
