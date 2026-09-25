@@ -1,0 +1,5 @@
+.build/
+.models/
+.swiftpm/
+Package.resolved
+__pycache__/
