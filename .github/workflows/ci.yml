@@ -19,7 +19,8 @@ jobs:
           check-latest: true
       - name: gofmt
         run: |
-          unformatted="$(gofmt -l cmd internal configs)"
+          unformatted="$(gofmt -l cmd internal configs ideacheck judge rubric prompt search store server)"
           if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
       - run: go vet ./...
+      - run: bash scripts/core.sh
       - run: go test ./...

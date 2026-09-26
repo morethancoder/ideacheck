@@ -10,9 +10,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/store"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 // Host is everything the app needs from the outside world. The CLI implements it.
@@ -41,12 +41,12 @@ type Host interface {
 	// when the judge writes too.
 	SaveRoles(judge, writer config.Provider) error
 	Writer() (backend, model, effort string)
-	Engine() (*pipeline.Engine, error)
+	Engine() (*ideacheck.Engine, error)
 	Profile() map[string]string
 	SaveProfile(map[string]string) error
 	History(limit int) ([]store.Row, error)
-	Stored(ref string) (*pipeline.Result, error)
-	Persist(in pipeline.Intake, res *pipeline.Result)
+	Stored(ref string) (*ideacheck.Result, error)
+	Persist(in ideacheck.Intake, res *ideacheck.Result)
 }
 
 // SearchState is whether research has something to search with, and whether
@@ -81,8 +81,8 @@ const (
 // Start says where the app opens and whether it exits once that task is done.
 type Start struct {
 	Page      page
-	Intake    pipeline.Intake // pageLive / pageIdea: the idea to check or prefill
-	Options   pipeline.Options
+	Intake    ideacheck.Intake // pageLive / pageIdea: the idea to check or prefill
+	Options   ideacheck.CheckOptions
 	NoAsk     bool // never ask follow-ups (-A)
 	ExitAfter bool // quit when the opening task finishes instead of going to the menu
 	NeedSetup bool // run setup first, then continue to Page
@@ -112,7 +112,7 @@ var menuItems = []struct {
 	{"Check an idea", "describe it once, then watch it being researched and judged", pageIdea},
 	{"History", "browse and reopen past checks", pageHistory},
 	{"Profile", "who you are — used for founder-fit questions", pageProfile},
-	{"Settings", "choose the model provider, API key and model", pageSetup},
+	{"Settings", "choose the judge and the writer: provider, model and API key", pageSetup},
 	{"Quit", "", -1},
 }
 
@@ -128,22 +128,25 @@ type App struct {
 	cursor        int    // menu
 
 	wiz     *wizard
-	intake  pipeline.Intake
+	intake  ideacheck.Intake
 	draft   *ideaDraft
 	setup   *setupDraft
 	dl      *download
 	profile map[string]*string
 	replies []string
-	missing []pipeline.Missing
+	missing []ideacheck.Missing
 	asked   bool
 	// answered: fields already offered in the detail steps; never re-asked.
 	answered []string
+	// earlier: the needs_input result the follow-up questions came from; the
+	// re-run keeps its judgments and reconsiders only what was answered.
+	earlier *ideacheck.Result
 
 	live    liveModel
-	engine  *pipeline.Engine // the running check's engine; it decides what is worth asking
+	engine  *ideacheck.Engine // the running check's engine; it decides what is worth asking
 	done    chan outcome
 	cancel  context.CancelFunc
-	result  *pipeline.Result
+	result  *ideacheck.Result
 	tab     int
 	history table.Model
 	rows    []store.Row
@@ -151,7 +154,7 @@ type App struct {
 
 // Run opens the app and returns the last result shown (nil when none), so the
 // caller can leave it in the terminal's scrollback.
-func Run(ctx context.Context, host Host, start Start, out io.Writer) (*pipeline.Result, error) {
+func Run(ctx context.Context, host Host, start Start, out io.Writer) (*ideacheck.Result, error) {
 	app := &App{host: host, start: start, ctx: ctx, intake: start.Intake, width: 80, height: 24}
 	final, err := tea.NewProgram(app, tea.WithContext(ctx), tea.WithOutput(out), tea.WithAltScreen()).Run()
 	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
@@ -166,7 +169,7 @@ func Run(ctx context.Context, host Host, start Start, out io.Writer) (*pipeline.
 func (a *App) Init() tea.Cmd {
 	if a.start.NeedSetup {
 		cmd := a.open(pageSetup)
-		a.note = "Welcome! First, choose how ideacheck reaches a model. A local Ollama model is free and needs no key."
+		a.note = "Welcome! First, choose the judge — the model that answers every scoring question. A local Ollama model is free and needs no key."
 		return cmd
 	}
 	return a.open(a.start.Page)
@@ -254,7 +257,7 @@ func (a *App) updateMenu(msg tea.Msg) tea.Cmd {
 		if menuItems[a.cursor].page < 0 {
 			return tea.Quit
 		}
-		a.intake, a.asked, a.answered = pipeline.Intake{}, false, nil
+		a.intake, a.asked, a.answered, a.earlier = ideacheck.Intake{}, false, nil, nil
 		return a.open(menuItems[a.cursor].page)
 	}
 	return nil

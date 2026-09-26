@@ -1,0 +1,152 @@
+# Sparkjudge — the iOS app. The .xcodeproj is generated from this file:
+#   cd apps/ios && xcodegen generate
+name: Sparkjudge
+options:
+  bundleIdPrefix: com.morethancoder
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+packages:
+  # RevenueCat: purchases, and the entitlement the hosted API's webhook reads
+  # (entitlement `pro`, appUserID = the app's user id). Pinned exactly.
+  # purchases-ios-spm is RevenueCat's SPM-only mirror of purchases-ios: the same
+  # sources in ~40 MB, where the main repo's history is well over a gigabyte.
+  RevenueCat:
+    url: https://github.com/RevenueCat/purchases-ios-spm
+    exactVersion: 5.91.0
+  # Laya typed-decision checkpoints on Core ML: the fast on-device judge, and
+  # the downloader that lists them live from the Hugging Face Hub.
+  LayaKit:
+    path: Packages/LayaKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+  configs:
+    # Where hosted checks go. Debug talks to `make api` on this Mac (attest off,
+    # mock judge); Release always to the hosted API, and always attests.
+    Debug:
+      SPARKJUDGE_API_URL: http://127.0.0.1:8787
+    Release:
+      SPARKJUDGE_API_URL: https://sparkjudge-api.fly.dev
+
+# build/Sparkcore.xcframework is rebuilt when it is missing or older than any
+# source of the core (ideacheck/ judge/ rubric/ prompt/ configs/ mobile/): by
+# the scheme's pre-action (below), before Xcode plans the build. Up to date it
+# is one `find` (well under a second); stale, `make mobile` (~25 s). This
+# target, built before the app, checks again where the build log shows it:
+# it fails when it had to rebuild (the pre-action did not run, or failed),
+# since the app would link the old framework this once. See scripts/sparkcore.sh.
+aggregateTargets:
+  Sparkcore:
+    buildScripts:
+      - name: Sparkcore.xcframework up to date
+        script: '"$SRCROOT/scripts/sparkcore.sh" --phase'
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
+    settings:
+      base:
+        # `make mobile` writes build/ and Go's caches: more than a sandboxed
+        # script may touch.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+targets:
+  Sparkjudge:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sparkjudge
+      # The Swift side of the Go core's judge protocol (FoundationJudge,
+      # FoundationWriter, LayaDeviceJudge, the throwing overloads). One copy,
+      # beside the Go package it implements; mobile/swiftcheck compiles the
+      # same files.
+      - path: ../../mobile/swift
+    dependencies:
+      - package: RevenueCat
+      - package: LayaKit
+      # The whole check in Go (make mobile). A static framework: linked, not
+      # embedded. Kept fresh by the Sparkcore target, built first.
+      - target: Sparkcore
+      - framework: ../../build/Sparkcore.xcframework
+        embed: false
+    # REVENUECAT_API_KEY comes from Config/Secrets.xcconfig (not committed; see
+    # Config/Sparkjudge.xcconfig). Without it the paywall shows StoreKit's own
+    # products and says purchases are not connected.
+    configFiles:
+      Debug: Config/Sparkjudge.xcconfig
+      Release: Config/Sparkjudge.xcconfig
+    info:
+      path: Sparkjudge/Info.plist
+      properties:
+        CFBundleDisplayName: Sparkjudge
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSMicrophoneUsageDescription: Sparkjudge listens while you hold the orb, so it can type your idea out as you say it. Audio never leaves your phone.
+        NSSpeechRecognitionUsageDescription: Your words are transcribed on this device, so an idea is written down before it is gone.
+        NSLocalNetworkUsageDescription: Sparkjudge can check ideas with an ideacheck server running on your own network.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        SparkjudgeAPIURL: $(SPARKJUDGE_API_URL)
+        RevenueCatAPIKey: $(REVENUECAT_API_KEY)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.morethancoder.sparkjudge
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+      configs:
+        # Both carry com.apple.developer.kernel.increased-memory-limit: the
+        # Laya judge holds ~1 GB of weights. On a device the App ID needs the
+        # Increased Memory Limit capability.
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Sparkjudge/Sparkjudge-Debug.entitlements
+        # Plus App Attest's production environment. Needs a team id and the
+        # App Attest capability on the App ID; simulator Debug builds skip it.
+        Release:
+          CODE_SIGN_ENTITLEMENTS: Sparkjudge/Sparkjudge.entitlements
+
+  SparkjudgeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SparkjudgeTests
+    dependencies:
+      - target: Sparkjudge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.morethancoder.sparkjudge.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Sparkjudge:
+    build:
+      targets:
+        Sparkjudge: all
+        SparkjudgeTests: [test]
+      # Brings Sparkcore.xcframework up to date before Xcode plans the build:
+      # the app copies the framework in before any build phase runs, so a
+      # framework rebuilt later is linked one build late (and a missing one
+      # fails the plan). Output: build/sparkcore.log. The Sparkcore target
+      # checks again and reports what went wrong.
+      preActions:
+        - name: Sparkcore.xcframework
+          script: '"$SRCROOT/scripts/sparkcore.sh" > "$SRCROOT/build/sparkcore.log" 2>&1'
+          settingsTarget: Sparkjudge
+    test:
+      targets:
+        - SparkjudgeTests
+    run:
+      config: Debug
+      # Local StoreKit testing: the monthly and yearly Pro subscriptions.
+      storeKitConfiguration: StoreKit/Sparkjudge.storekit

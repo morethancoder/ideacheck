@@ -1,0 +1,11 @@
+{{- /* The daily inspiration call behind GET /v1/trends. .Groups are the idea
+types (the router's options) with the items the judge filed under each; .Types
+are their keys, which are also the JSON keys the reply must use. */ -}}
+This week's items, by kind of idea:
+{{ range .Groups }}
+{{ .Type }} ({{ .Meaning }}):
+{{- range .Items }}
+- {{ .Title }}{{ if .Summary }}: {{ .Summary }}{{ end }}
+{{- end }}
+{{ end }}
+Write one prompt for each kind: {{ range $i, $t := .Types }}{{ if $i }}, {{ end }}{{ $t }}{{ end }}.

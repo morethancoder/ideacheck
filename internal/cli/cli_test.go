@@ -17,6 +17,7 @@ import (
 
 	"github.com/morethancoder/ideacheck/internal/config"
 	"github.com/morethancoder/ideacheck/internal/schema"
+	"github.com/morethancoder/ideacheck/judge/structured"
 )
 
 type run struct {
@@ -414,8 +415,11 @@ func TestFirstRunDetectionAndSettingsTakeEffectImmediately(t *testing.T) {
 		t.Errorf("Current after setup = %q %q", backend, model)
 	}
 	engine, err := h.Engine() // no restart: the next engine uses the new settings
-	if err != nil || engine.Config.Active().Provider != "openai" || engine.Config.Active().BaseURL != "https://api.openai.com/v1" {
-		t.Errorf("engine after setup: %v %+v", err, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if llm, ok := engine.Judge.(*structured.Judge).LLM.(*structured.Compat); !ok || llm.Client.BaseURL != "https://api.openai.com/v1" || llm.Model != "gpt-y" {
+		t.Errorf("engine after setup: %+v", engine.Judge)
 	}
 	cfgFile, _ := os.ReadFile(filepath.Join(home, ".config", "ideacheck", "config.yaml"))
 	if strings.Contains(string(cfgFile), "sk-test") {

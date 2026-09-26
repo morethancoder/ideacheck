@@ -1,0 +1,85 @@
+# Sparkjudge's hosted API (cmd/sparkjudge-api): the server behind the iOS app's
+# hosted checks. The CLI never reads this file.
+#
+# A file of the same name in the directory SPARKJUDGE_CONFIG_DIR names replaces
+# this one (as does any rubric or prompt there). A few values also come from the
+# environment, noted beside them. Secrets come from the environment only:
+# TYPESAFE_API_KEY, OPENROUTER_API_KEY, REVENUECAT_WEBHOOK_AUTH, and
+# TAVILY_API_KEY or BRAVE_API_KEY for research. docs/sparkjudge-api.md has them all.
+
+listen: ":8080"               # SPARKJUDGE_LISTEN
+data_dir: /data               # checks.db and accounts.db (a Fly volume); SPARKJUDGE_DATA_DIR
+
+# Apple App Attest: every request must come from a genuine copy of the app.
+#   required  the app attests a key once (POST /v1/attest), then signs every
+#             request with it (an assertion)
+#   off       development only: the X-App-User-Id header alone identifies the
+#             caller, for the simulator (which cannot attest) and local tests
+attest:
+  mode: required              # SPARKJUDGE_ATTEST
+  team_id: ""                 # SPARKJUDGE_TEAM_ID: the Apple Developer team, 10 characters
+  bundle_id: com.morethancoder.sparkjudge
+  # Keys attested by a development build (Xcode) carry the appattestdevelop
+  # environment; TestFlight and the App Store attest in production. Turn this on
+  # for a staging server only.
+  development: false
+  challenge_ttl: 5m
+
+# What each plan may run in a calendar month (UTC). A user is pro while the
+# RevenueCat entitlement below is active; everyone else is free. The free
+# checks are a taste of pro, not a tier of their own.
+plans:
+  free: { checks_per_month: 3 }
+  pro: { checks_per_month: 100 }
+entitlement: pro              # the RevenueCat entitlement id that makes a user pro
+
+limits:
+  requests_per_minute: 60     # per user, every route
+  checks_per_hour: 10         # per user, on top of the monthly plan
+  # Every check's cost (result.cost.usd) adds to the day's spend (UTC). Once it
+  # reaches this, checks are refused until midnight UTC: a runaway client or a
+  # price change cannot run up an unbounded bill.
+  daily_spend_usd: 25
+  max_body_bytes: 1048576
+
+# The Lab's routes. Neither counts as a check.
+lab:
+  # POST /v1/mix: the writer combines two or three ideas into a new draft, in
+  # one cheap call. The app mixes on the phone (Apple's on-device model) for
+  # everyone; the server mixes for these plans only. Each mix's cost adds to
+  # the day's spend, and the daily cap stops mixes too.
+  mix:
+    plans: [pro]
+    per_hour: 20              # per user, on top of requests_per_minute
+    max_ideas: 3
+    # What the writer returns, by fields.yaml's names: they become the new
+    # draft's title and fields. The prompt is prompts/mix_system.md + mix.tmpl.
+    fields: [title, problem, audience, solution]
+  # GET /v1/trends: what trends.yaml's sources list, built at most once per its
+  # refresh and served from the cache in between, so a request costs no model.
+  trends: trends.yaml
+
+# The check itself, in config.yaml's shape, over the embedded config.yaml and
+# under IDEACHECK_* environment variables (IDEACHECK_BACKEND=mock runs it with
+# no model at all). Jev judges; a cheap OpenRouter model reads, researches and
+# writes the summary.
+engine:
+  backend: jev
+  writer: structured
+  explain: true
+  extract: true
+  research:
+    enabled: true
+    # auto: a SearXNG at endpoints.searxng (none here: set
+    # IDEACHECK_RESEARCH__ENDPOINTS__SEARXNG to one you run), else Tavily or
+    # Brave when its key is set, else the writer's own web tool (OpenRouter's
+    # web plugin, billed per search on top of tokens).
+    search: auto
+    endpoints:
+      searxng: ""
+  backends:
+    structured:
+      provider: openrouter
+      base_url: https://openrouter.ai/api/v1
+      model: z-ai/glm-5.3-flash
+      effort: ""

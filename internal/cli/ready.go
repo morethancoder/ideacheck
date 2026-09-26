@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/logprob"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/structured"
+	"github.com/morethancoder/ideacheck/internal/judge/laya"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/judge/logprob"
+	"github.com/morethancoder/ideacheck/judge/structured"
 )
 
 const readyTimeout = 3 * time.Second
@@ -28,6 +29,14 @@ func ready(ctx context.Context, cfg config.Config) error {
 // reachable checks one backend: the judge, or the writer beside it.
 func reachable(ctx context.Context, cfg config.Config, backend string) error {
 	b := cfg.Backends[backend]
+	if backend == laya.Name {
+		// The worker would download it, but inside a question's timeout: 850 MB
+		// does not fit in 90 s, and the whole check would fail for it.
+		if !laya.Downloaded(b.Model) {
+			return &tui.NotReady{Reason: fmt.Sprintf("The Laya model %s is not downloaded yet. Choose Laya in Settings and it is fetched (about 850 MB, once).", b.Model)}
+		}
+		return nil
+	}
 	local := backend == logprob.Name || (backend == structured.Name && b.Provider == "ollama")
 	if !local || strings.Contains(b.BaseURL, "ollama.com") {
 		return nil

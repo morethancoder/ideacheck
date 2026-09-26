@@ -1,0 +1,51 @@
+# Fly.io app for the Sparkjudge hosted API. Create the app and volume once
+# (docs/sparkjudge-api.md), then `make deploy`.
+app = "sparkjudge-api"
+primary_region = "fra"
+
+# SIGTERM starts a drain: checks in flight get up to two minutes to finish.
+kill_signal = "SIGTERM"
+kill_timeout = "130s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  SPARKJUDGE_ATTEST = "required"
+  SPARKJUDGE_DATA_DIR = "/data"
+  SPARKJUDGE_LISTEN = ":8080"
+
+# One volume holds checks.db and accounts.db (SQLite). A volume belongs to one
+# machine, so this app runs exactly one: scale it with `fly scale count 1`,
+# never more, until the accounts store moves to Postgres.
+[[mounts]]
+  source = "sparkjudge_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stopping when idle saves little on one small machine and costs every first
+  # request a cold start, while a stop mid-check (an async check outlives its
+  # request) would lose it: keep it running. "suspend" is the cheaper middle
+  # ground once checks are all synchronous.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Each SSE stream holds a request open for the length of a check.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/v1/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -9,6 +9,9 @@
 #    `requires: [evidence]`, and is skipped — not guessed — when nothing was searched.
 #  - `requires` (optional) names state the question cannot be judged without:
 #    when it is absent the question is not asked, and its weight moves to the rest.
+# The rubric scored when the answer is `other`, a type with no rubric of its
+# own, or could not be had at all.
+fallback: business
 questions:
   - id: idea_type
     kind: choice

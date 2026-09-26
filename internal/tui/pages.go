@@ -14,9 +14,9 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/internal/backends"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge/backends"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
 )
 
 // ---- Settings ---------------------------------------------------------------
@@ -25,11 +25,9 @@ import (
 const otherModel = "\x00other"
 
 type setupDraft struct {
-	id, key     string
+	id, key     string // the judge's provider, and a key typed for it
 	replaceKey  bool   // a key is already set and the user chose to replace it
-	writer      string // provider id that writes next to a judge that cannot; noWriter = nobody
-	jevJudges   bool   // let Jev answer the typed questions next to the chosen model
-	judgeAsked  bool   // the Judge step was shown; until then jevJudges stays false
+	writer      string // the writer's provider id; sameWriter = the judge writes too, noWriter = nobody
 	providers   []config.Provider
 	current     [2][3]string     // backend, model, effort of the judge and the writer when setup opened
 	picks       map[string]*pick // by provider id, once that provider's models were listed
@@ -59,38 +57,25 @@ func (a *App) searching(d *setupDraft) SearchState {
 
 func (d *setupDraft) chosen() config.Provider { return providerByID(d.providers, d.id) }
 
-// noWriter is the "scores only" choice in the writer list.
-const noWriter = "\x00none"
+// The two answers in the writer list that name no other provider: the judge
+// writes as well (a chat model), or nobody does (beside a judge that cannot).
+const (
+	sameWriter = "\x00same"
+	noWriter   = "\x00none"
+)
 
-// writerChoice is the provider picked in the Writer step, zero when that step
-// does not apply or the answer was nobody.
+// writerChoice is the other provider picked in the Writer step; zero when the
+// judge writes too, or nobody does.
 func (d *setupDraft) writerChoice() config.Provider {
-	if !d.chosen().NeedsWriter || d.writer == noWriter {
+	if d.writer == noWriter || d.writer == sameWriter || d.writer == d.id {
 		return config.Provider{}
 	}
 	return providerByID(d.providers, d.writer)
 }
 
-// classifier is the provider that only classifies (Jev), if setup offers one.
-func (d *setupDraft) classifier() (config.Provider, bool) {
-	for _, p := range d.providers {
-		if p.NeedsWriter {
-			return p, true
-		}
-	}
-	return config.Provider{}, false
-}
-
 // roles is who judges and who writes, from the choices made.
 func (d *setupDraft) roles() (judge, writer config.Provider) {
-	chosen := d.chosen()
-	switch jev, ok := d.classifier(); {
-	case chosen.NeedsWriter:
-		return chosen, d.writerChoice()
-	case ok && d.jevJudges:
-		return jev, chosen
-	}
-	return chosen, config.Provider{}
+	return d.chosen(), d.writerChoice()
 }
 
 // key is the API key already set for the chosen provider, if any.
@@ -106,15 +91,24 @@ func (a *App) usable(p config.Provider) bool {
 	return (p.NeedsCLI == "" || a.host.HasCLI(p.NeedsCLI)) && (p.KeyEnv == "" || a.host.Key(p.KeyEnv).Found())
 }
 
-// writers are the providers that can write next to a classifier, ready ones only.
+// writers are the choices for who writes beside the chosen judge: the judge
+// itself when it can, every other provider that can write and is ready to use,
+// and nobody when the judge only judges.
 func (a *App) writers(d *setupDraft) []huh.Option[string] {
+	chosen := d.chosen()
 	var opts []huh.Option[string]
+	if !chosen.NeedsWriter {
+		opts = append(opts, huh.NewOption("The same model — "+chosen.ID+" judges and writes", sameWriter))
+	}
 	for _, p := range d.providers {
-		if !p.NeedsWriter && a.usable(p) {
+		if !p.NeedsWriter && p.ID != chosen.ID && a.usable(p) {
 			opts = append(opts, huh.NewOption(p.Label, p.ID))
 		}
 	}
-	return append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
+	if chosen.NeedsWriter {
+		opts = append(opts, huh.NewOption("Nobody — scores only: no web research, no reading of long text, no summary", noWriter))
+	}
+	return opts
 }
 
 // pickOf is what was chosen for p; before its models were listed, nothing.
@@ -213,7 +207,8 @@ func (a *App) loadModels(d *setupDraft, p config.Provider, role string) *pick {
 	if role == roleWriter {
 		effort = ""
 	}
-	if model, e, ok := d.was(p); ok {
+	model, e, saved := d.was(p)
+	if saved {
 		want, effort = model, e
 	}
 	k.model, k.custom, k.effort = otherModel, want, effort
@@ -222,10 +217,18 @@ func (a *App) loadModels(d *setupDraft, p config.Provider, role string) *pick {
 			k.model, k.custom = want, ""
 		}
 	}
-	// A discovered list is what is actually installed: never default to a model
-	// that is not in it (enter-enter-enter would save one that cannot run).
-	if discovered && k.model == otherModel {
+	// A discovered list is what the provider serves today: never default to a
+	// preset it no longer lists (enter-enter-enter would save one that cannot
+	// run). A saved model this provider's presets name stays, typed under
+	// "Other…": a pinned version may still answer after the list stopped
+	// naming it. (was matches by backend, so a saved id from another provider
+	// on the same backend is not kept.)
+	pinned := saved && slices.ContainsFunc(p.Models, func(m config.ModelChoice) bool { return m.ID == want })
+	if discovered && k.model == otherModel && !pinned {
 		k.model, k.custom = k.models[0].ID, ""
+	}
+	if len(k.models) > 15 {
+		k.note = strings.TrimSpace(k.note + " Type / to filter.")
 	}
 	if !slices.Contains(k.efforts(p), k.effort) {
 		k.effort = ""
@@ -247,17 +250,17 @@ func (a *App) openSetup() tea.Cmd {
 		if d.id == "" && p.Backend == d.current[0][0] {
 			d.id = p.ID
 		}
-		// Settings opens on what is configured, the writer included. It only
-		// counts next to a judge that cannot write, and that step is always asked.
+		// Settings opens on what is configured, the writer included; with none
+		// configured the Writer step offers its first choice.
 		if d.writer == "" && p.Backend == d.current[1][0] && !p.NeedsWriter && a.usable(p) {
 			d.writer = p.ID
 		}
 	}
 	a.setup = d
 	steps := []step{
-		{title: "Provider", build: func() *huh.Form {
-			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach a model?",
-				"You pick the model next. Change this any time from Settings or `ideacheck setup`.", options, &d.id).
+		{title: "Judge", build: func() *huh.Form {
+			return huh.NewForm(huh.NewGroup(choose("Choose the judge",
+				roleNotes[roleJudge]+"\nPick where it runs; you pick the exact model next. A provider marked “judges only” needs a writer beside it, which you choose after; a chat model can do both. Change any of this later in Settings or `ideacheck setup`.", options, &d.id).
 				Validate(func(id string) error {
 					if cli := providerByID(d.providers, id).NeedsCLI; cli != "" && !a.host.HasCLI(cli) {
 						return fmt.Errorf("the %s command is not installed; pick another provider", cli)
@@ -294,18 +297,21 @@ func (a *App) openSetup() tea.Cmd {
 					return nil
 				})))
 		}},
-		a.judgeStep(d),
 	}
-	steps = append(steps, a.modelSteps(d, [3]string{"Model", "Model id", "Effort"}, d.chosen, d.role, nil)...)
+	steps = append(steps, a.modelSteps(d, [3]string{"Judge model", "Judge model id", "Judge effort"}, d.chosen, d.role, nil)...)
+	// The writer is asked whenever there is a choice to make: another provider
+	// ready to write, or nobody, beside a judge that only judges.
 	steps = append(steps,
-		step{title: "Writer", skip: func() bool { return !d.chosen().NeedsWriter }, build: func() *huh.Form {
+		step{title: "Writer", skip: func() bool { return len(a.writers(d)) < 2 }, build: func() *huh.Form {
 			opts := a.writers(d)
 			if !slices.ContainsFunc(opts, func(o huh.Option[string]) bool { return o.Value == d.writer }) {
 				d.writer = opts[0].Value
 			}
-			return huh.NewForm(huh.NewGroup(choose("How should ideacheck reach the writer?",
-				d.chosen().ID+" only judges. "+roleNotes[roleWriter]+"\nOnly providers ready to use are listed; you pick its model next.",
-				opts, &d.writer)))
+			desc := roleNotes[roleWriter] + "\nPick where it runs; you pick the exact model next. Only providers ready to use are listed."
+			if d.chosen().NeedsWriter {
+				desc = d.chosen().ID + " only judges, so another model writes. " + desc
+			}
+			return huh.NewForm(huh.NewGroup(choose("Choose the writer", desc, opts, &d.writer)))
 		}},
 	)
 	// The writer is picked like the judge was: its model, then how hard it thinks.
@@ -406,27 +412,6 @@ func (a *App) modelSteps(d *setupDraft, titles [3]string, who func() config.Prov
 	}
 }
 
-// judgeStep offers Jev as the judge beside a model that can do everything.
-// It comes before the model is picked, so that step can say which role the
-// model it offers will play.
-func (a *App) judgeStep(d *setupDraft) step {
-	return step{title: "Judge", skip: func() bool {
-		jev, ok := d.classifier()
-		return d.chosen().NeedsWriter || !ok || !a.usable(jev)
-	}, build: func() *huh.Form {
-		jev, _ := d.classifier()
-		// Yes by default — but only once the question is really asked: a step
-		// skipped for want of a key must not make Jev the judge anyway.
-		if !d.judgeAsked {
-			d.judgeAsked, d.jevJudges = true, true
-		}
-		return huh.NewForm(huh.NewGroup(huh.NewConfirm().Title("Let " + jev.ID + " be the judge?").
-			Description("You have a key for it. The judge answers every scoring question; " + jev.ID + " returns calibrated probabilities for each yes/no, level and option. " +
-				d.chosen().ID + " is then the writer: it reads your text, looks the idea up on the web and writes the summary.").
-			Affirmative("Yes, " + jev.ID + " judges").Negative("No, " + d.chosen().ID + " does both").Value(&d.jevJudges)))
-	}}
-}
-
 // What a model being picked will do.
 const (
 	roleJudge  = "judge"
@@ -434,15 +419,12 @@ const (
 	roleBoth   = "judge and writer"
 )
 
-// role is what the provider chosen first will do, given the choices so far.
+// role is what the judge's model will do: everything, when it writes as well.
 func (d *setupDraft) role() string {
-	switch judge, writer := d.roles(); {
-	case judge.ID == d.id && writer.ID == "" && !d.chosen().NeedsWriter:
-		return roleBoth
-	case judge.ID == d.id:
+	if d.chosen().NeedsWriter || d.writerChoice().ID != "" {
 		return roleJudge
 	}
-	return roleWriter
+	return roleBoth
 }
 
 var modelQuestions = map[string]string{
@@ -451,11 +433,11 @@ var modelQuestions = map[string]string{
 	roleBoth:   "Which model should judge and write?",
 }
 
-// roleNotes say what each role means, in the same words wherever it comes up.
+// roleNotes say what each role does, in the same words wherever it comes up.
 var roleNotes = map[string]string{
-	roleJudge:  "The judge answers every scoring question.",
-	roleWriter: "The writer reads your text, looks the idea up on the web and writes the summary. It never scores.",
-	roleBoth:   "This model answers every scoring question, and also reads your text, looks the idea up on the web and writes the summary.",
+	roleJudge:  "The judge answers every scoring question: whether the description states the problem, which kind of idea this is, each line of the rubric, and whether each research finding is about this idea. Every answer is a probability over a few named options; the judge never writes a word.",
+	roleWriter: "The writer does what has no options to choose from: it reads your text for the details you did not type in, names the web searches and turns what they find into findings, and writes the summary paragraph. It never scores.",
+	roleBoth:   "This model answers every scoring question, and also reads your text, researches the idea on the web and writes the summary.",
 }
 
 // rolesLine is the header's model line for the choices made so far, where
@@ -618,8 +600,8 @@ func (d *ideaDraft) offered() []string {
 	return out
 }
 
-func (d *ideaDraft) intake(base pipeline.Intake) pipeline.Intake {
-	out := pipeline.Intake{Idea: strings.TrimSpace(d.idea), Fields: map[string]string{}, Profile: base.Profile}
+func (d *ideaDraft) intake(base ideacheck.Intake) ideacheck.Intake {
+	out := ideacheck.Intake{Idea: strings.TrimSpace(d.idea), Fields: map[string]string{}, Profile: base.Profile}
 	for name, v := range d.fields {
 		if s := strings.TrimSpace(*v); s != "" {
 			out.Fields[name] = s
@@ -632,7 +614,7 @@ func (a *App) openIdea() tea.Cmd {
 	// One box is the default: the details are read out of the text, what the web
 	// can answer is looked up, and only what is still missing gets asked.
 	d := &ideaDraft{idea: a.intake.Idea, details: false, fields: map[string]*string{}}
-	for _, name := range pipeline.IdeaFields() {
+	for _, name := range ideacheck.IdeaFields() {
 		v := a.intake.Fields[name]
 		d.fields[name] = &v
 	}
@@ -677,7 +659,7 @@ func (a *App) openIdea() tea.Cmd {
 func (a *App) openProfile() tea.Cmd {
 	current := a.host.Profile()
 	a.profile = map[string]*string{}
-	for _, name := range pipeline.ProfileFields() {
+	for _, name := range ideacheck.ProfileFields() {
 		v := current[name]
 		a.profile[name] = &v
 	}
@@ -700,7 +682,7 @@ func (a *App) openProfile() tea.Cmd {
 
 // ---- Follow-up questions ---------------------------------------------------
 
-func (a *App) openAsk(missing []pipeline.Missing) tea.Cmd {
+func (a *App) openAsk(missing []ideacheck.Missing) tea.Cmd {
 	a.page, a.missing, a.replies = pageAsk, missing, make([]string, len(missing))
 	steps := make([]step, len(missing))
 	for i, m := range missing {
@@ -732,11 +714,12 @@ func (a *App) openLive() tea.Cmd {
 	}
 	a.engine = engine
 	ctx, cancel := context.WithCancel(a.ctx)
-	events := make(chan pipeline.Event, 64)
+	events := make(chan ideacheck.Event, 64)
 	a.done, a.cancel = make(chan outcome, 1), cancel
 	opts := a.start.Options
-	opts.Events, opts.Proceed = events, opts.Proceed || a.asked // asked once: judge with what is known
+	opts.OnEvent, opts.Proceed = func(e ideacheck.Event) { events <- e }, opts.Proceed || a.asked // asked once: judge with what is known
 	opts.Answered = append(opts.Answered, a.answered...)
+	opts.Earlier = a.earlier
 	in := a.intake
 	go func() {
 		res, err := engine.Check(ctx, in, opts)
@@ -750,7 +733,7 @@ func (a *App) openLive() tea.Cmd {
 func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case eventMsg:
-		a.live = a.live.apply(pipeline.Event(msg))
+		a.live = a.live.apply(ideacheck.Event(msg))
 		return a.live.wait()
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -763,7 +746,8 @@ func (a *App) updateLive(msg tea.Msg) tea.Cmd {
 		if got.err != nil {
 			return a.fail(got.err)
 		}
-		if got.res.Status == pipeline.StatusNeedsInput && !a.asked && !a.start.NoAsk {
+		if got.res.Status == ideacheck.StatusNeedsInput && !a.asked && !a.start.NoAsk {
+			a.earlier = got.res
 			return a.openAsk(a.engine.FollowUps(got.res, a.intake, a.answered))
 		}
 		a.host.Persist(a.intake, got.res)
@@ -787,7 +771,7 @@ func (a *App) updateResult(msg tea.Msg) tea.Cmd {
 	case "left", "shift+tab":
 		a.tab = (a.tab + len(resultTabs) - 1) % len(resultTabs)
 	case "n":
-		a.intake, a.asked, a.answered = pipeline.Intake{}, false, nil
+		a.intake, a.asked, a.answered, a.earlier = ideacheck.Intake{}, false, nil, nil
 		return a.open(pageIdea)
 	case "h":
 		return a.open(pageHistory)
@@ -833,7 +817,7 @@ func (a *App) resultView() string {
 }
 
 // ScoresView lists every rubric dimension: the scores are the explanation.
-func ScoresView(res *pipeline.Result) string {
+func ScoresView(res *ideacheck.Result) string {
 	if len(res.Dimensions) == 0 {
 		return dim.Render("No rubric was scored for this check.")
 	}
@@ -853,21 +837,21 @@ func ScoresView(res *pipeline.Result) string {
 		good.Render("■") + dim.Render(" good news  ") + warnSty.Render("■") + dim.Render(" middling  ") + bad.Render("■") + dim.Render(" bad news")
 }
 
-func evidenceTab(res *pipeline.Result) string {
+func evidenceTab(res *ideacheck.Result) string {
 	if res.Research == nil {
 		return dim.Render("This check scored the description alone: nothing was looked up.\nResearch needs something to search with. The free way: `ideacheck search up` starts a search engine in Docker.\nOr set a TAVILY_API_KEY or BRAVE_API_KEY, or use a writer with its own web tool (Claude CLI, Codex CLI,\nAnthropic, OpenRouter). See `research:` in config.yaml.")
 	}
 	return EvidenceView(res.Research)
 }
 
-func gapsView(res *pipeline.Result) string {
+func gapsView(res *ideacheck.Result) string {
 	if len(res.Missing) == 0 {
 		return good.Render("✓") + " Nothing important is missing from the description."
 	}
 	return missingPanel(res.Missing)
 }
 
-func detailsView(res *pipeline.Result) string {
+func detailsView(res *ideacheck.Result) string {
 	var b strings.Builder
 	for _, w := range res.Warnings {
 		b.WriteString(warnSty.Bold(true).Render("! ") + warnSty.Render(w) + "\n")

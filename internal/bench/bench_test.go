@@ -8,15 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/mock"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/configs"
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/judge"
+	"github.com/morethancoder/ideacheck/judge/mock"
 )
 
 func catalog(t *testing.T) map[string]judge.Question {
 	t.Helper()
-	c, err := Catalog(config.NewFiles(""), "rubrics")
+	c, err := Catalog(configs.Defaults(), "rubrics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,9 +65,9 @@ func TestMeasureScoresAgainstLabels(t *testing.T) {
 		{ID: "i1", Labels: map[string]any{"tarpit": 1.0, "sisp": 0.0, "problem_acuity": 3.0, "idea_type": "business"}},
 		{ID: "vague", ExpectMissing: []string{"has_problem", "has_why_now"}},
 	}
-	res := func(composite float64, ms int64) *pipeline.Result {
-		return &pipeline.Result{Status: pipeline.StatusOK, Verdict: "explore", Composite: composite, Model: "m", CostEstimateUSD: 0.01,
-			Timing: pipeline.Timing{TotalMS: ms},
+	res := func(composite float64, ms int64) *ideacheck.Result {
+		return &ideacheck.Result{Status: ideacheck.StatusOK, Verdict: "explore", Composite: composite, Model: "m", CostEstimateUSD: 0.01,
+			Timing: ideacheck.Timing{TotalMS: ms},
 			Answers: []judge.Answer{
 				{ID: "tarpit", Kind: judge.Noul, Noul: 0.8},           // correct, brier 0.04
 				{ID: "sisp", Kind: judge.Noul, Noul: 0.6},             // wrong,   brier 0.36
@@ -79,7 +79,7 @@ func TestMeasureScoresAgainstLabels(t *testing.T) {
 	}
 	runs := []Run{
 		{IdeaID: "i1", Result: res(0.50, 100)}, {IdeaID: "i1", Repeat: 1, Result: res(0.60, 300)},
-		{IdeaID: "vague", Result: &pipeline.Result{Status: pipeline.StatusOK, Verdict: "park", Missing: []pipeline.Missing{{ID: "has_problem"}}, Timing: pipeline.Timing{TotalMS: 200}}},
+		{IdeaID: "vague", Result: &ideacheck.Result{Status: ideacheck.StatusOK, Verdict: "park", Missing: []ideacheck.Missing{{ID: "has_problem"}}, Timing: ideacheck.Timing{TotalMS: 200}}},
 		{IdeaID: "i1", Repeat: 2, Err: "boom"},
 	}
 	m := Measure("x", runs, ideas, catalog(t))
@@ -96,8 +96,8 @@ func TestMeasureScoresAgainstLabels(t *testing.T) {
 }
 
 func TestDryRunEndToEnd(t *testing.T) {
-	files := config.NewFiles("")
-	cfg, err := config.Load(files, config.LoadOptions{Environ: func() []string { return nil }, Overrides: map[string]any{"backend": "mock"}})
+	files := configs.Defaults()
+	settings, err := ideacheck.DefaultSettings("mock", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,11 @@ func TestDryRunEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := func(seed int64) Checker {
-		return &pipeline.Engine{Config: cfg, Files: files, Judge: &mock.Judge{Seed: seed}}
+		e, err := ideacheck.New(ideacheck.Options{Settings: settings, Files: files, Judge: &mock.Judge{Seed: seed}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
 	}
 	r := Runner{Engines: map[string]Checker{"a": engine(1), "b": engine(1), "c": engine(2)}, Order: []string{"a", "b", "c"}, Repeats: 2, Parallel: 4}
 	rep := r.Execute(context.Background(), "bench/ideas.jsonl", ideas, catalog(t), time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))

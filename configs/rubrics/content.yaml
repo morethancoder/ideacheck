@@ -3,6 +3,7 @@
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
 #  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence.<topic>` reads one research topic; only topics some question reads are searched.
 #    `evidence` is what a web search found (research.yaml lists the topics); it is
 #    only there when the check could research. A question that merely benefits
 #    from it lists it in `uses`; one that cannot be judged without it also sets
@@ -62,10 +63,14 @@ questions:
     kind: noul
     weight: 1.0
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.competitors]
     # Whether the angle is really unoccupied can only be judged against a list
     # of what is already published.
     requires: [evidence]
+    # No angle claimed is a "no" by the criteria below; a content idea's angle
+    # is what the gaps call its differentiation.
+    derive:
+      zero_when_unstated: differentiation
     instructions: Nothing listed in `evidence.competitors` already offers the angle or format the description in `idea` claims as its own.
     criteria:
       yes: The description claims a specific angle or format, and nothing listed in `evidence.competitors` is described as already offering it.

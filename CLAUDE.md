@@ -23,7 +23,7 @@ for a final score.
 question — anything whose answer is one of a known set of options, including how a
 research finding relates to the idea. The *writer* (`writer:`, `Engine.Writer`)
 does what has no option list: read a document, search the web, write a paragraph.
-One backend may hold both roles; Jev can only hold the first. When you add a
+One backend may hold both roles; Jev and Laya can only hold the first. When you add a
 model call, decide which role it is: if the answer can be typed, it is a question
 in a rubric file for the judge, not a prompt for the writer.
 
@@ -36,12 +36,14 @@ Corollary: to change behaviour, first ask whether the change belongs in
 |---|---|---|
 | Human | `ideacheck` / `ideacheck "idea"` | bubbletea TUI (`internal/tui`) |
 | Agent | `ideacheck --agent --answer problem=… ` or `ideacheck idea.md --agent` | JSON on stdout, logs on stderr, exit code carries the status |
-| Server | `ideacheck serve` | same JSON over HTTP (`internal/server`) |
+| Server | `ideacheck serve` | same JSON over HTTP (`server`) |
+| Hosted | `sparkjudge-api` (Fly.io) | the same HTTP API for the Sparkjudge iOS app, per user, behind App Attest and quotas (`docs/sparkjudge-api.md`) |
 
-All three call `pipeline.Engine.Check`. Nothing in `pipeline` knows about a
-terminal.
+All three call `ideacheck.Engine.Check`. Nothing in package `ideacheck` knows
+about a terminal, a process or a config file — see "Using the core from another
+host" below.
 
-## Pipeline (`internal/pipeline`)
+## Pipeline (`ideacheck/`, package `ideacheck`)
 
 ```
 intake → extract → gaps + router (one batch) → research + sift → score (fan-out) → aggregate → verdict → explain → persist
@@ -54,14 +56,14 @@ intake → extract → gaps + router (one batch) → research + sift → score (
 | fields | `fields.go` + `configs/fields.yaml` | the catalogue of what a caller can send and what each field means: one source for `ideacheck fields`, the JSON form, and the extraction prompt |
 | extract | `extract.go` | one optional model call that pulls idea fields out of free prose, filling only fields the user left empty (`extract: true`) |
 | gaps | `engine.go` + `rubrics/_gaps.yaml` | nouls "does the description state X"; below `threshold` and the field is still empty → `missing[]` |
-| route | `engine.go` + `rubrics/_router.yaml` | one `choice` over idea types → picks `rubrics/<type>.yaml` (`other` → `business`) |
-| research | `research.go`, `lookup.go` + `research.yaml` + `prompts/research*` | findings (with URLs) about the topics in `research.yaml` land in `result.research` and, grouped by topic, in `evidence` state. `lookup.go` is the default path and has no model in the loop: writer **plans** queries (`Planner`; else the topic's own `queries:`) → Go **searches** (`Engine.Search`: SearXNG / Tavily / Brave) → Go **reads** pages to text (`Engine.Pages`) → writer **digests** (`Digester`; else results are the findings; a finding whose URL was not among the results is dropped). `research.search: llm`, or nothing to search with, falls back to the writer's own web tool (`Researcher`). Cached per idea-as-given (`Engine.Cache`, the history DB). Every step degrades, none fails the check |
-| sift | `research.go` + `rubrics/_evidence.yaml` | the judge types each finding (one `choice` over `idea` + `finding`); options under `drop:` remove it from `evidence`. `research.sift: auto` = only when judge ≠ writer |
-| score | `engine.go`, `judge/fanout.go` | every rubric question at once, one goroutine each |
+| route | `engine.go` + `rubrics/_router.yaml` | one `choice` over idea types → picks `rubrics/<type>.yaml` (`other` → the router's `fallback:`) |
+| research | `research.go`, `lookup.go` + `research.yaml` + `prompts/research*` | the rubric is picked first, so only the `research.yaml` topics its questions read (`uses: [evidence.<topic>]`) are looked up. Findings (with URLs) land in `result.research` and, grouped by topic, in `evidence` state. `lookup.go` is the default path and has no model in the loop: writer **plans** queries (`Planner`; else the topic's own `queries:`) → Go **searches** (`Engine.Search`: SearXNG / Tavily / Brave) → Go **reads** pages to text (`Engine.Pages`) → writer **digests** (`Digester`; else results are the findings; a finding whose URL was not among the results is dropped). `research.search: llm`, or nothing to search with, falls back to the writer's own web tool (`Researcher`). Cached per idea-as-given (`Engine.Cache`, the history DB). Every step degrades, none fails the check |
+| sift | `research.go` + `rubrics/_evidence.yaml` | the judge types each finding (one `choice` over `idea` + `finding`); options under `drop:` remove it from `evidence`. `research.sift: auto` = only when judge ≠ writer. The cache keeps each finding's relation and who typed it, so the same judge never sifts a cached search twice |
+| score | `engine.go`, `../judge/fanout.go` | every rubric question at once, one goroutine each |
 | aggregate | `aggregate.go` | normalize to [0,1], apply polarity, weight, divide by the weights **answered** |
 | verdict | `verdict.go` + rubric `verdict:` block | ordered gates, then composite thresholds. No model call |
-| explain | `explain.go` | optional paragraph saying why, after scoring. Never changes a score |
-| persist | `store/` | SQLite history (`history`, `last`, `show`) |
+| explain | `explain.go` + `prompts/explain.tmpl` | optional paragraph saying why, after scoring. Never changes a score. The bands that turn a value into "strength" or "probably true" are in the template |
+| persist | `../store/` | SQLite history (`history`, `last`, `show`); the host saves, not the engine |
 
 Invariants worth keeping:
 
@@ -79,7 +81,14 @@ Invariants worth keeping:
   researched; some failing = a warning beside the findings.
 - A gap whose field a research topic `covers:` is never asked about while research
   will run, and leaves `missing[]` once findings come back. The TUI asks at most
-  `ask_limit` follow-ups (`Engine.FollowUps`).
+  `ask_limit` follow-ups (`Engine.FollowUps`), then re-runs with the needs_input
+  result as `CheckOptions.Earlier`: its gap and router answers stand, and a gap whose
+  field is now filled is never asked (nor is any gap on a filled field).
+- A field the writer extracts is trusted by default (a strong writer reads
+  well, and a gap noul would make it flicker run to run). `Settings.VerifyExtract`
+  has the judge check each one against the idea as given and drops what it does
+  not state; the mobile binding turns it on, because a phone's small writer
+  fills fields the idea never states.
 - Missing facts do not block a verdict outside the TUI: agent and server runs
   score what is known and report `missing[]` with `partial: true`. `--strict`
   restores the old "stop and ask" behaviour.
@@ -90,35 +99,77 @@ Invariants worth keeping:
 
 ## Layout
 
+The public packages are the core any host imports; `internal/` is the desktop
+CLI around it. `make core` fails when a public package reaches `os/exec`,
+`internal/`, cobra, bubbletea, zerolog or koanf, and builds them for iOS and
+Android.
+
 ```
-cmd/ideacheck/         main; everything else is internal
-internal/
-  cli/                 cobra commands and flags. check.go is the default action
-  pipeline/            the stages above; pure functions except the judge call
-  judge/               the ONE interface all model access goes through + fanout
-    backends/          jev, logprob (OpenAI-compatible + logprobs), structured
-                       (Anthropic SDK / OpenAI-compatible), claudecli, codexcli, mock
-  rubric/              YAML load, validate, hash; verdict gates
-  prompt/              text/template loading of configs/prompts/*
-  config/              koanf: flags > env IDEACHECK_* > user dir > embedded
-  search/              the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
-                       page reader (public addresses only) that boils HTML down to text.
-                       local.go drives Docker for `ideacheck search up|down|status`
-  store/               SQLite history (modernc.org/sqlite, pure Go)
-  tui/                 bubbletea app: menu, idea form, live check, result, setup
-  ui/                  the shared step column — install.sh in Go: rows, pending
-                       lines with a spinner, the download bar, warnings, errors
-  server/              HTTP API + SSE
-  bench/               backend comparison on bench/ideas.jsonl
-  selfupdate/          daily release check, verified self-replace
-  logging/             zerolog to stderr, always
-configs/               EMBEDDED DEFAULTS (go:embed), user-overridable
+cmd/ideacheck/         main; cmd/schemagen writes schemas/
+cmd/sparkjudge-api/    the hosted API for the iOS app: server + internal/sparkjudge,
+                       engine built from sparkjudge.yaml's engine: layer
+ideacheck/             THE CORE (package ideacheck): Engine, New(Options), Check(ctx,
+                       Intake, CheckOptions), Settings, Result, Event — the stages above
+judge/                 the ONE interface all model access goes through + fanout,
+                       and judge.WithLogger (log/slog on the context)
+  jev/ logprob/        backends that run anywhere: plain HTTP, no processes
+  structured/ openai/  (structured: Anthropic SDK / OpenAI-compatible)
+  mock/                the offline, fixture-driven backend
+rubric/                YAML load, validate, hash; verdict gates
+prompt/                text/template loading of configs/prompts/*
+search/                the web lookup Go runs itself: SearXNG/Tavily/Brave clients, and a
+                       page reader (public addresses only) that boils HTML down to text
+store/                 SQLite history (modernc.org/sqlite, pure Go), each check with an
+                       owner (store.Local = this machine; a migration adds the column),
+                       and FindingsCache, the research cache over it
+server/                HTTP API + SSE; takes any Store (owner-scoped), logs through slog.
+                       Hooks for a hosted API: Auth (names the tenant that owns every
+                       check, registry run and list), Meter (may refuse a check before it
+                       runs; told how it ended), Mount (extra routes behind Auth).
+                       Errors are {"status","error":code,"message"}; *server.Error sets both
+mobile/                package sparkcore: the core as a gomobile library (make mobile →
+                       build/Sparkcore.xcframework) for the Sparkjudge iOS app
+  swift/               FoundationJudge/FoundationWriter (Apple's on-device model),
+                       LayaDeviceJudge (Laya on Core ML, via LayaKit) and the
+                       throwing Swift overloads; the app compiles these in
+  swiftcheck/          xcodegen test bundle: the proof it runs in an iOS process
+configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-embedded
+                       reader. Kept at this path (not defaults/): it is what CLAUDE.md,
+                       README and every "lives in configs/" rule name
   config.yaml          backends, pricing, setup wizard choices
+  sparkjudge.yaml      the hosted API: attest mode, plans, limits, spend cap, and an
+                       engine: section layered over config.yaml (Jev + OpenRouter writer)
+  trends.yaml          the hosted API's GET /v1/trends: sources, refresh, sparks on or off
   fields.yaml          what a caller can send about an idea, and what each field means
   research.yaml        what the writer looks up on the web, and which gap each topic covers
   searxng/settings.yml the SearXNG `ideacheck search up` runs in Docker: the defaults + JSON output
   rubrics/             _gaps, _router, _evidence, business, side_project, content, research, creative
   prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
+internal/              desktop only
+  cli/                 cobra commands and flags. check.go is the default action
+  config/              koanf: flags > env IDEACHECK_* > LoadOptions.Layers > user dir >
+                       embedded; Config.Settings() is what the core runs with
+  backends/            the registry: config → judge, for -b and setup
+  judge/               backends that start processes: laya (Jev's wire format over an
+                       embedded Python worker running laya-mlx locally; one process per
+                       checkpoint, shared by every engine in the binary), claudecli, codexcli
+  searchlocal/         Docker SearXNG for `ideacheck search up|down|status`
+  tui/                 bubbletea app: menu, idea form, live check, result, setup
+  ui/                  the shared step column — install.sh in Go: rows, pending
+                       lines with a spinner, the download bar, warnings, errors
+  bench/               backend comparison on bench/ideas.jsonl
+  selfupdate/          daily release check, verified self-replace
+  logging/             zerolog to stderr, always; Slog bridges log/slog into it
+  schema/              the JSON schema of Result
+  sparkjudge/          the hosted API's own part: App Attest (Verifier, over
+                       takimoto3/app-attest; Apple's root embedded, injectable in tests),
+                       Accounts (SQLite now, an interface Postgres can take over): keys,
+                       challenges, RevenueCat entitlements, the monthly ledger, daily
+                       spend; Meter, rate limits, /v1/me and the RevenueCat webhook; the Lab
+                       routes (lab.go, trends.go): /v1/mix (writer) and /v1/trends (judge types
+                       each item with the router question, cached per refresh)
+docs/                  sparkjudge-api.md: routes, auth flow, quotas, env, deploy
+Dockerfile, fly.toml   the hosted API's image and Fly app (make deploy; deploy/sparkjudge/)
 schemas/               check_result.schema.json, generated from the Go types
 scripts/               bash for every non-trivial make target
 ```
@@ -126,7 +177,7 @@ scripts/               bash for every non-trivial make target
 User overrides live in `$XDG_CONFIG_HOME/ideacheck/` (or `-c DIR`) with the same
 relative paths; any file present there replaces the embedded one.
 
-## Core interface (`internal/judge`)
+## Core interface (`judge`)
 
 ```go
 type Judge interface {
@@ -148,11 +199,95 @@ works. For the `structured` family, searching is a provider capability:
 Question kinds: `noul` (probability a statement is true, with optional
 `criteria: {yes, no}` for the boundary), `score` (ordered levels), `choice` (named
 options). Rubric-only metadata on a question: `weight`, `polarity` (+1
-good-when-high, −1 bad-when-high, 0 informational), `uses`, `requires`, and for
-`_gaps.yaml` only `ask`/`fills`. A rubric's `verdict.backends.<name>` overrides
+good-when-high, −1 bad-when-high, 0 informational), `uses`, `requires`, `derive`
+(below), and for `_gaps.yaml` only `ask`/`fills`. A rubric's `verdict.backends.<name>` overrides
 gates/thresholds/min_confidence for one backend: cuts are tuned per backend on
 `bench`, never carried across. Composite confidence averages choice and score
 answers only — a noul is a probability, not a doubt.
+
+## Using the core from another host
+
+A host builds `ideacheck.Settings` from its own configuration (the CLI:
+`config.Config.Settings()`; anyone else: `ideacheck.DefaultSettings`, the
+embedded config.yaml's values), picks a judge from `judge/…`, and calls `New`:
+
+```go
+settings, err := ideacheck.DefaultSettings("jev", "") // judge jev, no separate writer
+if err != nil {
+	return err
+}
+engine, err := ideacheck.New(ideacheck.Options{
+	Settings: settings, // Files nil = the embedded rubrics, prompts and research.yaml
+	Judge:    &jev.Judge{BaseURL: "https://api.typesafe.ai", APIKey: key, Model: settings.Judge.Model},
+})
+if err != nil {
+	return err
+}
+res, err := engine.Check(ctx, ideacheck.Intake{Idea: "a to-do app for dentists"}, ideacheck.CheckOptions{
+	Proceed: true,                                 // score what is known, report missing[]
+	OnEvent: func(e ideacheck.Event) { /* … */ }, // live progress, one event at a time
+})
+```
+
+The rest is optional ports on `Options`: `Writer` (a backend that can write —
+extract, research, explain), `Search` + `Pages` (`search.New`,
+`search.NewReader`), `Cache` (`store.FindingsCache`). Saving is the host's job
+(`store.Open(…).Save(ctx, store.Local, …)`: every check has an owner, `""` on
+this machine). `server.Server` is the HTTP face of the same engine. A
+result's `config_hash` is `Settings.Hash`, or a hash of the Settings when the
+host leaves it empty; the CLI's is `Config.Hash()`, pinned by a test in
+`internal/config` because history and bench baselines compare it.
+
+### Mobile (`mobile/`, package `sparkcore`)
+
+The iOS app runs the whole check on the phone: `sparkcore` wraps `ideacheck` in
+what gomobile can carry — strings (JSON), numbers, errors and interfaces of
+those. The app implements `Judge` (and optionally `Writer`) in Swift; Go renders
+the prompts from `configs/` and sends them in each request, so no prompt lives
+in Swift. `Engine.Prepare(intake, options)` → `Check.Run(listener)` /
+`Check.Cancel()`; `Fields()` and `Rubrics()` feed the app's forms. No research,
+no store: evidence questions are skipped, the app keeps its own history.
+
+- Every exported call recovers panics into errors: a Go panic kills the app. A
+  Swift call cannot be interrupted, so on cancel or timeout Go stops waiting
+  and drops its answer.
+- A gomobile `(string, error)` is not `throws` in Swift (non-null NSString +
+  NSError pointer): protocol methods take `error: NSErrorPointer`
+  (`sparkcoreCatching` adapts), and `mobile/swift/Sparkcore+Throws.swift` gives
+  the calls a throwing shape.
+- The judge's `Name()` picks the verdict cuts (`verdict.backends.<name>`); the
+  on-device judge is `foundation` and has none yet — tune them on bench, do not
+  guess. It answers with one greedy pick, so run it with `max_concurrent: 1`.
+- `BatchJudge` (`NewBatchEngine`) is a judge that also answers a group in one
+  call; `FoundationJudge` is one. The core's fan-out groups by `uses`; the
+  adapter merges the groups of a stage whose states come out identical (on the
+  phone no evidence, so `[idea]` and `[idea, evidence.market]` are both
+  `{idea}`) into one round, and asks alone any question a batch misses, answers
+  badly or cannot fit (4096 tokens). Measured in the simulator: a whole check
+  123 s one by one, 36 s batched. Keep `includeSchemaInPrompt: false` — with
+  the schema spelled out a batch of 9 took 45 s instead of 10.
+- The app (`apps/ios`) links `build/Sparkcore.xcframework` and compiles
+  `mobile/swift` and LayaKit; its scheme's pre-action rebuilds the xcframework
+  when a source of the core is newer (`apps/ios/scripts/sparkcore.sh`), before
+  Xcode plans the build (the app copies the framework in before its own
+  phases). `OnDeviceChecker` runs a check per engine on its own thread;
+  `OnDeviceJudges` holds Apple Intelligence's availability and the Laya
+  checkpoints on disk and on the Hub.
+- `apps/ios/Packages/LayaKit` runs Laya typed-decision checkpoints (the Core ML
+  exports of github.com/mizorewww/laya-coreml) with no Python: its own BPE
+  tokenizer (ModernBERT byte-level and Gemma Metaspace, byte-exact against the
+  Python `tokenizers`), laya's prompt and calibration, and `LayaDownloader`
+  (the Hub's live list, never a list in code; resumable, SHA-256 checked).
+  `LayaDeviceJudge` is named `laya`, like the desktop backend, and reads the
+  request's question and state the way the desktop sends them. On iOS/macOS 26
+  Core ML runs an enumerated-shape model on the CPU only (E5RT: "tensor_buffer
+  has known strides…"), so `FixedShape` makes a fixed-length copy of the graph
+  per length bucket for the GPU (weights hard-linked, not copied). Its tests
+  compare against fixtures from `scripts/fixtures.py` and skip a checkpoint
+  that `scripts/fetch-model.sh` has not downloaded.
+- The bind runs from a throwaway module in `build/bind` that requires
+  `golang.org/x/mobile`: in go.mod it would drag x/net and x/tools forward for
+  the CLI, and gomobile cannot bind inside a go.work.
 
 ## Writing rubric questions (`rubric.Validate` enforces most of it)
 
@@ -161,10 +296,31 @@ includes `other`; `score` has 2–10 concrete levels, low → high; weights ≥ 
 every weighted question sets polarity; `uses` lists only the state the question
 needs, and a question about the person sets `requires: [profile]`; state names are
 `idea`, `profile`, `evidence` (research findings by topic; an empty list means
-"searched, found none") and `finding` (`_evidence.yaml` only); name the state
+"searched, found none") and `finding` (`_evidence.yaml` only). Prefer
+`evidence.<topic>` to the whole of `evidence`: the question sees only that topic,
+and a topic no question of the chosen rubric reads is neither searched nor
+sifted (`requires: [evidence]` is met by any topic read); name the state
 the question reads (`idea`, `profile`, `evidence.competitors`) — Jev reads literally; gate expressions may
 reference real question ids only, and see normalized values in [0,1]. After
 changing a question, `make bench ARGS='-b jev'` and compare (`bench --compare`).
+
+Only what simple code cannot decide goes to the judge. A noul may carry one
+`derive:` rule that answers it without a model call when it can, and asks the
+judge as usual when it cannot:
+
+- `present: [profile.skills, …]` — 1 when any of these intake fields is filled, else 0
+  (the only rule a `_gaps.yaml` question may use: nothing else is known yet);
+- `same_as: <gap id>` — the answer the judge gave that gap question in this check;
+- `evidence: {topic, relation}` — 1 when a finding in the topic was sifted with that
+  relation, 0 when every finding in it was sifted otherwise (or none was found);
+  the question must read that topic;
+- `zero_when_unstated: <field>` — 0 when the field is empty and its gap question
+  found it unstated; for a question whose `no` criteria say "states none".
+
+`requires:` is checked first, so a derived question is still skipped without its
+state. A derived answer has method `derived`, its dimension names the rule
+(`derived`), and it counts toward the composite like any other. Names a rule
+points at in other files are checked when the rubric loads (`derivable`).
 
 ## Look and feel
 
@@ -207,7 +363,7 @@ convention elsewhere (`-j` jobs, `-p` port) are not reused for something else.
 Document the flag in `README.md` too.
 
 Agent contract: `--agent` = JSON on stdout + never ask + score with gaps. A field
-added to `pipeline.ideaFields`/`profileFields` must be described in
+added to `ideacheck.ideaFields`/`profileFields` must be described in
 `configs/fields.yaml` — a test fails otherwise, because that catalogue is what
 callers and the extraction prompt both read.
 Exit codes: `0` scored, `2` `needs_input` (only under `--strict`), `3` the check
@@ -224,14 +380,29 @@ make run ARGS='"an idea" -b mock'      # no model needed
 make dev        # build + open the TUI
 make schema     # regenerate schemas/check_result.schema.json from the Go types
 make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so research searches for real; make down removes it
+make api        # the Sparkjudge hosted API on 127.0.0.1:8787: mock judge, attest off, X-App-User-Id alone
+make deploy     # fly deploy of the hosted API; checks login, app and secrets first, creates nothing
 ```
+
+- The hosted API's tests (`internal/sparkjudge`) play the device: a test root CA,
+  intermediate and credential certificate, hand-encoded CBOR attestation and
+  assertion objects (`device_test.go`). No test reaches Apple, RevenueCat or Fly.
 
 - `-b mock` researches only when its fixtures dir holds a `research.json` (a list
   of findings), so offline runs and old tests are unchanged; `bench` never researches.
-- Setup picks every model the same way: `modelSteps` (list, typed id, effort)
-  runs once for the provider chosen first and once for the writer beside a judge
-  that cannot write. Each provider keeps its own `pick`, so no step may assume
-  "the" model.
+- Setup asks for the two roles by name: **Judge** (provider, key, model, effort),
+  then **Writer** — the judge itself when it can write (`sameWriter`), another
+  provider that is ready, or nobody beside a judge that only judges (`noWriter`).
+  The Writer step is skipped when there is only one possible answer. `modelSteps`
+  (list, typed id, effort) runs once per role; each provider keeps its own `pick`,
+  so no step may assume "the" model. A provider that only judges is `needs_writer`
+  in `config.yaml`; nothing in Go names Jev or Laya as the classifier.
+- `laya` tests run the test binary as the worker (`TestMain` + `Judge.Command`),
+  speaking worker.py's JSON lines, so no test needs Python. `laya.Downloaded`
+  reads the Hugging Face cache the way huggingface_hub lays it out, so setup can
+  say "not downloaded" without starting an interpreter; the readiness check does
+  the same before a check, because the worker would otherwise download 850 MB
+  inside a question's timeout.
 - Setup's last step (`Research`, `internal/tui/pages.go`) offers `search up` through
   `Host.Search` / `Host.StartSearch`. A wizard default belongs in the step's
   `build`, never in the draft's constructor: a skipped step must not answer yes
@@ -240,19 +411,24 @@ make up         # = ideacheck search up: a SearXNG in Docker on 127.0.0.1, so re
   kept the old width (cut off at the edge) and the form measured too short —
   huh then squeezed the list into a window starting at the cursor, often just
   the chosen option. Settings builds selects with `choose` (options before value).
-- `search.Local` talks to Docker through the `search.Docker` func (`app.docker` in
+- `searchlocal.Local` talks to Docker through the `searchlocal.Docker` func (`app.docker` in
   the CLI), so its tests fake the docker CLI and no test needs Docker. Its errors
   are the product: `DockerError` is problem + what to do, per OS.
-- Pipeline tests replace `Engine.Search` / `Engine.Pages` with fakes; `internal/search`
+- Core tests replace `Engine.Search` / `Engine.Pages` with fakes; `search`
   tests use `httptest` per provider. No test touches the network.
 - An agent loop is the expensive way to do anything here: each turn re-sends all
   earlier tool output. Before adding a tool to a model call, ask whether Go can
   fetch the material and hand it over in one call instead.
+- Setup's model lists are read live (`discover:` per provider, `internal/cli/models.go`):
+  a model id or effort level written into Go or a preset list goes stale with the
+  next release, so `models:` in `config.yaml` only lends labels and is the fallback
+  when a list cannot be reached. `claude` has no list command; its aliases come from
+  `--help` (verified on 2.1.282).
 - The search flags were verified against the installed CLIs (`claude` 2.1.278,
   `codex` 0.153.4) — re-verify them, as the comments beside them say, when bumping.
 - `-b mock` is the offline backend: use it for anything that is not about a real
   provider's wire format.
-- Prompt output is pinned by golden files: `go test ./internal/prompt -update`.
+- Prompt output is pinned by golden files: `go test ./prompt -update`.
 - Backend tests use `net/http/httptest` fixtures per wire format — never a live API.
 - Fan-out tests assert real concurrency (12 questions × 200 ms must finish well
   under their sum) and partial failure, timeout and 429 `Retry-After` handling.

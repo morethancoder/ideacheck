@@ -1,0 +1,39 @@
+# The proof that the core runs inside an iOS process: a unit-test bundle that
+# links build/Sparkcore.xcframework (make mobile) and runs checks from Swift.
+#   xcodegen generate
+#   xcodebuild test -project SwiftCheck.xcodeproj -scheme SwiftCheck \
+#     -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
+name: SwiftCheck
+packages:
+  LayaKit:
+    path: ../../apps/ios/Packages/LayaKit
+options:
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGNING_ALLOWED: "NO"
+targets:
+  SwiftCheckTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+      - ../swift
+    dependencies:
+      - framework: ../../build/Sparkcore.xcframework
+        embed: false
+      - package: LayaKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.morethancoder.sparkcore.swiftcheck
+        GENERATE_INFOPLIST_FILE: "YES"
+schemes:
+  SwiftCheck:
+    build:
+      targets:
+        SwiftCheckTests: [test]
+    test:
+      targets:
+        - SwiftCheckTests

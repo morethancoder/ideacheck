@@ -1,0 +1,348 @@
+{
+  "status": "ok",
+  "id": "chk_01M3CX7MXGFB6QVCFTHY7MDTQH",
+  "backend": "mock",
+  "writer": "claude-cli",
+  "model": "mock",
+  "method": "mock",
+  "idea_type": {
+    "choice": "side_project",
+    "confidence": 0.8
+  },
+  "missing": [],
+  "extracted": [
+    "title"
+  ],
+  "answers": [
+    {
+      "id": "has_problem",
+      "kind": "noul",
+      "noul": 0.57664,
+      "probabilities": {
+        "no": 0.42335999999999996,
+        "yes": 0.57664
+      },
+      "confidence": 0.017014881781647784,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "has_audience",
+      "kind": "noul",
+      "noul": 0.6763600000000001,
+      "probabilities": {
+        "no": 0.3236399999999999,
+        "yes": 0.6763600000000001
+      },
+      "confidence": 0.09170401271054651,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "has_solution",
+      "kind": "noul",
+      "noul": 0.8265600000000001,
+      "probabilities": {
+        "no": 0.17343999999999993,
+        "yes": 0.8265600000000001
+      },
+      "confidence": 0.33448613380081815,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "has_why_now",
+      "kind": "noul",
+      "noul": 0.7728800000000001,
+      "probabilities": {
+        "no": 0.22711999999999988,
+        "yes": 0.7728800000000001
+      },
+      "confidence": 0.22704306684276665,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "has_competitor_awareness",
+      "kind": "noul",
+      "noul": 0.5660400000000001,
+      "probabilities": {
+        "no": 0.4339599999999999,
+        "yes": 0.5660400000000001
+      },
+      "confidence": 0.012620844640602313,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "has_differentiation",
+      "kind": "noul",
+      "noul": 0.73656,
+      "probabilities": {
+        "no": 0.26344,
+        "yes": 0.73656
+      },
+      "confidence": 0.16810686125383545,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "has_founder_context",
+      "kind": "noul",
+      "noul": 0.7520800000000001,
+      "probabilities": {
+        "no": 0.24791999999999992,
+        "yes": 0.7520800000000001
+      },
+      "confidence": 0.19203527293507672,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "idea_type",
+      "kind": "choice",
+      "choice": "side_project",
+      "probabilities": {
+        "business": 0.04,
+        "content": 0.04,
+        "creative": 0.04,
+        "other": 0.04,
+        "research": 0.04,
+        "side_project": 0.8
+      },
+      "confidence": 0.8,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 1
+    },
+    {
+      "id": "personal_usefulness",
+      "kind": "score",
+      "score": 0.3858,
+      "probabilities": {
+        "0": 0.6142000000000001,
+        "1": 0.3858
+      },
+      "confidence": 0.7,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "would_use_weekly",
+      "kind": "noul",
+      "noul": 0.58108,
+      "probabilities": {
+        "no": 0.41891999999999996,
+        "yes": 0.58108
+      },
+      "confidence": 0.019052476384078476,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "learning_value",
+      "kind": "score",
+      "score": 1.78,
+      "probabilities": {
+        "1": 0.21999999999999997,
+        "2": 0.78
+      },
+      "confidence": 0.7,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "scope_fits_time",
+      "kind": "score",
+      "probabilities": {},
+      "confidence": 0,
+      "method": "",
+      "model": "",
+      "latency_ms": 0,
+      "error": "no profile given"
+    },
+    {
+      "id": "first_version_defined",
+      "kind": "noul",
+      "noul": 0.55356,
+      "probabilities": {
+        "no": 0.44643999999999995,
+        "yes": 0.55356
+      },
+      "confidence": 0.008293145264425816,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "novelty_to_builder",
+      "kind": "noul",
+      "noul": 0.8427600000000001,
+      "probabilities": {
+        "no": 0.15723999999999994,
+        "yes": 0.8427600000000001
+      },
+      "confidence": 0.37233431843575604,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "existing_tool_suffices",
+      "kind": "noul",
+      "noul": 0.8458800000000001,
+      "probabilities": {
+        "no": 0.15411999999999992,
+        "yes": 0.8458800000000001
+      },
+      "confidence": 0.379944714778915,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    },
+    {
+      "id": "clarity",
+      "kind": "score",
+      "score": 0.3948,
+      "probabilities": {
+        "0": 0.6052,
+        "1": 0.3948
+      },
+      "confidence": 0.7,
+      "method": "mock",
+      "model": "mock",
+      "latency_ms": 0
+    }
+  ],
+  "composite": 0.44488307692307694,
+  "composite_confidence": 0.6999999999999998,
+  "verdict": "park",
+  "verdict_reason": "Composite 0.44 meets the park threshold 0.30",
+  "dimensions": [
+    {
+      "id": "personal_usefulness",
+      "value": 0.1286,
+      "weight": 1.5,
+      "polarity": 1,
+      "confidence": 0.7
+    },
+    {
+      "id": "would_use_weekly",
+      "value": 0.58108,
+      "weight": 1,
+      "polarity": 1,
+      "confidence": 0.019052476384078476
+    },
+    {
+      "id": "learning_value",
+      "value": 0.89,
+      "weight": 1,
+      "polarity": 1,
+      "confidence": 0.7
+    },
+    {
+      "id": "scope_fits_time",
+      "value": null,
+      "weight": 1.5,
+      "polarity": 1,
+      "confidence": 0,
+      "error": "no profile given"
+    },
+    {
+      "id": "first_version_defined",
+      "value": 0.55356,
+      "weight": 1,
+      "polarity": 1,
+      "confidence": 0.008293145264425816
+    },
+    {
+      "id": "novelty_to_builder",
+      "value": 0.8427600000000001,
+      "weight": 0.5,
+      "polarity": 1,
+      "confidence": 0.37233431843575604
+    },
+    {
+      "id": "existing_tool_suffices",
+      "value": 0.8458800000000001,
+      "weight": 1,
+      "polarity": -1,
+      "confidence": 0.379944714778915
+    },
+    {
+      "id": "clarity",
+      "value": 0.1974,
+      "weight": 0.5,
+      "polarity": 1,
+      "confidence": 0.7
+    }
+  ],
+  "top_strengths": [
+    {
+      "id": "learning_value",
+      "value": 0.89,
+      "weight": 1
+    },
+    {
+      "id": "novelty_to_builder",
+      "value": 0.8427600000000001,
+      "weight": 0.5
+    },
+    {
+      "id": "would_use_weekly",
+      "value": 0.58108,
+      "weight": 1
+    }
+  ],
+  "top_risks": [
+    {
+      "id": "personal_usefulness",
+      "value": 0.1286,
+      "weight": 1.5
+    },
+    {
+      "id": "existing_tool_suffices",
+      "value": 0.15411999999999992,
+      "weight": 1
+    },
+    {
+      "id": "clarity",
+      "value": 0.1974,
+      "weight": 0.5
+    }
+  ],
+  "timing": {
+    "total_ms": 24811,
+    "slowest_question": "idea_type"
+  },
+  "cost_estimate_usd": 0.007996,
+  "cost": {
+    "usd": 0.007996,
+    "basis": "reported",
+    "model": "claude-haiku-4-5",
+    "tokens_in": 4466,
+    "tokens_out": 706,
+    "note": "API list price as reported by the CLI; your subscription covers it"
+  },
+  "summary": "Your idea for a to-do app for dentists is too vague and faces strong headwinds from existing solutions. The core problem—what dentists struggle with that they can't already solve with free or cheap to-do tools like Google Tasks or Todoist—isn't clear from your description, and you haven't stated that you'd use it yourself once built. On the positive side, building this would let you learn new skills you want to develop, and it's a project type you haven't tackled before. To move this forward, clarify what a general to-do app does poorly for dentists specifically, and show how you'd be the first user validating that solution.",
+  "rubric": {
+    "name": "side_project",
+    "hash": "sha256:212d6c9d8ff85f4109e5ab0f522b2c89ff74f8eeae48bd9262441c2ce5dbac2e"
+  },
+  "config_hash": "sha256:e21ea973a5517685b3b521289d8bbe5e82b55e1fe69f7eac9e6e87677dfbb159",
+  "warnings": [
+    "not researched, scoring the description alone: searxng: reply is not JSON (invalid character '\u003c' looking for beginning of value): \u003chtml\u003e\u003chead\u003e\u003ctitle\u003eBurp Suite Community Edition\u003c/title\u003e\r\n\u003cstyle type=\"text/css\"\u003e\r\nbody { background: #dedede; font-famil…",
+    "question scope_fits_time is excluded from the composite: no profile given"
+  ],
+  "created_at": "2026-09-25T18:28:53Z"
+}

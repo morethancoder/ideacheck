@@ -10,7 +10,9 @@
 #  - `requires` (optional) names state the question cannot be judged without:
 #    when it is absent the question is not asked, and its weight moves to the rest.
 # `ask` is the follow-up shown to the user; `fills` is the intake field the reply is
-# stored in (an idea field, or profile.<field>).
+# stored in (an idea field, or profile.<field>). A gap whose field is already
+# filled is never asked. `derive: {present: [...]}` answers from which fields are
+# filled instead of asking the judge (1 when any is, else 0).
 threshold: 0.5
 # How hard unstated facts discount a result's confidence when the idea is scored
 # anyway (agent and server runs, or the TUI after it has asked once): the
@@ -65,5 +67,9 @@ questions:
       yes: "`profile` is present and states at least one of: the person's skills, their domain experience, or their relationship to the problem."
       no: "`profile` is absent or empty, or says nothing about the person's skills, experience, or relationship to the problem."
     uses: [profile]
+    # Whether the profile says anything about the person is a question of
+    # which fields are filled in: no model needed.
+    derive:
+      present: [profile.background, profile.skills, profile.domains, profile.would_use_myself]
     ask: What is your background relative to this idea (skills, domain, do you have this problem yourself)?
     fills: profile.background

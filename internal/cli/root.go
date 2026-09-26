@@ -18,7 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/search"
+	"github.com/morethancoder/ideacheck/internal/searchlocal"
 	"github.com/morethancoder/ideacheck/internal/ui"
 )
 
@@ -61,7 +61,7 @@ type app struct {
 	executable     func() (string, error) // nil means os.Executable; the upgrade target
 	width          int                    // terminal columns; 0 means ask the environment
 	releasesURL    string                 // GitHub release endpoint; empty means the real one
-	docker         search.Docker          // nil means the docker on PATH; `search up` drives it
+	docker         searchlocal.Docker     // nil means the docker on PATH; `search up` drives it
 
 	global globalFlags
 }

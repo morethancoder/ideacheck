@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/ideacheck"
 )
 
 // choose is the one way settings builds a select. The order is load-bearing:
@@ -35,7 +35,7 @@ var fieldHints = map[string]string{
 }
 
 // ApplyReplies stores non-blank replies in the fields their gaps fill.
-func ApplyReplies(in pipeline.Intake, missing []pipeline.Missing, replies []string) pipeline.Intake {
+func ApplyReplies(in ideacheck.Intake, missing []ideacheck.Missing, replies []string) ideacheck.Intake {
 	for i, m := range missing {
 		if reply := strings.TrimSpace(replies[i]); reply != "" {
 			in = in.With(m.Fills, reply)

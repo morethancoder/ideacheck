@@ -1,0 +1,60 @@
+# What GET /v1/trends shows in the Sparkjudge app's Trends screen (the hosted
+# API, cmd/sparkjudge-api; sparkjudge.yaml's lab.trends names this file).
+#
+# Built at most once per `refresh`: the sources are fetched, the judge types
+# every item into the router's idea types (rubrics/_router.yaml, the same
+# question a check asks), and the writer, when it can, writes one inspiration
+# prompt per type (prompts/trends_spark*). The result is kept in the checks
+# database and served from there until it is `refresh` old, so a request costs
+# no model call. A source that fails is left out with a warning; if every one
+# fails, the last list is served again.
+refresh: 24h
+timeout: 20s                  # per source
+max_items: 40                 # after dropping repeated URLs
+judge_timeout: 90s            # typing every item, all at once
+
+# kind says how to read a source's reply:
+#   hn      HN Algolia's search API ({hits: [{title, url, objectID, points}]})
+#   github  GitHub's repository search ({items: [{full_name, html_url, description, stargazers_count}]})
+#   search  the research search service (SearXNG, Tavily or Brave, as research
+#           is configured), once per query; skipped when there is none
+# In a url, {since_unix} and {since_date} are now minus `since` (the url is sent
+# as written: escape what a query may not carry, such as > as %3E). An item with no
+# link of its own (an Ask HN) points at `item_url`, {id} being its id;
+# `strip_prefix` comes off the front of every title.
+# `token_env` names an environment variable whose value, when set, is sent as a
+# bearer token (GitHub allows more searches with one; none is needed).
+# Product Hunt is not here: its API needs a developer token for every call.
+sources:
+  - id: show_hn
+    name: Show HN
+    kind: hn
+    url: https://hn.algolia.com/api/v1/search?tags=show_hn&numericFilters=created_at_i%3E{since_unix}&hitsPerPage=15
+    since: 168h
+    limit: 12
+    strip_prefix: "Show HN: "
+    item_url: https://news.ycombinator.com/item?id={id}
+  - id: hn
+    name: Hacker News
+    kind: hn
+    url: https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=15
+    limit: 10
+    item_url: https://news.ycombinator.com/item?id={id}
+  - id: github
+    name: GitHub
+    kind: github
+    url: https://api.github.com/search/repositories?q=created:%3E{since_date}&sort=stars&order=desc&per_page=15
+    since: 168h
+    limit: 12
+    token_env: GITHUB_TOKEN
+  - id: news
+    name: News
+    kind: search
+    queries:
+      - startup launches this week
+      - new app launched this week
+    limit: 8
+
+# One writer call per build that writes a prompt per idea type from the items
+# filed under it. Off, or with a writer that cannot write, the list has items only.
+spark: true

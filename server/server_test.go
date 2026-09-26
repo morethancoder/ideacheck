@@ -1,0 +1,330 @@
+package server
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/morethancoder/ideacheck/configs"
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/judge/mock"
+	"github.com/morethancoder/ideacheck/store"
+)
+
+func newServer(t *testing.T, with ...func(*Server)) *httptest.Server {
+	t.Helper()
+	files := configs.Defaults()
+	settings, err := ideacheck.DefaultSettings("mock", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "h.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	engine, err := ideacheck.New(ideacheck.Options{Settings: settings, Files: files, Judge: &mock.Judge{Seed: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Engine: engine, Store: st, Files: files, RubricsDir: settings.RubricsDir}
+	for _, f := range with {
+		f(s)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func getJSON(t *testing.T, url string, into any) int {
+	t.Helper()
+	res, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	_ = json.NewDecoder(res.Body).Decode(into)
+	return res.StatusCode
+}
+
+func TestCheckIsSavedAndRetrievable(t *testing.T) {
+	srv := newServer(t)
+	res, err := http.Post(srv.URL+"/v1/check?rubric=business", "application/json", strings.NewReader(`{"idea":"A payroll compliance tool"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got ideacheck.Result
+	_ = json.NewDecoder(res.Body).Decode(&got)
+	res.Body.Close()
+	if res.StatusCode != 200 || got.Status != ideacheck.StatusOK || got.Verdict == "" || got.Rubric.Name != "business" {
+		t.Fatalf("POST /v1/check = %d %+v", res.StatusCode, got)
+	}
+	var again ideacheck.Result
+	if code := getJSON(t, srv.URL+"/v1/checks/"+got.ID, &again); code != 200 || again.Composite != got.Composite {
+		t.Errorf("GET by id = %d %+v", code, again)
+	}
+	var list struct{ Checks []store.Row }
+	if getJSON(t, srv.URL+"/v1/checks", &list); len(list.Checks) != 1 || list.Checks[0].ID != got.ID {
+		t.Errorf("list = %+v", list)
+	}
+	if code := getJSON(t, srv.URL+"/v1/checks/chk_missing", &again); code != 404 {
+		t.Errorf("missing id = %d, want 404", code)
+	}
+}
+
+func TestBadRequests(t *testing.T) {
+	srv := newServer(t)
+	for name, body := range map[string]string{"empty": "", "unknown field": `{"idea":"x","fields":{"pitch":"y"}}`, "broken json": `{"idea":`} {
+		res, _ := http.Post(srv.URL+"/v1/check", "application/json", strings.NewReader(body))
+		if res.StatusCode != 400 {
+			t.Errorf("%s: status %d, want 400", name, res.StatusCode)
+		}
+		res.Body.Close()
+	}
+}
+
+// Async check + SSE: a subscriber sees every question start and land, then the result.
+func TestEventsStreamProgressThenResult(t *testing.T) {
+	srv := newServer(t)
+	res, _ := http.Post(srv.URL+"/v1/check?async=1&rubric=creative", "application/json", strings.NewReader(`{"idea":"A puzzle game"}`))
+	var accepted struct{ ID, Events string }
+	_ = json.NewDecoder(res.Body).Decode(&accepted)
+	res.Body.Close()
+	if res.StatusCode != 202 || accepted.ID == "" {
+		t.Fatalf("async POST = %d %+v", res.StatusCode, accepted)
+	}
+	stream, err := http.Get(srv.URL + accepted.Events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if ct := stream.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("content type = %q", ct)
+	}
+	counts := map[string]int{}
+	var final ideacheck.Result
+	sc := bufio.NewScanner(stream.Body)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	event := ""
+	for sc.Scan() {
+		line := sc.Text()
+		if name, ok := strings.CutPrefix(line, "event: "); ok {
+			event = name
+		}
+		if data, ok := strings.CutPrefix(line, "data: "); ok {
+			counts[event]++
+			if event == "result" {
+				_ = json.Unmarshal([]byte(data), &final)
+			}
+		}
+	}
+	// 6 gaps (the rubric is forced, so no router) + 3 of the 4 creative
+	// questions that need no profile + the summary, each started + answered;
+	// founder context and audience_named are derived, shown answered only.
+	if counts["progress"] != 2*(6+3+1)+2 || counts["result"] != 1 || final.ID != accepted.ID || final.Verdict == "" {
+		t.Errorf("events = %v final = %+v", counts, final)
+	}
+	if code := getJSON(t, srv.URL+"/v1/checks/chk_nope/events", &struct{}{}); code != 404 {
+		t.Errorf("events for unknown id = %d", code)
+	}
+}
+
+func TestCORSIsLimitedToLocalhost(t *testing.T) {
+	srv := newServer(t)
+	for origin, allowed := range map[string]bool{"http://localhost:5173": true, "http://127.0.0.1:3000": true, "https://evil.example": false, "http://localhost.evil.example": false} {
+		req, _ := http.NewRequest(http.MethodOptions, srv.URL+"/v1/check", nil)
+		req.Header.Set("Origin", origin)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, res.Body)
+		res.Body.Close()
+		if got := res.Header.Get("Access-Control-Allow-Origin") == origin; got != allowed {
+			t.Errorf("origin %s allowed = %v, want %v", origin, got, allowed)
+		}
+	}
+}
+
+func TestRubricsAndHealth(t *testing.T) {
+	srv := newServer(t)
+	var rubrics struct {
+		Rubrics []struct {
+			Name      string
+			Questions []struct{ ID string }
+		}
+	}
+	if code := getJSON(t, srv.URL+"/v1/rubrics", &rubrics); code != 200 || len(rubrics.Rubrics) != 5 || len(rubrics.Rubrics[0].Questions) == 0 {
+		t.Errorf("rubrics = %d %+v", code, rubrics)
+	}
+	var health map[string]string
+	if code := getJSON(t, srv.URL+"/v1/healthz", &health); code != 200 || health["status"] != "ok" {
+		t.Errorf("healthz = %d %v", code, health)
+	}
+}
+
+// tenants records who each saved check belonged to.
+type tenants struct {
+	Store
+	saved []string
+}
+
+func (t *tenants) Save(ctx context.Context, owner string, in ideacheck.Intake, res *ideacheck.Result) error {
+	t.saved = append(t.saved, owner)
+	return t.Store.Save(ctx, owner, in, res)
+}
+
+func TestAuthAdmitsOrRefusesAndNamesTheTenant(t *testing.T) {
+	var kept *tenants
+	srv := newServer(t, func(s *Server) {
+		kept = &tenants{Store: s.Store}
+		s.Store = kept
+		s.Auth = func(r *http.Request) (string, error) {
+			if r.Header.Get("Authorization") != "Bearer k1" {
+				return "", errors.New("no such key")
+			}
+			return "acme", nil
+		}
+	})
+	var health map[string]string
+	if code := getJSON(t, srv.URL+"/v1/healthz", &health); code != 200 {
+		t.Errorf("healthz without a key = %d, want 200", code)
+	}
+	var refused map[string]string
+	if code := getJSON(t, srv.URL+"/v1/rubrics", &refused); code != 401 || refused["error"] != "unauthorized" || refused["message"] != "no such key" {
+		t.Errorf("rubrics without a key = %d %v, want 401", code, refused)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/check?rubric=business", strings.NewReader(`{"idea":"A payroll compliance tool"}`))
+	req.Header.Set("Authorization", "Bearer k1")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 || len(kept.saved) != 1 || kept.saved[0] != "acme" {
+		t.Errorf("check with a key = %d, saved for %v; want 200 for acme", res.StatusCode, kept.saved)
+	}
+}
+
+// as sends a request as the tenant named in X-Tenant (see byHeader).
+func as(t *testing.T, tenant, method, url, body string) (int, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(method, url, strings.NewReader(body))
+	req.Header.Set("X-Tenant", tenant)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return res.StatusCode, b
+}
+
+func byHeader(s *Server) {
+	s.Auth = func(r *http.Request) (string, error) { return r.Header.Get("X-Tenant"), nil }
+}
+
+// A tenant never sees another tenant's check: not in the list, not by id, not
+// its live events.
+func TestTenantsSeeOnlyTheirOwnChecks(t *testing.T) {
+	srv := newServer(t, byHeader)
+	code, body := as(t, "ann", http.MethodPost, srv.URL+"/v1/check?async=1&rubric=creative", `{"idea":"A puzzle game"}`)
+	var accepted struct{ ID string }
+	_ = json.Unmarshal(body, &accepted)
+	if code != 202 {
+		t.Fatalf("async POST = %d %s", code, body)
+	}
+	if code, _ := as(t, "bob", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID+"/events", ""); code != 404 {
+		t.Errorf("bob's view of ann's live events = %d, want 404", code)
+	}
+	// ann's stream ends when her check does, and it is then in her history.
+	if code, _ := as(t, "ann", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID+"/events", ""); code != 200 {
+		t.Fatalf("ann's events = %d", code)
+	}
+	if code, _ := as(t, "bob", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID, ""); code != 404 {
+		t.Errorf("bob's GET of ann's check = %d, want 404", code)
+	}
+	if code, _ := as(t, "ann", http.MethodGet, srv.URL+"/v1/checks/"+accepted.ID, ""); code != 200 {
+		t.Errorf("ann's GET of her check = %d", code)
+	}
+	var list struct{ Checks []store.Row }
+	_, body = as(t, "bob", http.MethodGet, srv.URL+"/v1/checks", "")
+	if _ = json.Unmarshal(body, &list); len(list.Checks) != 0 {
+		t.Errorf("bob's list = %+v, want empty", list.Checks)
+	}
+}
+
+// A meter that refuses stops the check before it runs, with its own status and
+// code; one that admits hears how the check ended.
+func TestMeterRefusesOrSettles(t *testing.T) {
+	var settled []string
+	srv := newServer(t, byHeader, func(s *Server) {
+		s.Meter = func(_ context.Context, tenant string) (func(*ideacheck.Result, error), error) {
+			if tenant == "broke" {
+				return nil, &Error{Status: http.StatusPaymentRequired, Code: "quota_exceeded", Message: "no checks left this month"}
+			}
+			return func(res *ideacheck.Result, err error) { settled = append(settled, res.Status) }, nil
+		}
+	})
+	code, body := as(t, "broke", http.MethodPost, srv.URL+"/v1/check", `{"idea":"A puzzle game"}`)
+	var refused map[string]string
+	_ = json.Unmarshal(body, &refused)
+	if code != 402 || refused["error"] != "quota_exceeded" || refused["message"] == "" {
+		t.Errorf("refused check = %d %s", code, body)
+	}
+	if code, body := as(t, "ann", http.MethodPost, srv.URL+"/v1/check?rubric=creative", `{"idea":"A puzzle game"}`); code != 200 {
+		t.Fatalf("admitted check = %d %s", code, body)
+	}
+	if len(settled) != 1 || settled[0] != ideacheck.StatusOK {
+		t.Errorf("settled = %v, want one ok", settled)
+	}
+}
+
+func TestFieldsCatalogue(t *testing.T) {
+	srv := newServer(t)
+	var f ideacheck.Fields
+	if code := getJSON(t, srv.URL+"/v1/fields", &f); code != 200 || len(f.Idea) == 0 || f.Idea[0].Name == "" {
+		t.Errorf("fields = %d %+v", code, f)
+	}
+}
+
+// slow holds every check until release is closed.
+type slow struct{ release chan struct{} }
+
+func (s slow) Check(ctx context.Context, _ ideacheck.Intake, o ideacheck.CheckOptions) (*ideacheck.Result, error) {
+	<-s.release
+	return &ideacheck.Result{ID: o.ID, Status: ideacheck.StatusOK}, nil
+}
+
+// A quiet check still sends bytes, so a proxy that drops idle connections
+// does not cut the stream before the result.
+func TestQuietStreamsKeepAlive(t *testing.T) {
+	held := slow{release: make(chan struct{})}
+	srv := newServer(t, func(s *Server) { s.Engine = held; s.KeepAlive = 10 * time.Millisecond })
+	res, _ := http.Post(srv.URL+"/v1/check?async=1", "application/json", strings.NewReader(`{"idea":"A puzzle game"}`))
+	var accepted struct{ Events string }
+	_ = json.NewDecoder(res.Body).Decode(&accepted)
+	res.Body.Close()
+	stream, err := http.Get(srv.URL + accepted.Events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	sc := bufio.NewScanner(stream.Body)
+	for sc.Scan() && sc.Text() != ": keep-alive" {
+	}
+	close(held.release)
+	for sc.Scan() && sc.Text() != "event: result" {
+	}
+	if sc.Text() != "event: result" {
+		t.Error("the stream ended without its result after keep-alives")
+	}
+}

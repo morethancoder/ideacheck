@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/morethancoder/ideacheck/internal/judge/backends"
+	"github.com/morethancoder/ideacheck/internal/backends"
 	"github.com/morethancoder/ideacheck/internal/logging"
-	"github.com/morethancoder/ideacheck/internal/server"
-	"github.com/morethancoder/ideacheck/internal/store"
+	"github.com/morethancoder/ideacheck/server"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 func (a *app) serveCmd() *cobra.Command {
@@ -44,7 +44,7 @@ func (a *app) serveCmd() *cobra.Command {
 			}
 			defer st.Close()
 			log := logging.New(a.stderr, cfg.Log.Level, cfg.Log.Format, !a.global.noColor && a.getenv("NO_COLOR") == "")
-			api := &server.Server{Engine: engine, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: log}
+			api := &server.Server{Engine: engine, Store: st, Files: a.files(), RubricsDir: cfg.RubricsDir, Log: logging.Slog(log)}
 			return listen(cmd.Context(), net.JoinHostPort(host, strconv.Itoa(port)), api.Handler(), func(addr string) {
 				// A person watching a terminal gets the step column; anything
 				// else — a supervisor, a log file — gets the structured line.
@@ -61,7 +61,7 @@ func (a *app) serveCmd() *cobra.Command {
 				p.Row("listening", "http://"+addr)
 				p.Blank()
 				p.Hint("POST /v1/check", `{"idea":"..."}`)
-				p.Hint("GET /v1/checks", "past checks · /v1/rubrics · /v1/healthz")
+				p.Hint("GET /v1/checks", "past checks · /v1/rubrics · /v1/fields · /v1/healthz")
 				p.Blank()
 				p.Note("ctrl+c stops it, draining the checks in flight")
 				p.Blank()
@@ -72,7 +72,7 @@ func (a *app) serveCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.IntVarP(&port, "port", "p", 8080, "port")                                                                   // here -p IS port (docker, ssh, kubectl port-forward)
 	f.StringVarP(&host, "host", "H", "127.0.0.1", "bind address")                                                 // -H = host; -h is help
-	f.StringVarP(&backend, "backend", "b", "", "jev, logprob, structured, claude-cli, mock")                      // same as the default action
+	f.StringVarP(&backend, "backend", "b", "", "jev, laya, logprob, structured, claude-cli, codex-cli, mock")     // same as the default action
 	f.BoolVar(&allowCLI, "allow-cli-backend", false, "permit the claude-cli / codex-cli backends in server mode") // long only: a deliberate opt-in
 	return cmd
 }

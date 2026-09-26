@@ -5,6 +5,8 @@ package logging
 import (
 	"context"
 	"io"
+	"log/slog"
+	"slices"
 
 	"github.com/rs/zerolog"
 )
@@ -42,5 +44,56 @@ func WithRequestID(ctx context.Context, log zerolog.Logger, id string) context.C
 	return log.With().Str("request_id", id).Logger().WithContext(ctx)
 }
 
-// From returns the context's logger (a disabled logger when none was attached).
-func From(ctx context.Context) *zerolog.Logger { return zerolog.Ctx(ctx) }
+// Slog is l for packages that log through log/slog (the server, the judges),
+// so their lines look like every other line.
+func Slog(l zerolog.Logger) *slog.Logger { return slog.New(bridge{l: l}) }
+
+type bridge struct {
+	l     zerolog.Logger
+	attrs []slog.Attr
+}
+
+func (b bridge) Enabled(_ context.Context, lvl slog.Level) bool { return level(lvl) >= b.l.GetLevel() }
+
+func (b bridge) Handle(_ context.Context, r slog.Record) error {
+	ev := b.l.WithLevel(level(r.Level))
+	add := func(a slog.Attr) bool {
+		v := a.Value.Resolve()
+		if err, ok := v.Any().(error); ok {
+			ev = ev.AnErr(a.Key, err)
+		} else if v.Kind() == slog.KindString {
+			ev = ev.Str(a.Key, v.String())
+		} else {
+			ev = ev.Interface(a.Key, v.Any())
+		}
+		return true
+	}
+	for _, a := range b.attrs {
+		add(a)
+	}
+	r.Attrs(add)
+	ev.Msg(r.Message)
+	return nil
+}
+
+func (b bridge) WithAttrs(attrs []slog.Attr) slog.Handler {
+	b.attrs = append(slices.Clip(b.attrs), attrs...)
+	return b
+}
+
+// WithGroup flattens: nothing here logs groups.
+func (b bridge) WithGroup(string) slog.Handler { return b }
+
+func level(l slog.Level) zerolog.Level {
+	switch {
+	case l >= slog.LevelError:
+		return zerolog.ErrorLevel
+	case l >= slog.LevelWarn:
+		return zerolog.WarnLevel
+	case l >= slog.LevelInfo:
+		return zerolog.InfoLevel
+	case l >= slog.LevelDebug:
+		return zerolog.DebugLevel
+	}
+	return zerolog.TraceLevel
+}

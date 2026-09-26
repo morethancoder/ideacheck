@@ -1,0 +1,17 @@
+# Only what `go build ./cmd/sparkjudge-api` and the entrypoint need; never .env.
+*
+!go.mod
+!go.sum
+!cmd/
+!configs/
+!ideacheck/
+!internal/
+!judge/
+!prompt/
+!rubric/
+!search/
+!server/
+!store/
+!deploy/sparkjudge/
+**/*_test.go
+**/testdata/

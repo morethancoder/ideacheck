@@ -8,13 +8,13 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/morethancoder/ideacheck/internal/judge"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/judge"
 )
 
-// Checker is the slice of pipeline.Engine the runner needs.
+// Checker is the slice of ideacheck.Engine the runner needs.
 type Checker interface {
-	Check(ctx context.Context, in pipeline.Intake, o pipeline.Options) (*pipeline.Result, error)
+	Check(ctx context.Context, in ideacheck.Intake, o ideacheck.CheckOptions) (*ideacheck.Result, error)
 }
 
 type Runner struct {
@@ -27,11 +27,11 @@ type Runner struct {
 
 // Run is one (backend, idea, repeat) check.
 type Run struct {
-	Backend string           `json:"backend"`
-	IdeaID  string           `json:"idea_id"`
-	Repeat  int              `json:"repeat"`
-	Result  *pipeline.Result `json:"result,omitempty"`
-	Err     string           `json:"error,omitempty"`
+	Backend string            `json:"backend"`
+	IdeaID  string            `json:"idea_id"`
+	Repeat  int               `json:"repeat"`
+	Result  *ideacheck.Result `json:"result,omitempty"`
+	Err     string            `json:"error,omitempty"`
 }
 
 type Report struct {
@@ -83,7 +83,7 @@ func (r Runner) runBackend(ctx context.Context, backend string, ideas []Idea) []
 	for i := range runs {
 		g.Go(func() error {
 			// Proceed: gaps are measured (recall) but must not stop scoring.
-			res, err := r.Engines[backend].Check(ctx, byID[runs[i].IdeaID].Intake(), pipeline.Options{Rubric: r.Rubric, Proceed: true})
+			res, err := r.Engines[backend].Check(ctx, byID[runs[i].IdeaID].Intake(), ideacheck.CheckOptions{Rubric: r.Rubric, Proceed: true})
 			if err != nil {
 				runs[i].Err = err.Error()
 			}
@@ -136,7 +136,7 @@ func Measure(backend string, runs []Run, ideas []Idea, catalog map[string]judge.
 	composites := map[string][]float64{}
 	for _, run := range runs {
 		res := run.Result
-		if res == nil || res.Status == pipeline.StatusError {
+		if res == nil || res.Status == ideacheck.StatusError {
 			m.Failed++
 			continue
 		}
@@ -188,7 +188,7 @@ func scoreLabel(q judge.Question, a judge.Answer, label any, accuracy, mae, brie
 	}
 }
 
-func scoreGaps(expected []string, got []pipeline.Missing, recall *tally) {
+func scoreGaps(expected []string, got []ideacheck.Missing, recall *tally) {
 	found := map[string]bool{}
 	for _, m := range got {
 		found[m.ID] = true

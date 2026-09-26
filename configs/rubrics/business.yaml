@@ -3,6 +3,7 @@
 #  - every `choice` includes `other`; `score` has 2-10 levels, worded concretely, low -> high;
 #  - weights are >= 0; every weighted question sets polarity (+1 good-when-high, -1 bad-when-high);
 #  - `uses` lists only the state fields the question needs (idea, profile, evidence).
+#    `evidence.<topic>` reads one research topic; only topics some question reads are searched.
 #    `evidence` is what a web search found (research.yaml lists the topics); it is
 #    only there when the check could research. A question that merely benefits
 #    from it lists it in `uses`; one that cannot be judged without it also sets
@@ -47,7 +48,7 @@ questions:
     kind: score
     weight: 1.0
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.market]
     instructions: How large could the market for the idea in `idea` plausibly become? When `evidence` is present, go by the market signals in `evidence.market` over the description's own claims.
     levels:
       - Tiny niche unlikely to grow
@@ -58,7 +59,7 @@ questions:
     kind: noul
     weight: 1.5
     polarity: -1
-    uses: [idea, evidence]
+    uses: [idea, evidence.prior_attempts]
     instructions: This is an idea many people independently come up with and that has repeatedly been tried without success (for example apps to plan meetups with friends, generic social networks, restaurant or music discovery apps). When `evidence` is present, `evidence.prior_attempts` lists earlier attempts a web search found.
     criteria:
       yes: A common idea many teams have launched, in a category that keeps failing to become a lasting business.
@@ -76,7 +77,11 @@ questions:
     kind: noul
     weight: 0
     polarity: 0
-    uses: [idea, evidence]
+    uses: [idea, evidence.competitors]
+    # The judge already typed each competitor it found: one that addresses the
+    # same problem for the same audience is this question's yes.
+    derive:
+      evidence: {topic: competitors, relation: direct}
     instructions: Products or services already exist that address substantially the same problem for the same audience. When `evidence` is present, `evidence.competitors` lists what a web search found, and an empty list means it found none.
     criteria:
       yes: At least one existing product or service already does this job for this audience, even imperfectly.
@@ -94,10 +99,13 @@ questions:
     kind: noul
     weight: 1.0
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.competitors]
     # Whether the claimed difference survives contact with what already exists
     # can only be judged against a list of what exists.
     requires: [evidence]
+    # No difference claimed is a "no" by the criteria below.
+    derive:
+      zero_when_unstated: differentiation
     instructions: None of the products listed in `evidence.competitors` already offers what the description in `idea` claims as its difference.
     criteria:
       yes: The description claims a specific difference, and no product listed in `evidence.competitors` is described as already offering it.
@@ -106,7 +114,7 @@ questions:
     kind: score
     weight: 1.0
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.recent_changes]
     instructions: How strong is the reason this is newly possible or newly needed? When `evidence` is present, `evidence.recent_changes` lists recent changes a web search found.
     levels:
       - Nothing has changed; this could have been built years ago
@@ -117,8 +125,11 @@ questions:
     kind: noul
     weight: 0.5
     polarity: 1
-    uses: [idea, evidence]
+    uses: [idea, evidence.recent_changes]
     requires: [evidence]
+    # No reason given is a "no" by the criteria below.
+    derive:
+      zero_when_unstated: why_now
     instructions: A change listed in `evidence.recent_changes` supports the reason the description in `idea` gives for why this is possible or needed now.
     criteria:
       yes: The description gives a reason, and a change listed in `evidence.recent_changes` is that same change or directly supports it.

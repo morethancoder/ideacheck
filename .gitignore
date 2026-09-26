@@ -4,3 +4,6 @@ bench/results/*
 .env
 .playwright/
 *.db
+.claude/worktrees/
+build/
+mobile/swiftcheck/*.xcodeproj/

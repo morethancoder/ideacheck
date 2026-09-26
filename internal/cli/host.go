@@ -6,11 +6,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/search"
-	"github.com/morethancoder/ideacheck/internal/store"
+	"github.com/morethancoder/ideacheck/internal/judge/laya"
+	"github.com/morethancoder/ideacheck/internal/searchlocal"
 	"github.com/morethancoder/ideacheck/internal/tui"
+	"github.com/morethancoder/ideacheck/search"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 // host connects the TUI app to config, credentials, the engine and history.
@@ -76,7 +78,13 @@ func (h *host) livePrices(url string) map[string]config.Price {
 // MissingModel is true when p runs models locally and model is not downloaded.
 // An Ollama that is not answering says false: the readiness check explains that.
 func (h *host) MissingModel(p config.Provider, model string) bool {
-	if !localOllama(p) || model == "" {
+	if model == "" {
+		return false
+	}
+	if p.Backend == laya.Name {
+		return !laya.Downloaded(model)
+	}
+	if !localOllama(p) {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(h.ctx, readyTimeout)
@@ -86,6 +94,13 @@ func (h *host) MissingModel(p config.Provider, model string) bool {
 }
 
 func (h *host) Download(ctx context.Context, p config.Provider, model string, progress func(tui.Progress)) error {
+	if p.Backend == laya.Name {
+		cfg, _ := h.config()
+		j := &laya.Judge{Model: model, Python: cfg.Backends[laya.Name].Python}
+		return j.Download(ctx, func(status string, done, total int64) {
+			progress(tui.Progress{Status: status, Done: done, Total: total})
+		})
+	}
 	return pullModel(ctx, p.BaseURL, model, progress)
 }
 
@@ -97,7 +112,7 @@ func (h *host) Search() tui.SearchState {
 		return tui.SearchState{}
 	}
 	s := tui.SearchState{Enabled: cfg.Research.Enabled}
-	if provider, err := search.New(h.ctx, cfg.Research, h.app.secrets().Get); err == nil && provider != nil {
+	if provider, err := search.New(h.ctx, cfg.Research.Searching(), h.app.secrets().Get); err == nil && provider != nil {
 		s.With = provider.Name()
 		return s
 	}
@@ -110,7 +125,7 @@ func (h *host) StartSearch(ctx context.Context, progress func(tui.Progress)) err
 	if err != nil {
 		return err
 	}
-	return local.Up(ctx, func(s search.Step) {
+	return local.Up(ctx, func(s searchlocal.Step) {
 		if !s.Done && !s.Warn {
 			progress(tui.Progress{Status: s.Text})
 		}
@@ -166,7 +181,7 @@ func (h *host) Writer() (string, string, string) {
 
 // Engine is only handed out once the model can be reached; a *tui.NotReady
 // error sends the app to Settings with the reason instead of failing every question.
-func (h *host) Engine() (*pipeline.Engine, error) {
+func (h *host) Engine() (*ideacheck.Engine, error) {
 	engine, cfg, err := h.app.engine(h.flags)
 	if err != nil {
 		return nil, err
@@ -175,7 +190,7 @@ func (h *host) Engine() (*pipeline.Engine, error) {
 }
 
 func (h *host) Profile() map[string]string {
-	in, err := h.app.withProfile(pipeline.Intake{}, h.flags.profile)
+	in, err := h.app.withProfile(ideacheck.Intake{}, h.flags.profile)
 	if err != nil {
 		return nil
 	}
@@ -197,20 +212,20 @@ func (h *host) History(limit int) ([]store.Row, error) {
 		return nil, err
 	}
 	defer s.Close()
-	return s.List(h.ctx, limit)
+	return s.List(h.ctx, store.Local, limit)
 }
 
-func (h *host) Stored(ref string) (*pipeline.Result, error) {
+func (h *host) Stored(ref string) (*ideacheck.Result, error) {
 	s, err := h.store()
 	if err != nil {
 		return nil, err
 	}
 	defer s.Close()
-	return s.Get(h.ctx, ref)
+	return s.Get(h.ctx, store.Local, ref)
 }
 
 // Persist is best-effort: history must never cost the user a result.
-func (h *host) Persist(in pipeline.Intake, res *pipeline.Result) {
+func (h *host) Persist(in ideacheck.Intake, res *ideacheck.Result) {
 	if cfg, err := h.config(); err == nil {
 		_ = h.app.persist(h.ctx, cfg.Store.Path, in, res)
 	}

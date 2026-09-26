@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/morethancoder/ideacheck/internal/judge"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
+	"github.com/morethancoder/ideacheck/ideacheck"
+	"github.com/morethancoder/ideacheck/judge"
 )
 
 type row struct {
@@ -19,12 +19,12 @@ type row struct {
 }
 
 type outcome struct {
-	res *pipeline.Result
+	res *ideacheck.Result
 	err error
 }
 
 type (
-	eventMsg  pipeline.Event
+	eventMsg  ideacheck.Event
 	closedMsg struct{}
 )
 
@@ -33,10 +33,10 @@ type liveModel struct {
 	rows   []row
 	index  map[string]int
 	spin   spinner.Model
-	events <-chan pipeline.Event
+	events <-chan ideacheck.Event
 }
 
-func newLive(header string, events <-chan pipeline.Event) liveModel {
+func newLive(header string, events <-chan ideacheck.Event) liveModel {
 	return liveModel{
 		header: header, index: map[string]int{}, events: events,
 		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(accent)),
@@ -45,7 +45,7 @@ func newLive(header string, events <-chan pipeline.Event) liveModel {
 
 func (m liveModel) Init() tea.Cmd { return tea.Batch(m.spin.Tick, m.wait()) }
 
-// wait blocks for the next pipeline event; a closed channel means the check is over.
+// wait blocks for the next check event; a closed channel means the check is over.
 func (m liveModel) wait() tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-m.events
@@ -59,7 +59,7 @@ func (m liveModel) wait() tea.Cmd {
 func (m liveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case eventMsg:
-		return m.apply(pipeline.Event(msg)), m.wait()
+		return m.apply(ideacheck.Event(msg)), m.wait()
 	case closedMsg:
 		return m, tea.Quit
 	case tea.KeyMsg:
@@ -75,7 +75,7 @@ func (m liveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // apply adds a row when a question starts and fills it in when the answer lands.
-func (m liveModel) apply(e pipeline.Event) liveModel {
+func (m liveModel) apply(e ideacheck.Event) liveModel {
 	i, ok := m.index[e.Question.ID]
 	if !ok {
 		i = len(m.rows)
@@ -109,13 +109,13 @@ func (m liveModel) body() string {
 
 func stageTitle(stage string) string {
 	switch stage {
-	case pipeline.StagePreflight:
+	case ideacheck.StagePreflight:
 		return "What is stated · idea type"
-	case pipeline.StageExtract:
+	case ideacheck.StageExtract:
 		return "Reading the description"
-	case pipeline.StageResearch:
+	case ideacheck.StageResearch:
 		return "Looking it up on the web"
-	case pipeline.StageExplain:
+	case ideacheck.StageExplain:
 		return "Summary"
 	}
 	return "Scoring"
@@ -128,9 +128,9 @@ func (m liveModel) renderRow(r row) string {
 		return fmt.Sprintf("  %s %s", m.spin.View(), dim.Render(name))
 	case r.answer.Failed():
 		return fmt.Sprintf("  %s %s %s", bad.Render("✗"), name, bad.Render(r.answer.Err))
-	case r.stage == pipeline.StageExplain:
+	case r.stage == ideacheck.StageExplain:
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render("written"))
-	case r.stage == pipeline.StageExtract:
+	case r.stage == ideacheck.StageExtract:
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render("read"))
 	case r.value == nil && r.answer.Confidence == 0: // a step of the web lookup: a count, not a judgment
 		return fmt.Sprintf("  %s %s %s", good.Render("✓"), name, dim.Render(r.answer.Choice))

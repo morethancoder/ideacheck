@@ -13,11 +13,11 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/morethancoder/ideacheck/ideacheck"
 	"github.com/morethancoder/ideacheck/internal/config"
-	"github.com/morethancoder/ideacheck/internal/judge"
-	"github.com/morethancoder/ideacheck/internal/judge/backends/mock"
-	"github.com/morethancoder/ideacheck/internal/pipeline"
-	"github.com/morethancoder/ideacheck/internal/store"
+	"github.com/morethancoder/ideacheck/judge"
+	"github.com/morethancoder/ideacheck/judge/mock"
+	"github.com/morethancoder/ideacheck/store"
 )
 
 type fakeHost struct {
@@ -27,8 +27,9 @@ type fakeHost struct {
 	roles     string // "judge+writer" provider ids, as SaveRoles got them
 	keys      map[string]bool
 	providers []config.Provider
-	persists  []*pipeline.Result
+	persists  []*ideacheck.Result
 	profile   map[string]string
+	current   [3]string // backend, model, effort the judge runs now; zero = mock
 	writer    [3]string // backend, model, effort of the writer in effect
 	notReady  string    // Engine fails with *NotReady until setup is saved
 	models    []config.ModelChoice
@@ -48,7 +49,12 @@ func (h *fakeHost) Providers() []config.Provider {
 	}
 	return []config.Provider{{ID: "claude-cli", Backend: "claude-cli", Model: "sonnet"}, {ID: "openai", Backend: "structured", Provider: "openai", Model: "gpt-x", KeyEnv: "OPENAI_API_KEY"}}
 }
-func (h *fakeHost) Current() (string, string, string) { return "mock", "mock", "" }
+func (h *fakeHost) Current() (string, string, string) {
+	if h.current != [3]string{} {
+		return h.current[0], h.current[1], h.current[2]
+	}
+	return "mock", "mock", ""
+}
 func (h *fakeHost) Models(p config.Provider, _ string) ([]config.ModelChoice, error) {
 	if h.models != nil {
 		return h.models, nil
@@ -99,19 +105,23 @@ func (h *fakeHost) SaveRoles(judge, writer config.Provider) error {
 	return nil
 }
 func (h *fakeHost) Writer() (string, string, string) { return h.writer[0], h.writer[1], h.writer[2] }
-func (h *fakeHost) Engine() (*pipeline.Engine, error) {
+func (h *fakeHost) Engine() (*ideacheck.Engine, error) {
 	if h.notReady != "" {
 		return nil, &NotReady{Reason: h.notReady}
 	}
-	files := config.NewFiles("")
-	cfg, err := config.Load(files, config.LoadOptions{Environ: func() []string { return nil }, Overrides: map[string]any{"backend": "mock"}})
-	return &pipeline.Engine{Config: cfg, Files: files, Judge: &mock.Judge{Seed: 1, FixturesDir: h.fixtures}}, err
+	settings, err := ideacheck.DefaultSettings("mock", "")
+	if err != nil {
+		return nil, err
+	}
+	return ideacheck.New(ideacheck.Options{Settings: settings, Judge: &mock.Judge{Seed: 1, FixturesDir: h.fixtures}})
 }
-func (h *fakeHost) Profile() map[string]string                    { return h.profile }
-func (h *fakeHost) SaveProfile(p map[string]string) error         { h.profile = p; return nil }
-func (h *fakeHost) History(int) ([]store.Row, error)              { return nil, nil }
-func (h *fakeHost) Stored(string) (*pipeline.Result, error)       { return nil, nil }
-func (h *fakeHost) Persist(_ pipeline.Intake, r *pipeline.Result) { h.persists = append(h.persists, r) }
+func (h *fakeHost) Profile() map[string]string               { return h.profile }
+func (h *fakeHost) SaveProfile(p map[string]string) error    { h.profile = p; return nil }
+func (h *fakeHost) History(int) ([]store.Row, error)         { return nil, nil }
+func (h *fakeHost) Stored(string) (*ideacheck.Result, error) { return nil, nil }
+func (h *fakeHost) Persist(_ ideacheck.Intake, r *ideacheck.Result) {
+	h.persists = append(h.persists, r)
+}
 
 // pump runs a command chain the way the bubbletea runtime would, feeding every
 // produced message back into Update, until the app leaves fromPage.
@@ -156,7 +166,7 @@ func TestCheckFlowAsksOnceThenShowsAndSavesTheResult(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "has_why_now.json"), []byte(`{"noul":0.2}`), 0o644)
 	h := &fakeHost{t: t, fixtures: dir}
-	a := newApp(h, Start{Page: pageLive, Intake: pipeline.Intake{Idea: "A payroll tool"}, Options: pipeline.Options{Rubric: "business"}})
+	a := newApp(h, Start{Page: pageLive, Intake: ideacheck.Intake{Idea: "A payroll tool", Profile: map[string]string{"background": "ran payroll at a restaurant"}}, Options: ideacheck.CheckOptions{Rubric: "business"}})
 
 	pump(t, a, a.Init(), pageLive)
 	if a.page != pageAsk || len(a.missing) != 1 || a.missing[0].ID != "has_why_now" || len(h.persists) != 0 {
@@ -169,7 +179,7 @@ func TestCheckFlowAsksOnceThenShowsAndSavesTheResult(t *testing.T) {
 	a.replies[0] = "Tip-credit rules changed this year"
 	a.page = pageAsk
 	pump(t, a, a.wizardDone(), pageLive)
-	if a.page != pageResult || a.result == nil || a.result.Status != pipeline.StatusOK || a.result.Verdict == "" {
+	if a.page != pageResult || a.result == nil || a.result.Status != ideacheck.StatusOK || a.result.Verdict == "" {
 		t.Fatalf("after one round of questions the idea is judged regardless: page=%v result=%+v", a.page, a.result)
 	}
 	if a.intake.Fields["why_now"] != "Tip-credit rules changed this year" || len(h.persists) != 1 {
@@ -199,7 +209,7 @@ func TestDetailStepsAreNotAskedAgain(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(dir, gap+".json"), []byte(`{"noul":0.2}`), 0o644)
 	}
 	h := &fakeHost{t: t, fixtures: dir}
-	a := newApp(h, Start{Page: pageIdea, Options: pipeline.Options{Rubric: "business"}})
+	a := newApp(h, Start{Page: pageIdea, Options: ideacheck.CheckOptions{Rubric: "business"}})
 	a.Init()
 	a.draft.idea, a.draft.details = "A payroll tool", true // "Yes, step by step": one box is the default
 	*a.draft.fields["why_now"] = "vague"
@@ -209,7 +219,7 @@ func TestDetailStepsAreNotAskedAgain(t *testing.T) {
 		t.Fatalf("page=%v asks=%+v, want only the background question", a.page, a.missing)
 	}
 
-	a = newApp(h, Start{Page: pageIdea, Options: pipeline.Options{Rubric: "business"}})
+	a = newApp(h, Start{Page: pageIdea, Options: ideacheck.CheckOptions{Rubric: "business"}})
 	a.Init()
 	a.draft.idea, a.draft.details = "A payroll tool", false // "Skip, just check it"
 	pump(t, a, a.wizardDone(), pageIdea)
@@ -222,9 +232,9 @@ func TestDetailStepsAreNotAskedAgain(t *testing.T) {
 func TestNoAskReportsGapsWithoutAsking(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "has_why_now.json"), []byte(`{"noul":0.2}`), 0o644)
-	a := newApp(&fakeHost{t: t, fixtures: dir}, Start{Page: pageLive, NoAsk: true, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(&fakeHost{t: t, fixtures: dir}, Start{Page: pageLive, NoAsk: true, Intake: ideacheck.Intake{Idea: "x"}})
 	pump(t, a, a.Init(), pageLive)
-	if a.page != pageResult || a.result.Status != pipeline.StatusNeedsInput {
+	if a.page != pageResult || a.result.Status != ideacheck.StatusNeedsInput {
 		t.Errorf("-A: page=%v status=%q", a.page, a.result.Status)
 	}
 }
@@ -240,8 +250,8 @@ func TestSetupOffersToKeepAKeyAlreadySet(t *testing.T) {
 	if view := a.View(); !strings.Contains(view, "already set") || !strings.Contains(view, "ending in …abcd") || !strings.Contains(view, "Replace it") {
 		t.Fatalf("want the keep-or-replace choice, got:\n%s", view)
 	}
-	if _, total := a.wiz.position(); total != 3 {
-		t.Errorf("keeping the key: provider, key choice, model; total = %d", total)
+	if _, total := a.wiz.position(); total != 4 {
+		t.Errorf("keeping the key: judge, key choice, judge model, writer (Claude CLI is ready too); total = %d", total)
 	}
 	a.setup.key, loadChosen(a).custom = "typed-then-kept", "gpt-y"
 	a.finishSetup()
@@ -267,7 +277,7 @@ func TestSetupOffersToKeepAKeyAlreadySet(t *testing.T) {
 
 func TestFirstRunSetupThenContinuesToTheCheck(t *testing.T) {
 	h := &fakeHost{t: t}
-	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: ideacheck.Intake{Idea: "x"}})
 	a.Init()
 	if a.page != pageSetup {
 		t.Fatalf("first run must open setup, got page %v", a.page)
@@ -276,8 +286,8 @@ func TestFirstRunSetupThenContinuesToTheCheck(t *testing.T) {
 		t.Errorf("claude-cli needs no key: want step 1 of 2, got %d of %d", at, total)
 	}
 	a.setup.id = "openai"
-	if _, total := a.wiz.position(); total != 3 {
-		t.Errorf("a key provider adds the API key step: total = %d", total)
+	if _, total := a.wiz.position(); total != 4 {
+		t.Errorf("a key provider adds the API key step, and Claude CLI is there to write: total = %d", total)
 	}
 	a.setup.key, loadChosen(a).custom = " sk-test ", " gpt-y "
 	a.finishSetup()
@@ -291,7 +301,7 @@ func TestFirstRunSetupThenContinuesToTheCheck(t *testing.T) {
 
 func TestUnreachableModelOpensSettingsCalmlyThenRunsTheCheck(t *testing.T) {
 	h := &fakeHost{t: t, notReady: "The model qwen3:8b is not downloaded."}
-	a := newApp(h, Start{Page: pageLive, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(h, Start{Page: pageLive, Intake: ideacheck.Intake{Idea: "x"}})
 	a.Init()
 	view := a.View()
 	if a.page != pageSetup || a.banner != "" || !strings.Contains(view, "qwen3:8b is not downloaded") || strings.Contains(view, "! ") {
@@ -316,6 +326,23 @@ func TestSetupNeverDefaultsToAModelThatIsNotInstalled(t *testing.T) {
 	a.open(pageSetup)
 	if got := loadChosen(a).modelID(); got != "qwen3:8b" {
 		t.Errorf("default model = %q, want the preset when it is installed", got)
+	}
+}
+
+func TestSetupKeepsAPinnedModelTheLiveListNoLongerNames(t *testing.T) {
+	jev := config.Provider{ID: "jev", Backend: "jev", Model: "jev-latest", Discover: "typesafe",
+		Models: []config.ModelChoice{{ID: "jev-latest"}, {ID: "jev-1.13.0"}}}
+	h := &fakeHost{t: t, providers: []config.Provider{jev}, models: []config.ModelChoice{{ID: "jev-preview"}, {ID: "jev-latest"}},
+		current: [3]string{"jev", "jev-1.13.0", ""}}
+	a := newApp(h, Start{Page: pageMenu})
+	a.open(pageSetup)
+	if got := loadChosen(a).modelID(); got != "jev-1.13.0" {
+		t.Errorf("model = %q, want the saved pin kept", got)
+	}
+	h.current = [3]string{"jev", "retired-model", ""}
+	a.open(pageSetup)
+	if got := loadChosen(a).modelID(); got != "jev-preview" {
+		t.Errorf("model = %q, want the newest listed: a saved id the presets do not name is not a pin", got)
 	}
 }
 
@@ -382,7 +409,7 @@ func TestMenuNavigation(t *testing.T) {
 func TestSetupDownloadsAMissingLocalModelBeforeSavingIt(t *testing.T) {
 	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Discover: "ollama", Billing: "local"}
 	h := &fakeHost{t: t, providers: []config.Provider{ollama}, models: []config.ModelChoice{{ID: "llama3.2:3b"}}, missing: "qwen3:8b"}
-	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: ideacheck.Intake{Idea: "x"}})
 	a.Init()
 	k := loadChosen(a)
 	k.model, k.custom = otherModel, " qwen3:8b "
@@ -471,38 +498,65 @@ func TestABlankModelIDIsNotSaved(t *testing.T) {
 	}
 }
 
-// Jev only classifies, so choosing it asks who writes; choosing a chat model
-// while holding a TypeSafe key offers Jev as the judge beside it. Either way
-// the saved roles say who judges and who writes.
-func TestSetupPairsAClassifierWithAWriter(t *testing.T) {
+// Setup asks for the judge, then for the writer. A judge that only judges
+// (Jev, Laya) needs another provider or nobody; a chat judge can write as well,
+// or hand that to another provider. The saved roles say who does what.
+func TestSetupPairsAJudgeWithAWriter(t *testing.T) {
 	providers := []config.Provider{
 		{ID: "claude-cli", Label: "Claude CLI", Backend: "claude-cli", NeedsCLI: "claude", Model: "sonnet"},
 		{ID: "jev", Label: "Jev", Backend: "jev", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true, Model: "jev-1"},
+		{ID: "laya", Label: "Laya", Backend: "laya", NeedsWriter: true, Model: "aac6fef/laya-mlx"},
 		{ID: "openai", Label: "OpenAI", Backend: "structured", KeyEnv: "OPENAI_API_KEY", Model: "gpt"},
 	}
 	h := &fakeHost{t: t, providers: providers, keys: map[string]bool{"TYPESAFE_API_KEY": true}}
 	a := newApp(h, Start{Page: pageSetup, ExitAfter: true})
 	a.Init()
-
-	a.setup.id = "jev"
-	if opts := a.writers(a.setup); len(opts) != 2 || opts[0].Value != "claude-cli" || opts[1].Value != noWriter {
-		t.Fatalf("writers = %+v, want the ready chat provider then nobody (OpenAI has no key)", opts)
-	}
-	a.setup.writer = "claude-cli"
-	a.saveSetup()
-	if h.roles != "jev+claude-cli" {
-		t.Errorf("roles = %q, want jev judging and claude-cli writing", h.roles)
+	if view := a.View(); !strings.Contains(view, "Choose the judge") || !strings.Contains(view, "every scoring question") {
+		t.Errorf("the first step names the role and what it does:\n%s", view)
 	}
 
-	a.setup.id, a.setup.jevJudges = "claude-cli", true
-	a.saveSetup()
-	if h.roles != "jev+claude-cli" {
-		t.Errorf("roles = %q, want Jev offered as the judge beside the chosen model", h.roles)
+	for _, id := range []string{"jev", "laya"} {
+		a.setup.id = id
+		if opts := a.writers(a.setup); len(opts) != 2 || opts[0].Value != "claude-cli" || opts[1].Value != noWriter {
+			t.Fatalf("%s: writers = %+v, want the ready chat provider then nobody (OpenAI has no key; a judge-only model never writes)", id, opts)
+		}
+		a.setup.writer = "claude-cli"
+		a.saveSetup()
+		if h.roles != id+"+claude-cli" {
+			t.Errorf("roles = %q, want %s judging and claude-cli writing", h.roles, id)
+		}
+		a.setup.writer = noWriter
+		a.saveSetup()
+		if h.roles != id+"+" {
+			t.Errorf("roles = %q, want %s alone", h.roles, id)
+		}
 	}
-	a.setup.jevJudges = false
+
+	a.setup.id = "claude-cli"
+	opts := a.writers(a.setup)
+	if len(opts) != 1 || opts[0].Value != sameWriter {
+		t.Fatalf("writers = %+v, want only the judge itself (nothing else is ready, and a chat judge needs nobody)", opts)
+	}
+	if _, total := a.wiz.position(); total != 2 {
+		t.Errorf("one possible writer is no choice: judge, judge model; total = %d", total)
+	}
+	a.setup.writer = sameWriter
 	a.saveSetup()
 	if h.roles != "claude-cli+" {
 		t.Errorf("roles = %q, want one model doing everything", h.roles)
+	}
+
+	h.keys["OPENAI_API_KEY"] = true
+	if opts := a.writers(a.setup); len(opts) != 2 || opts[1].Value != "openai" {
+		t.Fatalf("writers = %+v, want the judge itself, then OpenAI now that it has a key", opts)
+	}
+	if _, total := a.wiz.position(); total != 3 {
+		t.Errorf("a second possible writer adds the Writer step: total = %d", total)
+	}
+	a.setup.writer = "openai"
+	a.saveSetup()
+	if h.roles != "claude-cli+openai" {
+		t.Errorf("roles = %q, want a chat judge with another writer", h.roles)
 	}
 }
 
@@ -529,7 +583,7 @@ func TestSetupPicksTheWritersModel(t *testing.T) {
 		t.Errorf("the writer's model defaults to the one it runs now, got %q", k.modelID())
 	}
 	if _, total := a.wiz.position(); total != 5 {
-		t.Errorf("provider, key, model, writer, writer model (haiku takes no effort): total = %d", total)
+		t.Errorf("judge, key, judge model, writer, writer model (haiku takes no effort): total = %d", total)
 	}
 	k.model, k.effort = "sonnet", "high"
 	if _, total := a.wiz.position(); total != 6 {
@@ -595,7 +649,7 @@ func TestSetupSaysHowToGetDockerWhenItCannotStartASearchEngine(t *testing.T) {
 	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
 	h := &fakeHost{t: t, providers: []config.Provider{ollama},
 		search: &SearchState{Enabled: true, DockerErr: errors.New("Docker is installed but not running\nStart it: open -a Docker")}}
-	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: ideacheck.Intake{Idea: "x"}})
 	view, ok := researchStep(t, a)
 	if !ok || !strings.Contains(view, "open -a Docker") || !strings.Contains(view, "ideacheck search up") || !strings.Contains(view, "own web tool") {
 		t.Fatalf("the step must carry the way out:\n%s", view)
@@ -609,7 +663,7 @@ func TestSetupSaysHowToGetDockerWhenItCannotStartASearchEngine(t *testing.T) {
 func TestSetupStartsTheSearchEngineAfterSaving(t *testing.T) {
 	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
 	h := &fakeHost{t: t, providers: []config.Provider{ollama}, search: &SearchState{Enabled: true}}
-	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: ideacheck.Intake{Idea: "x"}})
 	a.Init()
 	a.setup.startSearch = true
 	cmd := a.finishSetup()
@@ -626,7 +680,7 @@ func TestSetupStartsTheSearchEngineAfterSaving(t *testing.T) {
 func TestAFailedSearchEngineStartKeepsTheSetup(t *testing.T) {
 	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
 	h := &fakeHost{t: t, providers: []config.Provider{ollama}, search: &SearchState{Enabled: true}, searchErr: errors.New("port 8080 is taken")}
-	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: pipeline.Intake{Idea: "x"}})
+	a := newApp(h, Start{Page: pageLive, NeedSetup: true, Intake: ideacheck.Intake{Idea: "x"}})
 	a.Init()
 	a.setup.startSearch = true
 	pump(t, a, a.finishSetup(), pageDownload)
@@ -635,18 +689,20 @@ func TestAFailedSearchEngineStartKeepsTheSetup(t *testing.T) {
 	}
 }
 
-// The Judge step is skipped when Jev has no key; its "yes" default must not
-// apply to a question that was never asked, or a first run saves a judge that
-// cannot answer.
-func TestSetupWithoutAJevKeyKeepsTheChosenModelAsJudge(t *testing.T) {
+// A first run with nothing but a local model answers the Writer step for the
+// user: the judge writes too. Nothing skipped may leave the roles unset.
+func TestFirstRunWithOneProviderSavesItAsJudgeAndWriter(t *testing.T) {
 	ollama := config.Provider{ID: "ollama", Backend: "logprob", Model: "qwen3:8b", Billing: "local"}
 	jev := config.Provider{ID: "jev", Backend: "jev", Model: "jev-1", KeyEnv: "TYPESAFE_API_KEY", NeedsWriter: true}
 	h := &fakeHost{t: t, providers: []config.Provider{ollama, jev}}
 	a := newApp(h, Start{Page: pageSetup, NeedSetup: true})
 	a.Init()
 	a.setup.id = "ollama"
-	if judge, writer := a.setup.roles(); judge.ID != "ollama" || writer.ID != "" {
-		t.Errorf("judge=%q writer=%q, want ollama alone", judge.ID, writer.ID)
+	if _, total := a.wiz.position(); total != 2 {
+		t.Errorf("judge, judge model — Jev has no key, so no writer to choose: total = %d", total)
+	}
+	if judge, writer := a.setup.roles(); judge.ID != "ollama" || writer.ID != "" || a.setup.role() != roleBoth {
+		t.Errorf("judge=%q writer=%q role=%q, want ollama alone", judge.ID, writer.ID, a.setup.role())
 	}
 }
 

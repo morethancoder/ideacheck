@@ -150,6 +150,9 @@
         },
         "error": {
           "type": "string"
+        },
+        "derived": {
+          "type": "string"
         }
       },
       "additionalProperties": false,
