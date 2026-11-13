@@ -128,9 +128,9 @@ func TestResearchIsCachedPerIdea(t *testing.T) {
 	cache := &memCache{m: map[string][]byte{}}
 	e.Cache = cache
 
-	first, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
-	second, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true})
-	other, _ := e.Check(context.Background(), Intake{Idea: "A different idea"}, CheckOptions{Proceed: true})
+	first, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "business"})
+	second, _ := e.Check(context.Background(), idea, CheckOptions{Proceed: true, Rubric: "business"})
+	other, _ := e.Check(context.Background(), Intake{Idea: "A different idea"}, CheckOptions{Proceed: true, Rubric: "business"})
 	if first.Research.Cached || !second.Research.Cached || other.Research.Cached || cache.puts != 2 {
 		t.Errorf("cached = %v %v %v, puts = %d; want false true false, 2", first.Research.Cached, second.Research.Cached, other.Research.Cached, cache.puts)
 	}

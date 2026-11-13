@@ -162,7 +162,7 @@ func TestRubricsAndHealth(t *testing.T) {
 			Questions []struct{ ID string }
 		}
 	}
-	if code := getJSON(t, srv.URL+"/v1/rubrics", &rubrics); code != 200 || len(rubrics.Rubrics) != 5 || len(rubrics.Rubrics[0].Questions) == 0 {
+	if code := getJSON(t, srv.URL+"/v1/rubrics", &rubrics); code != 200 || len(rubrics.Rubrics) != 6 || len(rubrics.Rubrics[0].Questions) == 0 {
 		t.Errorf("rubrics = %d %+v", code, rubrics)
 	}
 	var health map[string]string
