@@ -386,6 +386,15 @@ does not load.
 Precedence: flags > env (`IDEACHECK_BACKEND=jev`, nest with `__`:
 `IDEACHECK_BACKENDS__JEV__MODEL=…`) > your config dir > embedded defaults.
 
+Shipped rubrics (`ideacheck rubrics`): `business`, `side_project`, `content` (series,
+channels, newsletters, podcasts, courses), `video` (one YouTube video or short: search
+demand, outlier evidence, competition gap, packaging, proof, channel fit, video type),
+`research` and `creative`. The router picks one; `-r` forces one. For `video`, pass a
+ytx research note as evidence:
+`ideacheck "a video about X" -r video --context "$(cat note.md)"`; the rubric reads its
+sections (Demand, Top videos, Outliers, Channels in this space, What viewers ask, How
+the top videos open).
+
 Rubrics (`rubrics/*.yaml`) are validated on load: one judgment per question, every
 `choice` has `other`, 2–10 score levels, weighted questions declare polarity, gate
 expressions may only reference real question ids. Gates see **normalized** values in

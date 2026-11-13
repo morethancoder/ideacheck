@@ -20,7 +20,8 @@ questions:
     options:
       business: A product, service, or startup intended to make money
       side_project: A tool or app built mainly for personal use, learning, or fun
-      content: A blog, newsletter, video series, podcast, course, or similar media
+      content: A blog, newsletter, video series, YouTube channel, podcast, course, or similar media made of many pieces
+      video: One single YouTube video or short ("a video about...", "YouTube video", "short about..."), not a series or a channel
       research: An investigation, experiment, paper, or study
       creative: A game, story, artwork, music, or other creative work
       other: None of the above

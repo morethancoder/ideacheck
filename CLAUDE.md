@@ -143,7 +143,7 @@ configs/               EMBEDDED DEFAULTS (go:embed) + Files, the user-dir-over-e
   fields.yaml          what a caller can send about an idea, and what each field means
   research.yaml        what the writer looks up on the web, and which gap each topic covers
   searxng/settings.yml the SearXNG `ideacheck search up` runs in Docker: the defaults + JSON output
-  rubrics/             _gaps, _router, _evidence, business, side_project, content, research, creative
+  rubrics/             _gaps, _router, _evidence, business, side_project, content, video, research, creative
   prompts/             judge_system.md, question_*.tmpl, explain*, extract*, research*
 internal/              desktop only
   cli/                 cobra commands and flags. check.go is the default action

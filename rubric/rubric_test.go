@@ -30,7 +30,7 @@ func TestEmbeddedRubricsAreValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(names, ","); got != "business,content,creative,research,side_project" {
+	if got := strings.Join(names, ","); got != "business,content,creative,research,side_project,video" {
 		t.Fatalf("scoring rubrics = %s", got)
 	}
 	for _, name := range append(names, GapsName, RouterName) {

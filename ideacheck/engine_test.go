@@ -164,6 +164,7 @@ func TestRouting(t *testing.T) {
 		warn                       bool
 	}{
 		{"router choice", "content", "", "content", false},
+		{"single video routes to video", "video", "", "video", false},
 		{"other falls back", "other", "", "business", true},
 		{"type without a rubric falls back", "podcast", "", "business", true},
 		{"forced beats router", "content", "research", "research", false},

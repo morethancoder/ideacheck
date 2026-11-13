@@ -1,0 +1,110 @@
+# Scores ONE YouTube video idea (long-form or short). Series and channels are
+# scored by `content`. Rules: see the header of content.yaml (enforced by rubric.Validate).
+#
+# Evidence: a ytx research note passed as supporting material, e.g.
+#   ideacheck "a video about X" -r video --context "$(cat note.md)"
+# It reaches the judge inside `idea` (as its context). Its sections are:
+#   Demand, Top videos, Outliers, Channels in this space, What viewers ask,
+#   How the top videos open, Sources.
+# With no note, the questions fall back to the pitch and answer on that alone
+# (the lowest level when the pitch claims nothing checkable).
+#
+# Weights (sum 9.5), by how much each decides whether a video gets watched:
+#   packaging_potential 2.0  a click needs a promise; the strongest lever the creator controls
+#   outlier_evidence    2.0  views / channel median across the topic shows real appetite
+#                            beyond one channel's audience; the best proof the topic can win
+#   search_demand       1.5  steady, findable traffic; but browse traffic can carry a video
+#                            with no search at all, so below the two above
+#   competition_gap     1.5  an unfilled angle lets a new video stand out; no gap means a
+#                            crowded result page
+#   proof_available     1.0  shown proof holds retention, but a video can work on story alone
+#   channel_fit         1.0  matters for the first push to the existing audience; an
+#                            outlier topic can pull in a new one
+#   video_type_fits     0.5  a wrong type hurts, but it is the easiest thing to change later
+name: video
+description: Evaluates a single YouTube video idea (long-form or short); series and channels go to `content`.
+questions:
+  - id: search_demand
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: How much do people search YouTube for this topic? Read the Demand section of a ytx research note in `idea` (autocomplete phrases, search results volume) when there is one.
+    levels:
+      - No autocomplete phrases and a thin search results page, or no evidence of searching at all
+      - A few autocomplete phrases or a modest search results page; some searchers, not many
+      - Several matching autocomplete phrases and a busy search results page; clear, steady searching
+  - id: outlier_evidence
+    kind: score
+    weight: 2.0
+    polarity: 1
+    uses: [idea]
+    instructions: Have videos on this topic beaten their own channel's usual views (views divided by the channel median)? Read the Outliers section of a ytx research note in `idea` when there is one, and the Top videos section for the views behind it.
+    levels:
+      - No outliers listed, or every video sits near its channel's median (about 1x)
+      - One or two videos at 2x to 4x their channel's median
+      - Several videos at 4x or more, from different channels
+  - id: competition_gap
+    kind: score
+    weight: 1.5
+    polarity: 1
+    uses: [idea]
+    instructions: Is there an angle the top videos miss? Read What viewers ask (unanswered questions), Top videos (age, weak ones), How the top videos open and Channels in this space in a ytx research note in `idea` when there is one.
+    levels:
+      - The top videos are recent and strong, and cover the angle in the idea and what viewers ask
+      - The top videos cover the basics; some viewer questions or an angle are left open
+      - The top videos are old or weak and viewers ask questions nobody answers; the angle in the idea is open
+  - id: packaging_potential
+    kind: score
+    weight: 2.0
+    polarity: 1
+    uses: [idea]
+    instructions: Can this video get a title and a thumbnail that make a clear promise or contrast (expectation versus reality, before and after, a number, a stake)? Judge the idea; use the titles in the Top videos section of a ytx research note in `idea` only to see what is already common.
+    levels:
+      - No clear promise or contrast; the title would only name the topic
+      - A promise exists but is vague, or has no visible contrast, number or stake
+      - A clear promise with a visible contrast, number or stake that fits a title and a thumbnail
+  - id: proof_available
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: Can the creator show the thing (a build, a result, a test, footage) rather than only talk about it? Use `profile` for what the creator can actually do.
+    levels:
+      - Talking only; nothing to show on screen
+      - Something can be shown, but only partly, or it is not yet made
+      - The build, result, test or footage exists or is certain to be made, and the video can show it
+  - id: channel_fit
+    kind: score
+    weight: 1.0
+    polarity: 1
+    uses: [idea, profile]
+    instructions: Does the idea match what the creator's audience already watches, and can the creator credibly make it? Use `profile` for the creator and the Channels in this space section of a ytx research note in `idea` for what similar audiences watch.
+    levels:
+      - Far from the creator's audience or experience
+      - Adjacent to the audience, or credible but not proven
+      - Squarely what the audience watches and the creator has shown they can make
+  - id: video_type_fits
+    kind: score
+    weight: 0.5
+    polarity: 1
+    uses: [idea]
+    instructions: Does the video type chosen in `idea` (reaction, storytelling, build, tutorial, explainer, review, challenge) fit what the topic needs? Judge from the topic and, when a ytx research note is in `idea`, from How the top videos open and the types of the Top videos.
+    levels:
+      - The type works against the topic (a reaction to a thing with nothing to react to, a tutorial on a story)
+      - The type works but another would suit better, or none is stated
+      - The type is the natural form for this topic
+
+verdict:
+  gates:
+    - when: "packaging_potential < 0.3"
+      max: explore
+      reason: No clear title and thumbnail promise
+    - when: "outlier_evidence < 0.2 && search_demand < 0.2"
+      max: park
+      reason: No sign anyone watches or searches this topic
+  thresholds:
+    build: 0.65
+    explore: 0.45
+    park: 0.30
+  min_confidence: 0.45

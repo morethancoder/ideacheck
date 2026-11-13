@@ -249,7 +249,7 @@ func TestEmbeddedShipsUnderscoreFilesAndAllSkipsGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"_evidence.yaml", "_gaps.yaml", "_router.yaml", "business.yaml", "content.yaml", "creative.yaml", "research.yaml", "side_project.yaml"}
+	want := []string{"_evidence.yaml", "_gaps.yaml", "_router.yaml", "business.yaml", "content.yaml", "creative.yaml", "research.yaml", "side_project.yaml", "video.yaml"}
 	if !reflect.DeepEqual(names, want) {
 		t.Errorf("embedded rubrics = %v, want %v", names, want)
 	}
@@ -257,7 +257,7 @@ func TestEmbeddedShipsUnderscoreFilesAndAllSkipsGo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := 5 + 8 + 17 + 1; len(all) != want { // config.yaml + fields.yaml + research.yaml + sparkjudge.yaml + trends.yaml, 8 rubrics, 17 prompts, searxng/settings.yml
+	if want := 5 + 9 + 17 + 1; len(all) != want { // config.yaml + fields.yaml + research.yaml + sparkjudge.yaml + trends.yaml, 9 rubrics, 17 prompts, searxng/settings.yml
 		t.Errorf("All() = %d files %v, want %d", len(all), all, want)
 	}
 	for _, p := range all {

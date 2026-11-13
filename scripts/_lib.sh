@@ -51,6 +51,8 @@ want_env() {
 
 # confirm "question" — auto-yes when CI=1.
 confirm() {
+  # no terminal (background job, pipe): never wait for an answer that can't come. CI=1 / YES=1 accept.
+  if [ ! -t 0 ] && [ "${CI:-}" != "1" ] && [ "${YES:-}" != "1" ]; then echo "no terminal, answering no to: $* (YES=1 accepts)" >&2; return 1; fi
   [ "${CI:-}" = "1" ] && return 0
   read -r -p "$1 [y/N] " reply
   [[ "$reply" =~ ^[Yy]$ ]]
